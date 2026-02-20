@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseExcelColumns } from "@/lib/parse-excel";
+import { detectSchemaWithLLM } from "@/lib/llm-schema";
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,8 +13,15 @@ export async function POST(request: NextRequest) {
       );
     }
     const buffer = await file.arrayBuffer();
+
+    try {
+      const fields = await detectSchemaWithLLM(buffer);
+      return NextResponse.json({ fields });
+    } catch (llmError) {
+      console.warn("LLM schema detection failed, falling back to header-only parsing:", llmError);
+    }
+
     const columns = await parseExcelColumns(buffer);
-    // Placeholder "agent": use first row as final mapping (in real app, AI would suggest structure)
     const fields = columns.map((name, order) => ({
       id: crypto.randomUUID(),
       name: name.trim() || `Field_${order + 1}`,
