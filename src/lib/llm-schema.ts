@@ -1,6 +1,6 @@
 import { ChatAnthropic } from "@langchain/anthropic";
 import { HumanMessage, type BaseMessage } from "@langchain/core/messages";
-import { createReactAgent } from "@langchain/langgraph/prebuilt";
+import { createAgent } from "langchain";
 import type { SchemaField } from "./types";
 import {
   extractWorkbookPreview,
@@ -97,10 +97,10 @@ export async function detectSchemaWithLLM(
     temperature: 0,
   });
 
-  const agent = createReactAgent({
-    llm,
+  const agent = createAgent({
+    model: llm,
     tools: [],
-    prompt: SYSTEM_PROMPT,
+    systemPrompt: SYSTEM_PROMPT,
   });
 
   const result = await agent.invoke({
