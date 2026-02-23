@@ -22,49 +22,18 @@ import {
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { useSchemaStore } from "@/lib/schema-store";
 import { ArrowRight } from "lucide-react";
-
-function getByPath(obj: Record<string, unknown>, path: string): unknown {
-  const parts = path.split(".");
-  let current: unknown = obj;
-  for (const p of parts) {
-    if (current == null || typeof current !== "object") return undefined;
-    current = (current as Record<string, unknown>)[p];
-  }
-  return current;
-}
-
-function setByPath(obj: Record<string, unknown>, path: string, value: unknown) {
-  const parts = path.split(".");
-  let current = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const key = parts[i]!;
-    const next = (current[key] as Record<string, unknown>) ?? {};
-    current[key] = next;
-    current = next;
-  }
-  current[parts[parts.length - 1]!] = value;
-}
+import { applyMappings, getByPath } from "@/lib/pivot-transform";
 
 export default function PreviewPage() {
   const router = useRouter();
   const { workflow, getSchema } = useSchemaStore();
-  const { rawRows, columnMappings, currentSchemaId } = workflow;
+  const { rawRows, columnMappings, currentSchemaId, pivotConfig } = workflow;
   const schema = currentSchemaId ? getSchema(currentSchemaId) : null;
 
-  const previewRows = useMemo(() => {
-    const map: Record<string, string> = {};
-    columnMappings.forEach((m) => {
-      map[m.targetPath] = m.rawColumn;
-    });
-    return rawRows.map((raw) => {
-      const out: Record<string, unknown> = {};
-      columnMappings.forEach((m) => {
-        const rawVal = raw[m.rawColumn];
-        setByPath(out, m.targetPath, rawVal);
-      });
-      return out;
-    });
-  }, [rawRows, columnMappings]);
+  const previewRows = useMemo(
+    () => applyMappings(rawRows, columnMappings, pivotConfig),
+    [rawRows, columnMappings, pivotConfig],
+  );
 
   const previewColumns = useMemo(() => {
     const cols = new Set<string>();
@@ -99,7 +68,13 @@ export default function PreviewPage() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Preview</h1>
             <p className="text-muted-foreground">
-              Mapped output ({previewRows.length} rows). Proceed to export.
+              Mapped output ({previewRows.length} rows).
+              {pivotConfig.enabled && pivotConfig.groupByColumns.length > 0 && (
+                <span className="ml-1 text-primary">
+                  Pivoted by [{pivotConfig.groupByColumns.join(", ")}].
+                </span>
+              )}
+              {" "}Proceed to export.
             </p>
           </div>
           <Button onClick={() => router.push("/export")}>

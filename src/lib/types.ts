@@ -16,9 +16,24 @@ export interface FinalSchema {
 
 export type RawColumn = string;
 
+export type AggregationFunction =
+  | "sum"
+  | "concat"
+  | "count"
+  | "min"
+  | "max"
+  | "first"
+  | "ai_merge";
+
 export interface ColumnMapping {
   rawColumn: string;
   targetPath: string; // final schema path, e.g. "customer.name"
+  aggregation?: AggregationFunction;
+}
+
+export interface PivotConfig {
+  enabled: boolean;
+  groupByColumns: string[]; // raw column names used to group rows
 }
 
 export interface ExportFormat {

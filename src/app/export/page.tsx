@@ -14,28 +14,7 @@ import { useSchemaStore } from "@/lib/schema-store";
 import type { ExportFormat } from "@/lib/types";
 import { Download, FileSpreadsheet, Database, FileText } from "lucide-react";
 import ExcelJS from "exceljs";
-
-function getByPath(obj: Record<string, unknown>, path: string): unknown {
-  const parts = path.split(".");
-  let current: unknown = obj;
-  for (const p of parts) {
-    if (current == null || typeof current !== "object") return undefined;
-    current = (current as Record<string, unknown>)[p];
-  }
-  return current;
-}
-
-function setByPath(obj: Record<string, unknown>, path: string, value: unknown) {
-  const parts = path.split(".");
-  let current = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const key = parts[i]!;
-    const next = (current[key] as Record<string, unknown>) ?? {};
-    current[key] = next;
-    current = next;
-  }
-  current[parts[parts.length - 1]!] = value;
-}
+import { applyMappings, getByPath } from "@/lib/pivot-transform";
 
 const EXPORT_FORMATS: ExportFormat[] = [
   {
@@ -57,20 +36,14 @@ const EXPORT_FORMATS: ExportFormat[] = [
 
 export default function ExportPage() {
   const { workflow, getSchema } = useSchemaStore();
-  const { rawRows, columnMappings, currentSchemaId } = workflow;
+  const { rawRows, columnMappings, currentSchemaId, pivotConfig } = workflow;
   const schema = currentSchemaId ? getSchema(currentSchemaId) : null;
   const [exporting, setExporting] = useState<string | null>(null);
 
-  const mappedRows = useMemo(() => {
-    return rawRows.map((raw) => {
-      const out: Record<string, unknown> = {};
-      columnMappings.forEach((m) => {
-        const rawVal = raw[m.rawColumn];
-        setByPath(out, m.targetPath, rawVal);
-      });
-      return out;
-    });
-  }, [rawRows, columnMappings]);
+  const mappedRows = useMemo(
+    () => applyMappings(rawRows, columnMappings, pivotConfig),
+    [rawRows, columnMappings, pivotConfig],
+  );
 
   const columns = useMemo(() => {
     const cols = new Set<string>();

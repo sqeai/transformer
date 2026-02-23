@@ -11,6 +11,7 @@ import {
 import type {
   ColumnMapping,
   FinalSchema,
+  PivotConfig,
   RawColumn,
   SchemaField,
 } from "./types";
@@ -37,6 +38,7 @@ interface WorkflowState {
   rawColumns: RawColumn[];
   rawRows: Record<string, unknown>[];
   columnMappings: ColumnMapping[];
+  pivotConfig: PivotConfig;
 }
 
 interface SchemaStoreContextType {
@@ -49,6 +51,7 @@ interface SchemaStoreContextType {
   setCurrentSchema: (id: string | null) => void;
   setRawData: (columns: RawColumn[], rows: Record<string, unknown>[]) => void;
   setColumnMappings: (mappings: ColumnMapping[]) => void;
+  setPivotConfig: (config: PivotConfig) => void;
   resetWorkflow: () => void;
 }
 
@@ -57,6 +60,7 @@ const defaultWorkflow: WorkflowState = {
   rawColumns: [],
   rawRows: [],
   columnMappings: [],
+  pivotConfig: { enabled: false, groupByColumns: [] },
 };
 
 const SchemaStoreContext = createContext<SchemaStoreContextType | undefined>(
@@ -117,6 +121,10 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
     setWorkflow((w) => ({ ...w, columnMappings }));
   }, []);
 
+  const setPivotConfig = useCallback((pivotConfig: PivotConfig) => {
+    setWorkflow((w) => ({ ...w, pivotConfig }));
+  }, []);
+
   const resetWorkflow = useCallback(() => {
     setWorkflow(defaultWorkflow);
   }, []);
@@ -132,6 +140,7 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
       setCurrentSchema,
       setRawData,
       setColumnMappings,
+      setPivotConfig,
       resetWorkflow,
     }),
     [
@@ -144,6 +153,7 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
       setCurrentSchema,
       setRawData,
       setColumnMappings,
+      setPivotConfig,
       resetWorkflow,
     ],
   );

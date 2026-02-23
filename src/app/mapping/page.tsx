@@ -10,6 +10,7 @@ import { useSchemaStore } from "@/lib/schema-store";
 import { flattenFields } from "@/lib/schema-store";
 import type { ColumnMapping } from "@/lib/types";
 import { ArrowRight, Sparkles, Loader2 } from "lucide-react";
+import PivotConfigPanel from "@/components/PivotConfigPanel";
 
 const NODE_WIDTH = 220;
 const NODE_GAP = 48;
@@ -18,8 +19,8 @@ const RIGHT_X = LEFT_X + NODE_WIDTH + 160;
 
 export default function MappingPage() {
   const router = useRouter();
-  const { workflow, getSchema, setColumnMappings } = useSchemaStore();
-  const { currentSchemaId, rawColumns, rawRows } = workflow;
+  const { workflow, getSchema, setColumnMappings, setPivotConfig } = useSchemaStore();
+  const { currentSchemaId, rawColumns, rawRows, pivotConfig } = workflow;
   const schema = currentSchemaId ? getSchema(currentSchemaId) : null;
   const targetPaths = useMemo(
     () => (schema ? flattenFields(schema.fields).filter((f) => !f.children?.length).map((f) => f.path) : []),
@@ -211,24 +212,36 @@ export default function MappingPage() {
           </div>
         )}
 
-        <div className="flex-1 min-h-0 rounded-lg border bg-muted/20">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            connectOnClick
-            fitView
-            fitViewOptions={{ padding: 0.2 }}
-            onEdgesDelete={() => {
-              setTimeout(syncMappingsFromEdges, 0);
-            }}
-          >
-            <Background />
-            <Controls />
-            <MiniMap />
-          </ReactFlow>
+        <div className="flex flex-1 min-h-0 gap-3">
+          <div className="flex-1 min-h-0 rounded-lg border bg-muted/20">
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              connectOnClick
+              fitView
+              fitViewOptions={{ padding: 0.2 }}
+              onEdgesDelete={() => {
+                setTimeout(syncMappingsFromEdges, 0);
+              }}
+            >
+              <Background />
+              <Controls />
+              <MiniMap />
+            </ReactFlow>
+          </div>
+
+          <div className="w-80 shrink-0 overflow-y-auto">
+            <PivotConfigPanel
+              rawColumns={rawColumns}
+              columnMappings={workflow.columnMappings}
+              pivotConfig={pivotConfig}
+              onPivotConfigChange={setPivotConfig}
+              onColumnMappingsChange={setColumnMappings}
+            />
+          </div>
         </div>
       </div>
     </DashboardLayout>
