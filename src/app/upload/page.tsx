@@ -14,11 +14,33 @@ import {
 import { useSchemaStore } from "@/lib/schema-store";
 import { flattenFields } from "@/lib/schema-store";
 import { parseExcelToRows } from "@/lib/parse-excel";
-import { parseCsvToRows } from "@/lib/parse-csv";
+import { parseCsvToRows, extractCsvPreview } from "@/lib/parse-csv";
+import { extractExcelGrid } from "@/lib/parse-excel-preview";
 import type { RawDataAnalysis } from "@/lib/llm-schema";
-import { Upload, FileSpreadsheet, Loader2, Sparkles, Info, ArrowLeft } from "lucide-react";
+import DataPreviewTable, { type DataBoundary } from "@/components/DataPreviewTable";
+import {
+  Upload,
+  FileSpreadsheet,
+  Loader2,
+  Sparkles,
+  Info,
+  ArrowLeft,
+  ArrowRight,
+  RotateCcw,
+} from "lucide-react";
 
-type Step = "idle" | "analyzing" | "parsing" | "done";
+type Step = "idle" | "loading_preview" | "analyzing" | "preview" | "parsing";
+
+interface PreviewData {
+  grid: string[][];
+  totalRows: number;
+  totalColumns: number;
+  fileName: string;
+  isExcel: boolean;
+  csvText?: string;
+  excelBuffer?: ArrayBuffer;
+  llmAnalysis?: RawDataAnalysis;
+}
 
 export default function UploadPage() {
   const searchParams = useSearchParams();
@@ -29,15 +51,20 @@ export default function UploadPage() {
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<RawDataAnalysis | null>(null);
+  const [preview, setPreview] = useState<PreviewData | null>(null);
+  const [boundary, setBoundary] = useState<DataBoundary | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const schema = schemaId ? getSchema(schemaId) : null;
 
-  const processFile = useCallback(
+  const loadPreview = useCallback(
     async (file: File) => {
       setError(null);
       setAnalysis(null);
+      setPreview(null);
+      setBoundary(null);
       resetWorkflow();
+
       const ext = file.name.toLowerCase();
       const isExcel = ext.endsWith(".xlsx") || ext.endsWith(".xls");
       const isCsv = ext.endsWith(".csv");
@@ -48,13 +75,17 @@ export default function UploadPage() {
       }
 
       try {
+        setStep("loading_preview");
+
         let llmAnalysis: RawDataAnalysis | undefined;
 
         if (isExcel) {
+          const buffer = await file.arrayBuffer();
+
           setStep("analyzing");
-          const formData = new FormData();
-          formData.append("file", file);
           try {
+            const formData = new FormData();
+            formData.append("file", file);
             const res = await fetch("/api/analyze-raw", {
               method: "POST",
               body: formData,
@@ -64,51 +95,127 @@ export default function UploadPage() {
               setAnalysis(llmAnalysis!);
             }
           } catch {
-            // LLM analysis failed — fall back to basic parsing
+            // LLM analysis failed — user can still set boundaries manually
           }
-        }
 
-        setStep("parsing");
-        if (isCsv) {
-          const text = await file.text();
-          const { columns, rows } = parseCsvToRows(text);
-          setRawData(columns, rows);
-        } else {
-          const buffer = await file.arrayBuffer();
-          const { columns, rows } = await parseExcelToRows(buffer, {
-            analysis: llmAnalysis,
+          const { grid, totalRows, totalColumns } = await extractExcelGrid(buffer);
+
+          const defaultBoundary: DataBoundary = {
+            headerRowIndex: llmAnalysis?.headerRowIndex ?? 0,
+            dataStartRowIndex: llmAnalysis?.dataStartRowIndex ?? 1,
+            dataEndRowIndex: totalRows - 1,
+            startColumn: llmAnalysis?.columnsToKeep
+              ? Math.min(...llmAnalysis.columnsToKeep)
+              : 0,
+            endColumn: llmAnalysis?.columnsToKeep
+              ? Math.max(...llmAnalysis.columnsToKeep)
+              : totalColumns - 1,
+          };
+
+          setBoundary(defaultBoundary);
+          setPreview({
+            grid,
+            totalRows,
+            totalColumns,
+            fileName: file.name,
+            isExcel: true,
+            excelBuffer: buffer,
+            llmAnalysis,
           });
-          setRawData(columns, rows);
+        } else {
+          const csvText = await file.text();
+          const { grid, totalRows, totalColumns } = extractCsvPreview(csvText, 50);
+
+          const defaultBoundary: DataBoundary = {
+            headerRowIndex: 0,
+            dataStartRowIndex: 1,
+            dataEndRowIndex: totalRows - 1,
+            startColumn: 0,
+            endColumn: totalColumns - 1,
+          };
+
+          setBoundary(defaultBoundary);
+          setPreview({
+            grid,
+            totalRows,
+            totalColumns,
+            fileName: file.name,
+            isExcel: false,
+            csvText,
+          });
         }
 
-        if (schemaId) setCurrentSchema(schemaId);
-        setStep("done");
-        router.push("/mapping");
+        setStep("preview");
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to parse file");
+        setError(e instanceof Error ? e.message : "Failed to load file preview");
         setStep("idle");
       }
     },
-    [schemaId, setCurrentSchema, setRawData, resetWorkflow, router],
+    [resetWorkflow],
   );
+
+  const confirmAndParse = useCallback(async () => {
+    if (!preview || !boundary) return;
+
+    try {
+      setStep("parsing");
+
+      const columnsToKeep: number[] = [];
+      for (let i = boundary.startColumn; i <= boundary.endColumn; i++) {
+        columnsToKeep.push(i);
+      }
+
+      if (preview.isExcel && preview.excelBuffer) {
+        const { columns, rows } = await parseExcelToRows(preview.excelBuffer, {
+          analysis: preview.llmAnalysis,
+          headerRowIndex: boundary.headerRowIndex,
+          headerRowCount: preview.llmAnalysis?.headerRowCount,
+          dataStartRowIndex: boundary.dataStartRowIndex,
+          dataEndRowIndex: boundary.dataEndRowIndex,
+          columnsToKeep,
+        });
+        setRawData(columns, rows);
+      } else if (preview.csvText) {
+        const { columns, rows } = parseCsvToRows(preview.csvText, {
+          headerRowIndex: boundary.headerRowIndex,
+          dataStartRowIndex: boundary.dataStartRowIndex,
+          dataEndRowIndex: boundary.dataEndRowIndex,
+          columnsToKeep,
+        });
+        setRawData(columns, rows);
+      }
+
+      if (schemaId) setCurrentSchema(schemaId);
+      router.push("/mapping");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to parse file");
+      setStep("preview");
+    }
+  }, [preview, boundary, schemaId, setCurrentSchema, setRawData, router]);
+
+  const resetToIdle = () => {
+    setStep("idle");
+    setPreview(null);
+    setBoundary(null);
+    setAnalysis(null);
+    setError(null);
+  };
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragging(false);
       const file = e.dataTransfer.files[0];
-      if (file) processFile(file);
+      if (file) loadPreview(file);
     },
-    [processFile],
+    [loadPreview],
   );
 
   const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) processFile(file);
+    if (file) loadPreview(file);
     e.target.value = "";
   };
-
-  const loading = step !== "idle" && step !== "done";
 
   if (!schemaId || !schema) {
     return (
@@ -130,13 +237,6 @@ export default function UploadPage() {
 
   const targetPaths = flattenFields(schema.fields).map((f) => f.path);
 
-  const stepLabel: Record<Step, string> = {
-    idle: "Choose file",
-    analyzing: "AI is analyzing structure…",
-    parsing: "Parsing cleaned data…",
-    done: "Done",
-  };
-
   return (
     <DashboardLayout>
       <div className="space-y-6 animate-fade-in">
@@ -152,26 +252,28 @@ export default function UploadPage() {
           </div>
         </div>
 
-        <Card className="border border-primary/20 bg-primary/5">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium text-primary">
-              <Sparkles className="h-4 w-4" />
-              AI-powered data cleaning
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              The AI agent will automatically analyse your raw file to detect the real header row,
-              trim metadata/title rows, remove noise columns, and extract clean data — even if the
-              headers aren&apos;t on the first row.
-            </p>
-          </CardContent>
-        </Card>
+        {step === "idle" && (
+          <Card className="border border-primary/20 bg-primary/5">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm font-medium text-primary">
+                <Sparkles className="h-4 w-4" />
+                AI-powered data cleaning
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                The AI agent will automatically analyse your raw file to detect the real header row,
+                trim metadata/title rows, remove noise columns, and extract clean data — even if the
+                headers aren&apos;t on the first row. You can adjust the boundaries manually after.
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         <Card
           className={`border-2 border-dashed transition-colors ${
             dragging ? "border-primary bg-primary/5" : "border-muted-foreground/25"
-          }`}
+          } ${step !== "idle" && step !== "preview" ? "" : ""}`}
           onDragOver={(e) => {
             e.preventDefault();
             setDragging(true);
@@ -182,10 +284,12 @@ export default function UploadPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileSpreadsheet className="h-5 w-5" />
-              Drag and drop
+              {preview ? preview.fileName : "Drag and drop"}
             </CardTitle>
             <CardDescription>
-              Drop an Excel (.xlsx, .xls) or CSV file here, or click to browse.
+              {preview
+                ? "File loaded. Adjust boundaries below and click Continue when ready."
+                : "Drop an Excel (.xlsx, .xls) or CSV file here, or click to browse."}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center gap-4">
@@ -196,47 +300,96 @@ export default function UploadPage() {
               className="hidden"
               onChange={onFileInput}
             />
-            <Button
-              size="lg"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={loading}
-            >
-              {loading ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
+            {step === "idle" && (
+              <Button
+                size="lg"
+                onClick={() => fileInputRef.current?.click()}
+              >
                 <Upload className="mr-2 h-4 w-4" />
-              )}
-              {stepLabel[step]}
-            </Button>
+                Choose file
+              </Button>
+            )}
+            {(step === "loading_preview" || step === "analyzing") && (
+              <div className="flex items-center gap-3">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <span className="text-sm text-muted-foreground">
+                  {step === "analyzing"
+                    ? "AI is analyzing structure…"
+                    : "Loading preview…"}
+                </span>
+              </div>
+            )}
+            {step === "parsing" && (
+              <div className="flex items-center gap-3">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <span className="text-sm text-muted-foreground">
+                  Parsing data with selected boundaries…
+                </span>
+              </div>
+            )}
             {error && (
               <p className="text-sm text-destructive">{error}</p>
             )}
           </CardContent>
         </Card>
 
-        {analysis && (
-          <Card>
+        {step === "preview" && analysis && (
+          <Card className="border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/20">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
-                <Info className="h-4 w-4" />
+                <Info className="h-4 w-4 text-blue-500" />
                 AI Analysis Result
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-1 text-sm text-muted-foreground">
-              <p>Header detected at row {analysis.headerRowIndex + 1} — trimmed {analysis.trimmedRowCount} metadata row(s)</p>
-              <p>Keeping {analysis.columnsToKeep.length} of {analysis.headers.length + (analysis.columnsToKeep.length)} columns</p>
-              <p>Headers found: {analysis.headers.slice(0, 10).join(", ")}{analysis.headers.length > 10 ? "…" : ""}</p>
+              <p>
+                Header detected at row {analysis.headerRowIndex + 1} — trimmed{" "}
+                {analysis.trimmedRowCount} metadata row(s)
+              </p>
+              <p>
+                Keeping {analysis.columnsToKeep.length} of{" "}
+                {preview!.totalColumns} columns
+              </p>
+              <p>
+                Headers found:{" "}
+                {analysis.headers.slice(0, 10).join(", ")}
+                {analysis.headers.length > 10 ? "…" : ""}
+              </p>
               {analysis.notes && <p className="italic">{analysis.notes}</p>}
             </CardContent>
           </Card>
         )}
 
-        {targetPaths.length > 0 && (
+        {step === "preview" && preview && boundary && (
+          <>
+            <DataPreviewTable
+              grid={preview.grid}
+              totalRows={preview.totalRows}
+              totalColumns={preview.totalColumns}
+              initialBoundary={boundary}
+              onBoundaryChange={setBoundary}
+            />
+
+            <div className="flex items-center justify-between">
+              <Button variant="outline" onClick={resetToIdle}>
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Upload different file
+              </Button>
+              <Button onClick={confirmAndParse}>
+                Confirm & Continue to Mapping
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          </>
+        )}
+
+        {step === "idle" && targetPaths.length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle>Target fields ({targetPaths.length})</CardTitle>
               <CardDescription>
-                After upload you will map your columns to these: {targetPaths.slice(0, 8).join(", ")}
+                After upload you will map your columns to these:{" "}
+                {targetPaths.slice(0, 8).join(", ")}
                 {targetPaths.length > 8 ? "…" : ""}
               </CardDescription>
             </CardHeader>

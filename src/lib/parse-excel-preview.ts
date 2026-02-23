@@ -61,11 +61,146 @@ export interface ExtractOptions {
 }
 
 /**
- * Trims a workbook down to a compact preview suitable for LLM consumption.
- * Strips empty columns, limits row count, and returns a structured summary.
+ * Detects the largest continuous rectangular table region within a sheet.
+ * Scans for the densest block of non-empty cells, trimming surrounding
+ * metadata, titles, and other tables on both axes.
  *
- * When `useAllRows` is true, all rows (up to MAX_RAW_PREVIEW_ROWS) are returned
- * in `sampleRows` with `headers` left empty — useful for LLM-based header detection.
+ * Returns 1-based { startRow, endRow, startCol, endCol }.
+ */
+function detectTableBounds(sheet: ExcelJS.Worksheet): {
+  startRow: number;
+  endRow: number;
+  startCol: number;
+  endCol: number;
+} {
+  const totalRows = Math.min(sheet.rowCount, 500);
+  const totalCols = Math.min(sheet.columnCount, MAX_COLUMNS);
+
+  if (totalRows === 0 || totalCols === 0) {
+    return { startRow: 1, endRow: 1, startCol: 1, endCol: 1 };
+  }
+
+  const grid: boolean[][] = [];
+  for (let r = 1; r <= totalRows; r++) {
+    const row = sheet.getRow(r);
+    const rowFlags: boolean[] = [];
+    for (let c = 1; c <= totalCols; c++) {
+      const val = cellToString(row.getCell(c).value);
+      rowFlags.push(val.length > 0);
+    }
+    grid.push(rowFlags);
+  }
+
+  const rowFillCounts = grid.map((row) => row.filter(Boolean).length);
+  const colFillCounts: number[] = [];
+  for (let c = 0; c < totalCols; c++) {
+    let count = 0;
+    for (let r = 0; r < totalRows; r++) {
+      if (grid[r][c]) count++;
+    }
+    colFillCounts.push(count);
+  }
+
+  const medianRowFill = sortedMedian(rowFillCounts.filter((c) => c > 0));
+  const rowThreshold = Math.max(2, Math.floor(medianRowFill * 0.4));
+
+  let startRow = -1;
+  let endRow = -1;
+  let bestRunLength = 0;
+  let runStart = -1;
+  let runLength = 0;
+
+  for (let r = 0; r < totalRows; r++) {
+    if (rowFillCounts[r] >= rowThreshold) {
+      if (runStart === -1) runStart = r;
+      runLength++;
+    } else {
+      if (runLength > bestRunLength) {
+        bestRunLength = runLength;
+        startRow = runStart;
+        endRow = runStart + runLength - 1;
+      }
+      runStart = -1;
+      runLength = 0;
+    }
+  }
+  if (runLength > bestRunLength) {
+    startRow = runStart;
+    endRow = runStart + runLength - 1;
+  }
+
+  if (startRow === -1) {
+    startRow = 0;
+    endRow = totalRows - 1;
+  }
+
+  const colFillInRange: number[] = [];
+  for (let c = 0; c < totalCols; c++) {
+    let count = 0;
+    for (let r = startRow; r <= endRow; r++) {
+      if (grid[r][c]) count++;
+    }
+    colFillInRange.push(count);
+  }
+
+  const tableRowCount = endRow - startRow + 1;
+  const colThreshold = Math.max(1, Math.floor(tableRowCount * 0.3));
+
+  let startCol = -1;
+  let endCol = -1;
+  let bestColRun = 0;
+  let colRunStart = -1;
+  let colRunLen = 0;
+
+  for (let c = 0; c < totalCols; c++) {
+    if (colFillInRange[c] >= colThreshold) {
+      if (colRunStart === -1) colRunStart = c;
+      colRunLen++;
+    } else {
+      if (colRunLen > bestColRun) {
+        bestColRun = colRunLen;
+        startCol = colRunStart;
+        endCol = colRunStart + colRunLen - 1;
+      }
+      colRunStart = -1;
+      colRunLen = 0;
+    }
+  }
+  if (colRunLen > bestColRun) {
+    startCol = colRunStart;
+    endCol = colRunStart + colRunLen - 1;
+  }
+
+  if (startCol === -1) {
+    startCol = 0;
+    endCol = totalCols - 1;
+  }
+
+  return {
+    startRow: startRow + 1,
+    endRow: endRow + 1,
+    startCol: startCol + 1,
+    endCol: endCol + 1,
+  };
+}
+
+function sortedMedian(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
+
+/**
+ * Trims a workbook down to a compact preview suitable for LLM consumption.
+ * Detects the main table region, strips surrounding noise, limits row count,
+ * and returns a structured summary.
+ *
+ * When `useAllRows` is true, all rows (up to MAX_RAW_PREVIEW_ROWS) from the
+ * detected table region are returned in `sampleRows` with `headers` left
+ * empty — useful for LLM-based header detection.
  */
 export async function extractWorkbookPreview(
   buffer: ArrayBuffer,
@@ -78,15 +213,18 @@ export async function extractWorkbookPreview(
     return { sheetName: "", headers: [], sampleRows: [], totalRows: 0, totalColumns: 0 };
   }
 
+  const bounds = detectTableBounds(sheet);
+  const { startRow, endRow, startCol, endCol } = bounds;
+  const tableCols = endCol - startCol + 1;
+
   if (options?.useAllRows) {
-    const rowCount = Math.min(sheet.rowCount, MAX_RAW_PREVIEW_ROWS);
-    const maxCol = Math.min(sheet.columnCount, MAX_COLUMNS);
+    const rowCount = Math.min(endRow - startRow + 1, MAX_RAW_PREVIEW_ROWS);
 
     const sampleRows: string[][] = [];
-    for (let r = 1; r <= rowCount; r++) {
+    for (let r = startRow; r < startRow + rowCount; r++) {
       const row = sheet.getRow(r);
       const values: string[] = [];
-      for (let c = 1; c <= maxCol; c++) {
+      for (let c = startCol; c <= endCol; c++) {
         values.push(collapseMultiline(cellToString(row.getCell(c).value)));
       }
       sampleRows.push(values);
@@ -96,18 +234,16 @@ export async function extractWorkbookPreview(
       sheetName: sheet.name,
       headers: [],
       sampleRows,
-      totalRows: sheet.rowCount,
-      totalColumns: maxCol,
+      totalRows: endRow - startRow + 1,
+      totalColumns: tableCols,
     };
   }
 
-  const headerRow = sheet.getRow(1);
+  const headerRow = sheet.getRow(startRow);
   const rawHeaders: string[] = [];
-  headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-    if (colNumber <= MAX_COLUMNS) {
-      rawHeaders[colNumber - 1] = cellToString(cell.value);
-    }
-  });
+  for (let c = startCol; c <= endCol; c++) {
+    rawHeaders.push(cellToString(headerRow.getCell(c).value));
+  }
 
   const nonEmptyColIndices: number[] = [];
   for (let i = 0; i < rawHeaders.length; i++) {
@@ -121,21 +257,21 @@ export async function extractWorkbookPreview(
       sheetName: sheet.name,
       headers: [],
       sampleRows: [],
-      totalRows: sheet.rowCount - 1,
+      totalRows: Math.max(0, endRow - startRow),
       totalColumns: 0,
     };
   }
 
   const headers = nonEmptyColIndices.map((i) => rawHeaders[i]);
 
-  const dataRowCount = Math.max(0, sheet.rowCount - 1);
+  const dataRowCount = Math.max(0, endRow - startRow);
   const sampleCount = Math.min(MAX_SAMPLE_ROWS, dataRowCount);
 
   const sampleRows: string[][] = [];
-  for (let r = 2; r <= 1 + sampleCount; r++) {
+  for (let r = startRow + 1; r <= startRow + sampleCount; r++) {
     const row = sheet.getRow(r);
     const values = nonEmptyColIndices.map((colIdx) =>
-      cellToString(row.getCell(colIdx + 1).value),
+      cellToString(row.getCell(startCol + colIdx).value),
     );
     const allEmpty = values.every((v) => v === "");
     if (!allEmpty) {
@@ -150,6 +286,36 @@ export async function extractWorkbookPreview(
     totalRows: dataRowCount,
     totalColumns: nonEmptyColIndices.length,
   };
+}
+
+/**
+ * Extracts a raw grid (array of string arrays) from an Excel buffer
+ * for client-side preview. Returns up to `maxRows` rows and `maxCols` columns.
+ */
+export async function extractExcelGrid(
+  buffer: ArrayBuffer,
+  maxRows = 50,
+  maxCols = 60,
+): Promise<{ grid: string[][]; totalRows: number; totalColumns: number }> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return { grid: [], totalRows: 0, totalColumns: 0 };
+
+  const rowCount = Math.min(sheet.rowCount, maxRows);
+  const colCount = Math.min(sheet.columnCount, maxCols);
+
+  const grid: string[][] = [];
+  for (let r = 1; r <= rowCount; r++) {
+    const row = sheet.getRow(r);
+    const cells: string[] = [];
+    for (let c = 1; c <= colCount; c++) {
+      cells.push(cellToString(row.getCell(c).value));
+    }
+    grid.push(cells);
+  }
+
+  return { grid, totalRows: sheet.rowCount, totalColumns: sheet.columnCount };
 }
 
 /**
