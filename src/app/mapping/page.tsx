@@ -78,8 +78,18 @@ export default function MappingPage() {
       );
   }, [workflow.columnMappings, rawColumns]);
 
-  const [nodes, , onNodesChange] = useNodesState(initialNodes);
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(edgesFromMappings);
+
+  // Sync ReactFlow nodes when schema fields or raw columns change (e.g. from chat agent)
+  useEffect(() => {
+    setNodes(initialNodes);
+  }, [initialNodes, setNodes]);
+
+  // Sync ReactFlow edges when store mappings change (e.g. from chat agent)
+  useEffect(() => {
+    setEdges(edgesFromMappings);
+  }, [edgesFromMappings, setEdges]);
 
   const aggLookup = useMemo(() => {
     const map = new Map<string, ColumnMapping["aggregation"]>();
