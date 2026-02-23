@@ -186,13 +186,13 @@ export default function PivotConfigPanel({
               {pivotConfig.groupByColumns.map((col) => (
                 <span
                   key={col}
-                  className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary"
+                  className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary break-all"
                 >
                   {col}
                   <button
                     type="button"
                     onClick={() => removeGroupByColumn(col)}
-                    className="rounded-sm hover:bg-primary/20 p-0.5"
+                    className="rounded-sm hover:bg-primary/20 p-0.5 shrink-0"
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -233,15 +233,14 @@ export default function PivotConfigPanel({
                   {nonGroupByMappings.map((m) => (
                     <div
                       key={m.rawColumn}
-                      className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-1.5"
+                      className="rounded-md border bg-muted/30 px-3 py-2 space-y-1.5"
                     >
-                      <span className="text-sm min-w-0 truncate flex-1">
-                        {m.rawColumn}
+                      <div className="text-sm break-words">
+                        <span className="font-medium">{m.rawColumn}</span>
                         <span className="text-muted-foreground">
-                          {" "}
-                          &rarr; {m.targetPath}
+                          {" "}&rarr; {m.targetPath}
                         </span>
-                      </span>
+                      </div>
                       <Select
                         value={m.aggregation ?? "sum"}
                         onValueChange={(v) =>
@@ -251,7 +250,7 @@ export default function PivotConfigPanel({
                           )
                         }
                       >
-                        <SelectTrigger className="w-36 h-7 text-xs">
+                        <SelectTrigger className="w-full h-8 text-xs">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>

@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useSchemaStore } from "@/lib/schema-store";
 import { flattenFields } from "@/lib/schema-store";
 import type { ColumnMapping, PivotConfig } from "@/lib/types";
-import { ArrowRight, Sparkles, Loader2, AlertTriangle } from "lucide-react";
+import { ArrowRight, ArrowLeft, Sparkles, Loader2, AlertTriangle } from "lucide-react";
 import PivotConfigPanel from "@/components/PivotConfigPanel";
 
 const NODE_WIDTH = 240;
@@ -341,11 +341,16 @@ export default function MappingPage() {
     <DashboardLayout>
       <div className="flex h-[calc(100vh-3rem)] flex-col animate-fade-in">
         <div className="flex items-center justify-between pb-3">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Mapping Builder</h1>
-            <p className="text-muted-foreground">
-              Connect raw columns (left) to target fields (right) by clicking handles. {mappedCount} mapping{mappedCount !== 1 ? "s" : ""} active — only mapped fields will be transformed.
-            </p>
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => router.push(`/upload?schemaId=${currentSchemaId}`)}>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Mapping Builder</h1>
+              <p className="text-muted-foreground">
+                Connect raw columns (left) to target fields (right) by clicking handles. {mappedCount} mapping{mappedCount !== 1 ? "s" : ""} active — only mapped fields will be transformed.
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <Button

@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/table";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { useSchemaStore } from "@/lib/schema-store";
-import { ArrowRight, Layers, ArrowDownUp } from "lucide-react";
+import { ArrowRight, ArrowLeft, Layers, ArrowDownUp } from "lucide-react";
 import { applyMappings, getByPath, formatDisplayValue } from "@/lib/pivot-transform";
 import type { AggregationFunction } from "@/lib/types";
 
@@ -82,18 +82,23 @@ export default function PreviewPage() {
     <DashboardLayout>
       <div className="space-y-6 animate-fade-in">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Preview</h1>
-            <p className="text-muted-foreground">
-              {isPivoted ? (
-                <>
-                  {rawRows.length} raw rows aggregated into{" "}
-                  <strong>{previewRows.length}</strong> rows. Proceed to export.
-                </>
-              ) : (
-                <>Mapped output ({previewRows.length} rows). Proceed to export.</>
-              )}
-            </p>
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => router.push("/mapping")}>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Preview</h1>
+              <p className="text-muted-foreground">
+                {isPivoted ? (
+                  <>
+                    {rawRows.length} raw rows aggregated into{" "}
+                    <strong>{previewRows.length}</strong> rows. Proceed to export.
+                  </>
+                ) : (
+                  <>Mapped output ({previewRows.length} rows). Proceed to export.</>
+                )}
+              </p>
+            </div>
           </div>
           <Button onClick={() => router.push("/export")}>
             Export

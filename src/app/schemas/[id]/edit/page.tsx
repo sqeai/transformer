@@ -19,6 +19,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowRight,
+  ArrowLeft,
   GripVertical,
   Save,
   ChevronRight,
@@ -189,11 +190,16 @@ export default function EditSchemaPage() {
     <DashboardLayout>
       <div className="space-y-6 animate-fade-in">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Edit schema</h1>
-            <p className="text-muted-foreground">
-              Reorder, rename, and nest fields. Then save.
-            </p>
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => router.push("/schemas")}>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Edit schema</h1>
+              <p className="text-muted-foreground">
+                Reorder, rename, and nest fields. Then save.
+              </p>
+            </div>
           </div>
           <Button onClick={save}>
             <Save className="mr-2 h-4 w-4" />

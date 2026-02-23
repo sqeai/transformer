@@ -16,7 +16,7 @@ import { flattenFields } from "@/lib/schema-store";
 import { parseExcelToRows } from "@/lib/parse-excel";
 import { parseCsvToRows } from "@/lib/parse-csv";
 import type { RawDataAnalysis } from "@/lib/llm-schema";
-import { Upload, FileSpreadsheet, Loader2, Sparkles, Info } from "lucide-react";
+import { Upload, FileSpreadsheet, Loader2, Sparkles, Info, ArrowLeft } from "lucide-react";
 
 type Step = "idle" | "analyzing" | "parsing" | "done";
 
@@ -24,7 +24,7 @@ export default function UploadPage() {
   const searchParams = useSearchParams();
   const schemaId = searchParams.get("schemaId");
   const router = useRouter();
-  const { getSchema, setCurrentSchema, setRawData } = useSchemaStore();
+  const { getSchema, setCurrentSchema, setRawData, resetWorkflow } = useSchemaStore();
   const [dragging, setDragging] = useState(false);
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +37,7 @@ export default function UploadPage() {
     async (file: File) => {
       setError(null);
       setAnalysis(null);
+      resetWorkflow();
       const ext = file.name.toLowerCase();
       const isExcel = ext.endsWith(".xlsx") || ext.endsWith(".xls");
       const isCsv = ext.endsWith(".csv");
@@ -88,7 +89,7 @@ export default function UploadPage() {
         setStep("idle");
       }
     },
-    [schemaId, setCurrentSchema, setRawData, router],
+    [schemaId, setCurrentSchema, setRawData, resetWorkflow, router],
   );
 
   const onDrop = useCallback(
@@ -139,11 +140,16 @@ export default function UploadPage() {
   return (
     <DashboardLayout>
       <div className="space-y-6 animate-fade-in">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Upload raw data</h1>
-          <p className="text-muted-foreground">
-            Use schema &quot;{schema.name}&quot;. Upload Excel or CSV to map to the final structure.
-          </p>
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => router.push("/schemas")}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Upload raw data</h1>
+            <p className="text-muted-foreground">
+              Use schema &quot;{schema.name}&quot;. Upload Excel or CSV to map to the final structure.
+            </p>
+          </div>
         </div>
 
         <Card className="border border-primary/20 bg-primary/5">

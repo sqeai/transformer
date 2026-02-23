@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +13,7 @@ import {
 } from "@/components/ui/card";
 import { useSchemaStore } from "@/lib/schema-store";
 import type { ExportFormat } from "@/lib/types";
-import { Download, FileSpreadsheet, Database, FileText, Layers } from "lucide-react";
+import { Download, FileSpreadsheet, Database, FileText, Layers, ArrowLeft } from "lucide-react";
 import ExcelJS from "exceljs";
 import { applyMappings, getByPath } from "@/lib/pivot-transform";
 
@@ -35,6 +36,7 @@ const EXPORT_FORMATS: ExportFormat[] = [
 ];
 
 export default function ExportPage() {
+  const router = useRouter();
   const { workflow, getSchema } = useSchemaStore();
   const { rawRows, columnMappings, currentSchemaId, pivotConfig } = workflow;
   const schema = currentSchemaId ? getSchema(currentSchemaId) : null;
@@ -129,11 +131,16 @@ export default function ExportPage() {
   return (
     <DashboardLayout>
       <div className="space-y-6 animate-fade-in">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Export</h1>
-          <p className="text-muted-foreground">
-            Choose a format and download or send your mapped data.
-          </p>
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => router.push("/preview")}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Export</h1>
+            <p className="text-muted-foreground">
+              Choose a format and download or send your mapped data.
+            </p>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
