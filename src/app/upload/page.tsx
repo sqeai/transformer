@@ -300,7 +300,7 @@ export default function UploadPage() {
 
   return (
     <DashboardLayout>
-      <div className="flex h-[calc(100vh-3rem)] flex-col animate-fade-in min-w-0">
+      <div className="flex flex-col animate-fade-in min-w-0">
         <div className="shrink-0 flex items-center justify-between pb-3">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" onClick={() => router.push("/schemas")}>
