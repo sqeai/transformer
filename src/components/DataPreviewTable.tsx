@@ -171,7 +171,7 @@ export default function DataPreviewTable({
   };
 
   return (
-    <Card className="min-w-0 overflow-hidden min-h-1000">
+    <Card className="min-w-0 overflow-hidden">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <div>

@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -17,9 +18,13 @@ import type {
   RawColumn,
   SchemaField,
 } from "./types";
+import { idbGet, idbSet, idbDelete } from "./idb-storage";
 
 const SCHEMAS_STORAGE_KEY = "ai_data_cleanser_schemas";
 const WORKFLOW_STORAGE_KEY = "ai_data_cleanser_workflow";
+const IDB_RAW_COLUMNS_KEY = "workflow_rawColumns";
+const IDB_RAW_ROWS_KEY = "workflow_rawRows";
+const IDB_UPLOAD_STATE_KEY = "workflow_uploadState";
 
 interface WorkflowState {
   currentSchemaId: string | null;
@@ -38,6 +43,14 @@ interface WorkflowState {
   } | null;
 }
 
+/** Lightweight subset stored in localStorage (no large arrays). */
+interface WorkflowMeta {
+  currentSchemaId: string | null;
+  columnMappings: ColumnMapping[];
+  pivotConfig: PivotConfig;
+  defaultValues: DefaultValues;
+}
+
 function loadSchemas(): FinalSchema[] {
   if (typeof window === "undefined") return [];
   try {
@@ -53,7 +66,7 @@ function saveSchemas(schemas: FinalSchema[]) {
   localStorage.setItem(SCHEMAS_STORAGE_KEY, JSON.stringify(schemas));
 }
 
-function loadWorkflow(): WorkflowState | null {
+function loadWorkflowMeta(): WorkflowMeta | null {
   if (typeof window === "undefined") return null;
   try {
     const w = localStorage.getItem(WORKFLOW_STORAGE_KEY);
@@ -63,9 +76,48 @@ function loadWorkflow(): WorkflowState | null {
   }
 }
 
-function saveWorkflow(workflow: WorkflowState) {
+function saveWorkflowMeta(workflow: WorkflowState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(workflow));
+  const meta: WorkflowMeta = {
+    currentSchemaId: workflow.currentSchemaId,
+    columnMappings: workflow.columnMappings,
+    pivotConfig: workflow.pivotConfig,
+    defaultValues: workflow.defaultValues,
+  };
+  localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(meta));
+}
+
+async function saveWorkflowLargeData(workflow: WorkflowState) {
+  await Promise.all([
+    idbSet(IDB_RAW_COLUMNS_KEY, workflow.rawColumns),
+    idbSet(IDB_RAW_ROWS_KEY, workflow.rawRows),
+    idbSet(IDB_UPLOAD_STATE_KEY, workflow.uploadState),
+  ]);
+}
+
+async function loadWorkflowLargeData(): Promise<{
+  rawColumns: RawColumn[];
+  rawRows: Record<string, unknown>[];
+  uploadState: WorkflowState["uploadState"];
+}> {
+  const [rawColumns, rawRows, uploadState] = await Promise.all([
+    idbGet<RawColumn[]>(IDB_RAW_COLUMNS_KEY),
+    idbGet<Record<string, unknown>[]>(IDB_RAW_ROWS_KEY),
+    idbGet<WorkflowState["uploadState"]>(IDB_UPLOAD_STATE_KEY),
+  ]);
+  return {
+    rawColumns: rawColumns ?? [],
+    rawRows: rawRows ?? [],
+    uploadState: uploadState ?? null,
+  };
+}
+
+async function clearWorkflowLargeData() {
+  await Promise.all([
+    idbDelete(IDB_RAW_COLUMNS_KEY),
+    idbDelete(IDB_RAW_ROWS_KEY),
+    idbDelete(IDB_UPLOAD_STATE_KEY),
+  ]);
 }
 
 interface SchemaStoreContextType {
@@ -102,17 +154,50 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
   const [schemas, setSchemas] = useState<FinalSchema[]>([]);
   const [workflow, setWorkflow] = useState<WorkflowState>(defaultWorkflow);
   const [hydrated, setHydrated] = useState(false);
+  const prevWorkflowRef = useRef<WorkflowState>(defaultWorkflow);
 
   useEffect(() => {
     setSchemas(loadSchemas());
-    const saved = loadWorkflow();
-    if (saved) setWorkflow(saved);
-    setHydrated(true);
+    const meta = loadWorkflowMeta();
+
+    loadWorkflowLargeData()
+      .then((large) => {
+        const restored: WorkflowState = {
+          currentSchemaId: meta?.currentSchemaId ?? null,
+          columnMappings: meta?.columnMappings ?? [],
+          pivotConfig: meta?.pivotConfig ?? defaultWorkflow.pivotConfig,
+          defaultValues: meta?.defaultValues ?? {},
+          rawColumns: large.rawColumns,
+          rawRows: large.rawRows,
+          uploadState: large.uploadState,
+        };
+        setWorkflow(restored);
+        prevWorkflowRef.current = restored;
+        setHydrated(true);
+      })
+      .catch(() => {
+        if (meta) {
+          setWorkflow((w) => ({ ...w, ...meta }));
+        }
+        setHydrated(true);
+      });
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
-    saveWorkflow(workflow);
+    const prev = prevWorkflowRef.current;
+    prevWorkflowRef.current = workflow;
+
+    saveWorkflowMeta(workflow);
+
+    const largeDataChanged =
+      prev.rawColumns !== workflow.rawColumns ||
+      prev.rawRows !== workflow.rawRows ||
+      prev.uploadState !== workflow.uploadState;
+
+    if (largeDataChanged) {
+      saveWorkflowLargeData(workflow).catch(() => {});
+    }
   }, [workflow, hydrated]);
 
   const addSchema = useCallback((schema: FinalSchema) => {
@@ -177,6 +262,7 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
     setWorkflow(defaultWorkflow);
     if (typeof window !== "undefined") {
       localStorage.removeItem(WORKFLOW_STORAGE_KEY);
+      clearWorkflowLargeData().catch(() => {});
     }
   }, []);
 

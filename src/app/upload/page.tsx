@@ -300,7 +300,7 @@ export default function UploadPage() {
 
   return (
     <DashboardLayout>
-      <div className="flex h-[calc(100vh-6rem)] flex-col animate-fade-in min-w-0">
+      <div className="flex h-[calc(100vh-3rem)] flex-col animate-fade-in min-w-0">
         <div className="shrink-0 flex items-center justify-between pb-3">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" onClick={() => router.push("/schemas")}>
@@ -327,7 +327,7 @@ export default function UploadPage() {
           )}
         </div>
 
-        <div className="flex flex-1 min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
+        <div className="flex flex-1 min-h-0 min-w-0 flex-col gap-4 overflow-y-auto pb-4">
         {step === "idle" && (
           <Card className="border border-primary/20 bg-primary/5">
             <CardHeader className="pb-2">
