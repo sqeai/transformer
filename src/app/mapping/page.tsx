@@ -342,7 +342,7 @@ export default function MappingPage() {
       <div className="flex h-[calc(100vh-3rem)] flex-col animate-fade-in">
         <div className="flex items-center justify-between pb-3">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => router.push(`/upload?schemaId=${currentSchemaId}`)}>
+            <Button variant="ghost" size="icon" onClick={() => router.push("/upload")}>
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div>

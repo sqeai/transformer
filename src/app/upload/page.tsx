@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,10 +47,9 @@ interface PreviewData {
 }
 
 export default function UploadPage() {
-  const searchParams = useSearchParams();
-  const schemaId = searchParams.get("schemaId");
   const router = useRouter();
   const { getSchema, setCurrentSchema, setRawData, resetWorkflow, workflow, setUploadState } = useSchemaStore();
+  const schemaId = workflow.currentSchemaId;
   const [dragging, setDragging] = useState(false);
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +92,9 @@ export default function UploadPage() {
       setAnalysis(null);
       setPreview(null);
       setBoundary(null);
+      const savedSchemaId = schemaId;
       resetWorkflow();
+      if (savedSchemaId) setCurrentSchema(savedSchemaId);
 
       const ext = file.name.toLowerCase();
       const isExcel = ext.endsWith(".xlsx") || ext.endsWith(".xls");
@@ -184,7 +185,7 @@ export default function UploadPage() {
         setStep("idle");
       }
     },
-    [resetWorkflow],
+    [resetWorkflow, schemaId, setCurrentSchema],
   );
 
   const confirmAndParse = useCallback(async () => {
@@ -220,13 +221,12 @@ export default function UploadPage() {
         setRawData(columns, rows);
       }
 
-      if (schemaId) setCurrentSchema(schemaId);
       router.push("/mapping");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to parse file");
       setStep("preview");
     }
-  }, [preview, boundary, schemaId, setCurrentSchema, setRawData, router, setUploadState]);
+  }, [preview, boundary, setRawData, router, setUploadState]);
 
   const switchToSheet = useCallback(
     async (sheetIndex: number) => {
@@ -311,16 +311,30 @@ export default function UploadPage() {
   return (
     <DashboardLayout>
       <div className="flex h-[calc(100vh-6rem)] flex-col animate-fade-in min-w-0">
-        <div className="shrink-0 flex items-center gap-4 pb-3">
-          <Button variant="ghost" size="icon" onClick={() => router.push("/schemas")}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Upload raw data</h1>
-            <p className="text-muted-foreground">
-              Use schema &quot;{schema.name}&quot;. Upload Excel or CSV to map to the final structure.
-            </p>
+        <div className="shrink-0 flex items-center justify-between pb-3">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => router.push("/schemas")}>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Upload raw data</h1>
+              <p className="text-muted-foreground">
+                Use schema &quot;{schema.name}&quot;. Upload Excel or CSV to map to the final structure.
+              </p>
+            </div>
           </div>
+          {step === "preview" && preview && boundary && (
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={resetToIdle}>
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Upload different file
+              </Button>
+              <Button onClick={confirmAndParse}>
+                Confirm & Continue to Mapping
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-1 min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
@@ -466,17 +480,6 @@ export default function UploadPage() {
               initialBoundary={boundary}
               onBoundaryChange={setBoundary}
             />
-
-            <div className="flex items-center justify-between">
-              <Button variant="outline" onClick={resetToIdle}>
-                <RotateCcw className="mr-2 h-4 w-4" />
-                Upload different file
-              </Button>
-              <Button onClick={confirmAndParse}>
-                Confirm & Continue to Mapping
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </div>
           </>
         )}
 

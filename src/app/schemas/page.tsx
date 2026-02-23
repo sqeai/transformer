@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/alert-dialog";
 
 export default function SchemasPage() {
-  const { schemas, deleteSchema, addSchema } = useSchemaStore();
+  const { schemas, deleteSchema, addSchema, setCurrentSchema } = useSchemaStore();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -151,7 +151,10 @@ export default function SchemasPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => router.push(`/upload?schemaId=${s.id}`)}
+                            onClick={() => {
+                              setCurrentSchema(s.id);
+                              router.push("/upload");
+                            }}
                           >
                             Use
                           </Button>

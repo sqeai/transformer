@@ -26,8 +26,6 @@ import {
   TooltipTrigger,
   TooltipProvider,
 } from "@/components/ui/tooltip";
-import { useSchemaStore } from "@/lib/schema-store";
-
 const nav = [
   { name: "Final Schemas", href: "/schemas", icon: FileStack },
   { name: "Upload raw data", href: "/upload", icon: Database },
@@ -40,10 +38,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
-  const { workflow } = useSchemaStore();
-  const uploadHref = workflow.currentSchemaId
-    ? `/upload?schemaId=${workflow.currentSchemaId}`
-    : "/upload";
 
   return (
     <ProtectedRoute>
@@ -75,7 +69,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             </div>
             <nav className="flex-1 space-y-1 p-2">
               {nav.map((item) => {
-                const href = item.href === "/upload" ? uploadHref : item.href;
+                const href = item.href;
                 const isActive =
                   pathname === item.href || pathname.startsWith(item.href + "/");
                 const link = (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Table,
   TableBody,
@@ -54,8 +54,56 @@ export default function DataPreviewTable({
   const [endCol, setEndCol] = useState(initialBoundary?.endColumn ?? maxColIdx);
   const [showSettings, setShowSettings] = useState(false);
 
-  const emitBoundary = useCallback(
-    (h: number, ds: number, de: number, sc: number, ec: number) => {
+  const [draftHeaderRow, setDraftHeaderRow] = useState(String(headerRow + 1));
+  const [draftDataStart, setDraftDataStart] = useState(String(dataStart + 1));
+  const [draftDataEnd, setDraftDataEnd] = useState(String(dataEnd + 1));
+  const [draftStartCol, setDraftStartCol] = useState(String(startCol + 1));
+  const [draftEndCol, setDraftEndCol] = useState(String(endCol + 1));
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const DEBOUNCE_MS = 500;
+
+  const commitBoundary = useCallback(
+    (field: "headerRow" | "dataStart" | "dataEnd" | "startCol" | "endCol", raw: string) => {
+      const v = Number(raw);
+      if (Number.isNaN(v) || raw.trim() === "") return;
+      const idx = v - 1;
+
+      let h = headerRow, ds = dataStart, de = dataEnd, sc = startCol, ec = endCol;
+
+      switch (field) {
+        case "headerRow": {
+          h = Math.max(0, Math.min(idx, maxRowIdx));
+          setHeaderRow(h);
+          setDraftHeaderRow(String(h + 1));
+          break;
+        }
+        case "dataStart": {
+          ds = Math.max(0, Math.min(idx, maxRowIdx));
+          setDataStart(ds);
+          setDraftDataStart(String(ds + 1));
+          break;
+        }
+        case "dataEnd": {
+          de = Math.max(0, Math.min(idx, maxRowIdx));
+          setDataEnd(de);
+          setDraftDataEnd(String(de + 1));
+          break;
+        }
+        case "startCol": {
+          sc = Math.max(0, Math.min(idx, maxColIdx));
+          setStartCol(sc);
+          setDraftStartCol(String(sc + 1));
+          break;
+        }
+        case "endCol": {
+          ec = Math.max(0, Math.min(idx, maxColIdx));
+          setEndCol(ec);
+          setDraftEndCol(String(ec + 1));
+          break;
+        }
+      }
+
       onBoundaryChange({
         headerRowIndex: h,
         dataStartRowIndex: ds,
@@ -64,56 +112,26 @@ export default function DataPreviewTable({
         endColumn: ec,
       });
     },
-    [onBoundaryChange],
+    [maxRowIdx, maxColIdx, headerRow, dataStart, dataEnd, startCol, endCol, onBoundaryChange],
   );
 
-  const handleChange = useCallback(
+  const handleDraftChange = useCallback(
     (field: "headerRow" | "dataStart" | "dataEnd" | "startCol" | "endCol", raw: string) => {
-      const v = Number(raw);
-      if (Number.isNaN(v) || raw.trim() === "") return;
-      const idx = v - 1;
-
       switch (field) {
-        case "headerRow": {
-          const clamped = Math.max(0, Math.min(idx, maxRowIdx));
-          setHeaderRow(clamped);
-          const newDataStart = Math.max(dataStart, clamped + 1);
-          setDataStart(newDataStart);
-          emitBoundary(clamped, newDataStart, dataEnd, startCol, endCol);
-          break;
-        }
-        case "dataStart": {
-          const clamped = Math.max(headerRow + 1, Math.min(idx, maxRowIdx));
-          setDataStart(clamped);
-          const newDataEnd = Math.max(dataEnd, clamped);
-          setDataEnd(newDataEnd);
-          emitBoundary(headerRow, clamped, newDataEnd, startCol, endCol);
-          break;
-        }
-        case "dataEnd": {
-          const clamped = Math.max(dataStart, Math.min(idx, maxRowIdx));
-          setDataEnd(clamped);
-          emitBoundary(headerRow, dataStart, clamped, startCol, endCol);
-          break;
-        }
-        case "startCol": {
-          const clamped = Math.max(0, Math.min(idx, maxColIdx));
-          setStartCol(clamped);
-          const newEndCol = Math.max(endCol, clamped);
-          setEndCol(newEndCol);
-          emitBoundary(headerRow, dataStart, dataEnd, clamped, newEndCol);
-          break;
-        }
-        case "endCol": {
-          const clamped = Math.max(startCol, Math.min(idx, maxColIdx));
-          setEndCol(clamped);
-          emitBoundary(headerRow, dataStart, dataEnd, startCol, clamped);
-          break;
-        }
+        case "headerRow": setDraftHeaderRow(raw); break;
+        case "dataStart": setDraftDataStart(raw); break;
+        case "dataEnd": setDraftDataEnd(raw); break;
+        case "startCol": setDraftStartCol(raw); break;
+        case "endCol": setDraftEndCol(raw); break;
       }
+
+      clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => commitBoundary(field, raw), DEBOUNCE_MS);
     },
-    [maxRowIdx, maxColIdx, headerRow, dataStart, dataEnd, startCol, endCol, emitBoundary],
+    [commitBoundary],
   );
+
+  useEffect(() => () => clearTimeout(debounceRef.current), []);
 
   const headerCells = useMemo(() => {
     const row = grid[headerRow];
@@ -138,7 +156,7 @@ export default function DataPreviewTable({
   };
 
   return (
-    <Card className="min-w-0 overflow-hidden">
+    <Card className="min-w-0 overflow-hidden min-h-1000">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <div>
@@ -179,8 +197,8 @@ export default function DataPreviewTable({
                 type="number"
                 min={1}
                 max={maxRowIdx + 1}
-                value={headerRow + 1}
-                onChange={(e) => handleChange("headerRow", e.target.value)}
+                value={draftHeaderRow}
+                onChange={(e) => handleDraftChange("headerRow", e.target.value)}
                 className="h-8 text-sm"
               />
               <p className="text-[10px] text-muted-foreground">1-indexed row number</p>
@@ -192,10 +210,10 @@ export default function DataPreviewTable({
               </Label>
               <Input
                 type="number"
-                min={headerRow + 2}
+                min={1}
                 max={maxRowIdx + 1}
-                value={dataStart + 1}
-                onChange={(e) => handleChange("dataStart", e.target.value)}
+                value={draftDataStart}
+                onChange={(e) => handleDraftChange("dataStart", e.target.value)}
                 className="h-8 text-sm"
               />
               <p className="text-[10px] text-muted-foreground">First data row</p>
@@ -207,10 +225,10 @@ export default function DataPreviewTable({
               </Label>
               <Input
                 type="number"
-                min={dataStart + 1}
+                min={1}
                 max={totalRows}
-                value={dataEnd + 1}
-                onChange={(e) => handleChange("dataEnd", e.target.value)}
+                value={draftDataEnd}
+                onChange={(e) => handleDraftChange("dataEnd", e.target.value)}
                 className="h-8 text-sm"
               />
               <p className="text-[10px] text-muted-foreground">Last data row</p>
@@ -224,8 +242,8 @@ export default function DataPreviewTable({
                 type="number"
                 min={1}
                 max={maxColIdx + 1}
-                value={startCol + 1}
-                onChange={(e) => handleChange("startCol", e.target.value)}
+                value={draftStartCol}
+                onChange={(e) => handleDraftChange("startCol", e.target.value)}
                 className="h-8 text-sm"
               />
               <p className="text-[10px] text-muted-foreground">First column</p>
@@ -237,10 +255,10 @@ export default function DataPreviewTable({
               </Label>
               <Input
                 type="number"
-                min={startCol + 1}
+                min={1}
                 max={totalColumns}
-                value={endCol + 1}
-                onChange={(e) => handleChange("endCol", e.target.value)}
+                value={draftEndCol}
+                onChange={(e) => handleDraftChange("endCol", e.target.value)}
                 className="h-8 text-sm"
               />
               <p className="text-[10px] text-muted-foreground">Last column</p>
