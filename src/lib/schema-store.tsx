@@ -19,21 +19,7 @@ import type {
 } from "./types";
 
 const SCHEMAS_STORAGE_KEY = "ai_data_cleanser_schemas";
-
-function loadSchemas(): FinalSchema[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const s = localStorage.getItem(SCHEMAS_STORAGE_KEY);
-    return s ? JSON.parse(s) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveSchemas(schemas: FinalSchema[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(SCHEMAS_STORAGE_KEY, JSON.stringify(schemas));
-}
+const WORKFLOW_STORAGE_KEY = "ai_data_cleanser_workflow";
 
 interface WorkflowState {
   currentSchemaId: string | null;
@@ -50,6 +36,36 @@ interface WorkflowState {
     boundary: unknown;
     analysis: unknown;
   } | null;
+}
+
+function loadSchemas(): FinalSchema[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const s = localStorage.getItem(SCHEMAS_STORAGE_KEY);
+    return s ? JSON.parse(s) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSchemas(schemas: FinalSchema[]) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(SCHEMAS_STORAGE_KEY, JSON.stringify(schemas));
+}
+
+function loadWorkflow(): WorkflowState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const w = localStorage.getItem(WORKFLOW_STORAGE_KEY);
+    return w ? JSON.parse(w) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveWorkflow(workflow: WorkflowState) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(workflow));
 }
 
 interface SchemaStoreContextType {
@@ -85,10 +101,19 @@ const SchemaStoreContext = createContext<SchemaStoreContextType | undefined>(
 export function SchemaStoreProvider({ children }: { children: ReactNode }) {
   const [schemas, setSchemas] = useState<FinalSchema[]>([]);
   const [workflow, setWorkflow] = useState<WorkflowState>(defaultWorkflow);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     setSchemas(loadSchemas());
+    const saved = loadWorkflow();
+    if (saved) setWorkflow(saved);
+    setHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    saveWorkflow(workflow);
+  }, [workflow, hydrated]);
 
   const addSchema = useCallback((schema: FinalSchema) => {
     setSchemas((prev) => {
@@ -150,6 +175,9 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
 
   const resetWorkflow = useCallback(() => {
     setWorkflow(defaultWorkflow);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(WORKFLOW_STORAGE_KEY);
+    }
   }, []);
 
   const setUploadState = useCallback(
