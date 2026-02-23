@@ -36,6 +36,11 @@ export interface PivotConfig {
   groupByColumns: string[]; // raw column names used to group rows
 }
 
+export interface EdgeDefinition {
+  rawColumn: string;
+  targetPath: string;
+}
+
 export interface ExportFormat {
   id: "excel" | "csv" | "bigquery";
   label: string;

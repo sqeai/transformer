@@ -28,14 +28,13 @@ const pivotConfigSchema = z.object({
     .describe("Raw column names to group rows by"),
 });
 
-/**
- * Tool: update_schema
- *
- * Returns the complete updated schema fields. The client applies this directly.
- */
+function wrapDelimiter(tag: string, payload: object): string {
+  return `<!-- ${tag}:${JSON.stringify(payload)} -->`;
+}
+
 export const updateSchemaTool = tool(
   async (input) => {
-    return JSON.stringify({
+    return wrapDelimiter("SCHEMA_JSON", {
       type: "schema_update",
       schema: { name: input.schemaName, fields: input.fields },
     });
@@ -50,14 +49,9 @@ export const updateSchemaTool = tool(
   },
 );
 
-/**
- * Tool: update_mappings
- *
- * Returns the complete updated column mappings. The client applies this directly.
- */
 export const updateMappingsTool = tool(
   async (input) => {
-    return JSON.stringify({
+    return wrapDelimiter("MAPPINGS_JSON", {
       type: "mappings_update",
       mappings: input.mappings,
     });
@@ -71,14 +65,9 @@ export const updateMappingsTool = tool(
   },
 );
 
-/**
- * Tool: update_pivot_config
- *
- * Returns the updated pivot/aggregation configuration.
- */
 export const updatePivotConfigTool = tool(
   async (input) => {
-    return JSON.stringify({
+    return wrapDelimiter("PIVOT_JSON", {
       type: "pivot_update",
       pivotConfig: input.pivotConfig,
     });
@@ -88,6 +77,43 @@ export const updatePivotConfigTool = tool(
     description: `Update the pivot/aggregation configuration. Use this when the user asks to enable/disable pivoting, change group-by columns, or modify how rows are aggregated. When enabling pivot, also specify which raw columns to group by.`,
     schema: z.object({
       pivotConfig: pivotConfigSchema.describe("The updated pivot configuration"),
+    }),
+  },
+);
+
+const edgeSchema = z.object({
+  rawColumn: z.string().describe("Exact raw column name from the uploaded data (used to derive the source node ID)"),
+  targetPath: z.string().describe("Target schema field path, e.g. 'customer.name' (used to derive the target node ID)"),
+});
+
+export const setPivotConfigTool = tool(
+  async (input) => {
+    return wrapDelimiter("PIVOT_JSON", {
+      type: "set_pivot_config",
+      pivotConfig: input.pivotConfig,
+    });
+  },
+  {
+    name: "set_pivot_config",
+    description: `Directly set the pivot configuration on the client-side mapping page. Use this when you want to explicitly push a pivot config update to the UI — for example after analysing the schema and deciding which columns should be grouped. This is equivalent to calling setPivotConfig() on the client.`,
+    schema: z.object({
+      pivotConfig: pivotConfigSchema.describe("The pivot configuration to set"),
+    }),
+  },
+);
+
+export const setEdgesTool = tool(
+  async (input) => {
+    return wrapDelimiter("EDGES_JSON", {
+      type: "set_edges",
+      edges: input.edges,
+    });
+  },
+  {
+    name: "set_edges",
+    description: `Directly set the mapping edges on the client-side mapping page. Each edge connects a raw column to a target schema field path. Use this when you want to explicitly control which visual connections appear in the mapping builder — for example after analysing the data and schema to suggest optimal mappings. This is equivalent to calling setEdges() on the client. Always provide the COMPLETE set of edges (not a diff).`,
+    schema: z.object({
+      edges: z.array(edgeSchema).describe("The complete set of edges to display in the mapping builder"),
     }),
   },
 );
@@ -121,6 +147,8 @@ export function createTools(workspaceContext: string | null) {
     updateSchemaTool,
     updateMappingsTool,
     updatePivotConfigTool,
+    setPivotConfigTool,
+    setEdgesTool,
     createGetWorkspaceContextTool(workspaceContext),
   ];
 }
