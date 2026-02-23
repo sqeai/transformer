@@ -13,6 +13,7 @@ import { ArrowRight, ArrowLeft, Sparkles, Loader2, AlertTriangle } from "lucide-
 import PivotConfigPanel from "@/components/PivotConfigPanel";
 import DefaultValuesPanel from "@/components/DefaultValuesPanel";
 import VerticalPivotPanel from "@/components/VerticalPivotPanel";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 
 const NODE_WIDTH = 240;
 const NODE_GAP = 60;
@@ -487,47 +488,56 @@ export default function MappingPage() {
           </div>
         )}
 
-        <div className="flex flex-1 min-h-0 gap-3">
-          <div className="flex-1 min-h-0 rounded-lg border bg-muted/20">
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={nodeTypes}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onEdgesDelete={onEdgesDeleted}
-              connectOnClick
-              deleteKeyCode={["Backspace", "Delete"]}
-              fitView
-              fitViewOptions={{ padding: 0.2 }}
-            >
-              <Background />
-              <Controls />
-              <MiniMap />
-            </ReactFlow>
-          </div>
-
-          <div className="w-80 shrink-0 overflow-y-auto space-y-3">
-            <DefaultValuesPanel
-              unmappedTargetPaths={unmappedTargetPaths}
-              defaultValues={defaultValues}
-              onDefaultValuesChange={setDefaultValues}
-            />
-            <VerticalPivotPanel
-              rawColumns={rawColumns}
-              targetPaths={targetPaths}
-              verticalPivotConfig={verticalPivotConfig}
-              onVerticalPivotConfigChange={setVerticalPivotConfig}
-            />
-            <PivotConfigPanel
-              rawColumns={rawColumns}
-              columnMappings={workflow.columnMappings}
-              pivotConfig={pivotConfig}
-              onPivotConfigChange={setPivotConfig}
-              onColumnMappingsChange={setColumnMappings}
-            />
-          </div>
+        <div className="flex-1 min-h-0">
+          <ResizablePanelGroup orientation="horizontal" className="h-full rounded-lg border">
+            <ResizablePanel defaultSize={70} minSize={30}>
+              <div className="h-full relative overflow-hidden bg-muted/20">
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  nodeTypes={nodeTypes}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onConnect={onConnect}
+                  onEdgesDelete={onEdgesDeleted}
+                  connectOnClick
+                  deleteKeyCode={["Backspace", "Delete"]}
+                  fitView
+                  fitViewOptions={{ padding: 0.2 }}
+                >
+                  <Background />
+                  <Controls />
+                  <MiniMap />
+                </ReactFlow>
+              </div>
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+            <ResizablePanel defaultSize={30} minSize={30}>
+              <div className="h-full overflow-y-auto p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-muted-foreground">Configuration</h2>
+                </div>
+                <DefaultValuesPanel
+                  unmappedTargetPaths={unmappedTargetPaths}
+                  defaultValues={defaultValues}
+                  onDefaultValuesChange={setDefaultValues}
+                />
+                <VerticalPivotPanel
+                  rawColumns={rawColumns}
+                  targetPaths={targetPaths}
+                  verticalPivotConfig={verticalPivotConfig}
+                  onVerticalPivotConfigChange={setVerticalPivotConfig}
+                />
+                <PivotConfigPanel
+                  rawColumns={rawColumns}
+                  columnMappings={workflow.columnMappings}
+                  pivotConfig={pivotConfig}
+                  onPivotConfigChange={setPivotConfig}
+                  onColumnMappingsChange={setColumnMappings}
+                />
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </div>
       </div>
     </DashboardLayout>
