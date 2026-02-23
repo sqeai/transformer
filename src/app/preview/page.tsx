@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { useSchemaStore } from "@/lib/schema-store";
+import { useSchemaStore, flattenFields } from "@/lib/schema-store";
 import { ArrowRight, ArrowLeft, Layers, ArrowDownUp } from "lucide-react";
 import { applyMappings, getByPath, formatDisplayValue } from "@/lib/pivot-transform";
 import type { AggregationFunction } from "@/lib/types";
@@ -41,19 +41,25 @@ export default function PreviewPage() {
   const { rawRows, columnMappings, currentSchemaId, pivotConfig, defaultValues } = workflow;
   const schema = currentSchemaId ? getSchema(currentSchemaId) : null;
 
+  const allTargetPaths = useMemo(
+    () => schema ? flattenFields(schema.fields).filter((f) => !f.children?.length).map((f) => f.path) : [],
+    [schema],
+  );
+
   const previewRows = useMemo(
-    () => applyMappings(rawRows, columnMappings, pivotConfig, defaultValues),
-    [rawRows, columnMappings, pivotConfig, defaultValues],
+    () => applyMappings(rawRows, columnMappings, pivotConfig, defaultValues, allTargetPaths),
+    [rawRows, columnMappings, pivotConfig, defaultValues, allTargetPaths],
   );
 
   const previewColumns = useMemo(() => {
+    if (allTargetPaths.length > 0) return allTargetPaths;
     const cols = new Set<string>();
     columnMappings.forEach((m) => cols.add(m.targetPath));
     for (const path of Object.keys(defaultValues)) {
       cols.add(path);
     }
     return Array.from(cols).sort();
-  }, [columnMappings, defaultValues]);
+  }, [allTargetPaths, columnMappings, defaultValues]);
 
   if (!schema || rawRows.length === 0) {
     return (
@@ -158,7 +164,7 @@ export default function PreviewPage() {
               {isPivoted ? "Aggregated output" : "Mapped data"}
             </CardTitle>
             <CardDescription>
-              Schema: {schema.name}. Columns: {previewColumns.join(", ")}
+              Schema: {schema.name}. {previewColumns.length} field{previewColumns.length !== 1 ? "s" : ""} in output.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -166,19 +172,40 @@ export default function PreviewPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    {previewColumns.map((col) => (
-                      <TableHead key={col}>{col}</TableHead>
-                    ))}
+                    {previewColumns.map((col) => {
+                      const isMapped = columnMappings.some((m) => m.targetPath === col);
+                      const hasDefault = defaultValues[col] != null && defaultValues[col] !== "";
+                      return (
+                        <TableHead key={col} className="whitespace-nowrap">
+                          <span>{col}</span>
+                          {!isMapped && hasDefault && (
+                            <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400 font-normal">(default)</span>
+                          )}
+                          {!isMapped && !hasDefault && (
+                            <span className="ml-1 text-[10px] text-muted-foreground/50 font-normal">(unmapped)</span>
+                          )}
+                        </TableHead>
+                      );
+                    })}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {previewRows.slice(0, 50).map((row, i) => (
                     <TableRow key={i}>
-                      {previewColumns.map((col) => (
-                        <TableCell key={col}>
-                          {formatDisplayValue(getByPath(row as Record<string, unknown>, col))}
-                        </TableCell>
-                      ))}
+                      {previewColumns.map((col) => {
+                        const value = getByPath(row as Record<string, unknown>, col);
+                        const isMapped = columnMappings.some((m) => m.targetPath === col);
+                        const hasDefault = defaultValues[col] != null && defaultValues[col] !== "";
+                        const isDefaultValue = !isMapped && hasDefault;
+                        return (
+                          <TableCell
+                            key={col}
+                            className={isDefaultValue ? "text-amber-700 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/20" : ""}
+                          >
+                            {formatDisplayValue(value)}
+                          </TableCell>
+                        );
+                      })}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -190,6 +217,20 @@ export default function PreviewPage() {
                 Showing first 50 of {previewRows.length} rows.
               </p>
             )}
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm bg-white dark:bg-zinc-900 border" />
+                Mapped from raw data
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-100 dark:bg-amber-900 border border-amber-300" />
+                Default value applied
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm bg-zinc-100 dark:bg-zinc-800 border" />
+                Unmapped (empty)
+              </span>
+            </div>
           </CardContent>
         </Card>
       </div>

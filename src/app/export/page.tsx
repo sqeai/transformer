@@ -11,7 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { useSchemaStore } from "@/lib/schema-store";
+import { useSchemaStore, flattenFields } from "@/lib/schema-store";
 import type { ExportFormat } from "@/lib/types";
 import { Download, FileSpreadsheet, Database, FileText, Layers, ArrowLeft } from "lucide-react";
 import ExcelJS from "exceljs";
@@ -42,19 +42,25 @@ export default function ExportPage() {
   const schema = currentSchemaId ? getSchema(currentSchemaId) : null;
   const [exporting, setExporting] = useState<string | null>(null);
 
+  const allTargetPaths = useMemo(
+    () => schema ? flattenFields(schema.fields).filter((f) => !f.children?.length).map((f) => f.path) : [],
+    [schema],
+  );
+
   const mappedRows = useMemo(
-    () => applyMappings(rawRows, columnMappings, pivotConfig, defaultValues),
-    [rawRows, columnMappings, pivotConfig, defaultValues],
+    () => applyMappings(rawRows, columnMappings, pivotConfig, defaultValues, allTargetPaths),
+    [rawRows, columnMappings, pivotConfig, defaultValues, allTargetPaths],
   );
 
   const columns = useMemo(() => {
+    if (allTargetPaths.length > 0) return allTargetPaths;
     const cols = new Set<string>();
     columnMappings.forEach((m) => cols.add(m.targetPath));
     for (const path of Object.keys(defaultValues)) {
       cols.add(path);
     }
     return Array.from(cols).sort();
-  }, [columnMappings, defaultValues]);
+  }, [allTargetPaths, columnMappings, defaultValues]);
 
   const handleExport = async (formatId: string) => {
     if (!schema || mappedRows.length === 0) return;

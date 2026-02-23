@@ -74,22 +74,39 @@ function aggregate(
  * Applies column mappings (with optional pivot aggregation) to raw rows.
  * Without pivot: 1:1 row mapping.
  * With pivot: groups by the designated columns and aggregates the rest.
+ *
+ * When allTargetPaths is provided, every output row will contain all target
+ * schema fields — mapped values take priority, then defaults, then empty string.
  */
 export function applyMappings(
   rawRows: Record<string, unknown>[],
   columnMappings: ColumnMapping[],
   pivotConfig: PivotConfig,
   defaultValues: DefaultValues = {},
+  allTargetPaths?: string[],
 ): Record<string, unknown>[] {
+  const fillSchemaFields = (out: Record<string, unknown>) => {
+    if (allTargetPaths) {
+      for (const path of allTargetPaths) {
+        if (getByPath(out, path) === undefined) {
+          setByPath(out, path, defaultValues[path] ?? "");
+        }
+      }
+    }
+    for (const [path, value] of Object.entries(defaultValues)) {
+      if (getByPath(out, path) === undefined || getByPath(out, path) === "") {
+        setByPath(out, path, value);
+      }
+    }
+  };
+
   if (!pivotConfig.enabled || pivotConfig.groupByColumns.length === 0) {
     return rawRows.map((raw) => {
       const out: Record<string, unknown> = {};
       for (const m of columnMappings) {
         setByPath(out, m.targetPath, raw[m.rawColumn]);
       }
-      for (const [path, value] of Object.entries(defaultValues)) {
-        setByPath(out, path, value);
-      }
+      fillSchemaFields(out);
       return out;
     });
   }
@@ -117,9 +134,7 @@ export function applyMappings(
         setByPath(out, m.targetPath, aggregate(values, fn));
       }
     }
-    for (const [path, value] of Object.entries(defaultValues)) {
-      setByPath(out, path, value);
-    }
+    fillSchemaFields(out);
     result.push(out);
   }
 
