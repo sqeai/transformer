@@ -81,6 +81,14 @@ export default function MappingPage() {
   const [nodes, , onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(edgesFromMappings);
 
+  const aggLookup = useMemo(() => {
+    const map = new Map<string, ColumnMapping["aggregation"]>();
+    for (const m of workflow.columnMappings) {
+      if (m.aggregation) map.set(m.rawColumn, m.aggregation);
+    }
+    return map;
+  }, [workflow.columnMappings]);
+
   const onConnect = useCallback(
     (params: Connection) => {
       setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: "hsl(var(--primary))", strokeWidth: 2 } }, eds));
@@ -89,14 +97,15 @@ export default function MappingPage() {
       if (rawIdx != null && targetPath != null) {
         const col = rawColumns[Number(rawIdx)];
         if (col) {
+          const existing = aggLookup.get(col);
           setColumnMappings([
             ...workflow.columnMappings.filter((m) => m.targetPath !== targetPath),
-            { rawColumn: col, targetPath },
+            { rawColumn: col, targetPath, ...(existing ? { aggregation: existing } : {}) },
           ]);
         }
       }
     },
-    [rawColumns, workflow.columnMappings, setColumnMappings, setEdges],
+    [rawColumns, workflow.columnMappings, setColumnMappings, setEdges, aggLookup],
   );
 
   const syncMappingsFromEdges = useCallback(() => {
@@ -106,11 +115,13 @@ export default function MappingPage() {
         const targetPath = e.target?.replace("target_", "");
         if (rawIdx == null || targetPath == null) return null;
         const col = rawColumns[Number(rawIdx)];
-        return col ? { rawColumn: col, targetPath } : null;
+        if (!col) return null;
+        const existing = aggLookup.get(col);
+        return { rawColumn: col, targetPath, ...(existing ? { aggregation: existing } : {}) };
       })
       .filter((m): m is ColumnMapping => m != null);
     setColumnMappings(mappings);
-  }, [edges, rawColumns, setColumnMappings]);
+  }, [edges, rawColumns, setColumnMappings, aggLookup]);
 
   const runAutoMap = useCallback(async () => {
     if (rawColumns.length === 0 || targetPaths.length === 0) return;

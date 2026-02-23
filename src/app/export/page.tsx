@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/card";
 import { useSchemaStore } from "@/lib/schema-store";
 import type { ExportFormat } from "@/lib/types";
-import { Download, FileSpreadsheet, Database, FileText } from "lucide-react";
+import { Download, FileSpreadsheet, Database, FileText, Layers } from "lucide-react";
 import ExcelJS from "exceljs";
 import { applyMappings, getByPath } from "@/lib/pivot-transform";
 
@@ -171,6 +171,22 @@ export default function ExportPage() {
               {schema.name}.
             </CardDescription>
           </CardHeader>
+          {pivotConfig.enabled && pivotConfig.groupByColumns.length > 0 && (
+            <CardContent className="pt-0">
+              <div className="flex items-center gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
+                <Layers className="h-4 w-4 text-primary shrink-0" />
+                <span>
+                  Pivot active — grouped by{" "}
+                  <strong>{pivotConfig.groupByColumns.join(", ")}</strong>.
+                  {rawRows.length !== mappedRows.length && (
+                    <span className="text-muted-foreground">
+                      {" "}({rawRows.length} raw rows aggregated into {mappedRows.length}.)
+                    </span>
+                  )}
+                </span>
+              </div>
+            </CardContent>
+          )}
         </Card>
       </div>
     </DashboardLayout>

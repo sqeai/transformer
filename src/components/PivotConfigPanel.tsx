@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,16 +22,30 @@ import type {
   ColumnMapping,
   PivotConfig,
 } from "@/lib/types";
-import { Layers, X, Plus, Group } from "lucide-react";
+import { Layers, X, Plus, Group, Sparkles } from "lucide-react";
 
-const AGGREGATION_OPTIONS: { value: AggregationFunction; label: string }[] = [
+interface AggOption {
+  value: AggregationFunction;
+  label: string;
+  disabled?: boolean;
+  icon?: ReactNode;
+  suffix?: string;
+}
+
+const AGGREGATION_OPTIONS: AggOption[] = [
   { value: "sum", label: "Sum" },
   { value: "concat", label: "Concatenate" },
   { value: "count", label: "Count" },
   { value: "min", label: "Min" },
   { value: "max", label: "Max" },
   { value: "first", label: "First value" },
-  { value: "ai_merge", label: "AI Merge" },
+  {
+    value: "ai_merge",
+    label: "AI Merge",
+    disabled: true,
+    icon: <Sparkles className="h-3 w-3" />,
+    suffix: "Coming soon",
+  },
 ];
 
 interface PivotConfigPanelProps {
@@ -68,6 +83,24 @@ export default function PivotConfigPanel({
     [columnMappings, groupBySet],
   );
 
+  const ensureAggregations = useCallback(
+    (newGroupBySet: Set<string>) => {
+      const needsUpdate = columnMappings.some(
+        (m) => !newGroupBySet.has(m.rawColumn) && !m.aggregation,
+      );
+      if (needsUpdate) {
+        onColumnMappingsChange(
+          columnMappings.map((m) =>
+            !newGroupBySet.has(m.rawColumn) && !m.aggregation
+              ? { ...m, aggregation: "sum" as const }
+              : m,
+          ),
+        );
+      }
+    },
+    [columnMappings, onColumnMappingsChange],
+  );
+
   const toggleEnabled = useCallback(() => {
     const next = !pivotConfig.enabled;
     onPivotConfigChange({
@@ -79,17 +112,18 @@ export default function PivotConfigPanel({
       onColumnMappingsChange(
         columnMappings.map((m) => ({ rawColumn: m.rawColumn, targetPath: m.targetPath })),
       );
+    } else if (pivotConfig.groupByColumns.length > 0) {
+      ensureAggregations(new Set(pivotConfig.groupByColumns));
     }
-  }, [pivotConfig, columnMappings, onPivotConfigChange, onColumnMappingsChange]);
+  }, [pivotConfig, columnMappings, onPivotConfigChange, onColumnMappingsChange, ensureAggregations]);
 
   const addGroupByColumn = useCallback(
     (col: string) => {
-      onPivotConfigChange({
-        ...pivotConfig,
-        groupByColumns: [...pivotConfig.groupByColumns, col],
-      });
+      const next = [...pivotConfig.groupByColumns, col];
+      onPivotConfigChange({ ...pivotConfig, groupByColumns: next });
+      ensureAggregations(new Set(next));
     },
-    [pivotConfig, onPivotConfigChange],
+    [pivotConfig, onPivotConfigChange, ensureAggregations],
   );
 
   const removeGroupByColumn = useCallback(
@@ -222,8 +256,20 @@ export default function PivotConfigPanel({
                         </SelectTrigger>
                         <SelectContent>
                           {AGGREGATION_OPTIONS.map((opt) => (
-                            <SelectItem key={opt.value} value={opt.value}>
-                              {opt.label}
+                            <SelectItem
+                              key={opt.value}
+                              value={opt.value}
+                              disabled={opt.disabled}
+                            >
+                              <span className="flex items-center gap-1.5">
+                                {opt.icon}
+                                {opt.label}
+                                {opt.suffix && (
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {opt.suffix}
+                                  </span>
+                                )}
+                              </span>
                             </SelectItem>
                           ))}
                         </SelectContent>

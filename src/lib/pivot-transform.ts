@@ -102,7 +102,7 @@ export function applyMappings(
         setByPath(out, m.targetPath, rows[0]![m.rawColumn]);
       } else {
         const values = rows.map((r) => r[m.rawColumn]);
-        const fn = m.aggregation ?? "first";
+        const fn = m.aggregation ?? "sum";
         setByPath(out, m.targetPath, aggregate(values, fn));
       }
     }
@@ -110,6 +110,26 @@ export function applyMappings(
   }
 
   return result;
+}
+
+/**
+ * Format a value for display: numbers with more than 4 decimal places
+ * are shown truncated to 4 decimals with "..." appended.
+ */
+export function formatDisplayValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const str = String(value);
+    const dotIndex = str.indexOf(".");
+    if (dotIndex !== -1) {
+      const decimals = str.length - dotIndex - 1;
+      if (decimals > 4) {
+        return str.slice(0, dotIndex + 5) + "...";
+      }
+    }
+    return str;
+  }
+  return String(value);
 }
 
 export { getByPath };
