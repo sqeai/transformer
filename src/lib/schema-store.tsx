@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -78,8 +79,12 @@ const SchemaStoreContext = createContext<SchemaStoreContextType | undefined>(
 );
 
 export function SchemaStoreProvider({ children }: { children: ReactNode }) {
-  const [schemas, setSchemas] = useState<FinalSchema[]>(loadSchemas);
+  const [schemas, setSchemas] = useState<FinalSchema[]>([]);
   const [workflow, setWorkflow] = useState<WorkflowState>(defaultWorkflow);
+
+  useEffect(() => {
+    setSchemas(loadSchemas());
+  }, []);
 
   const addSchema = useCallback((schema: FinalSchema) => {
     setSchemas((prev) => {

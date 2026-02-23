@@ -26,6 +26,14 @@ function getByPath(obj: Record<string, unknown>, path: string): unknown {
   return current;
 }
 
+function stringifyValue(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "object") {
+    try { return JSON.stringify(v); } catch { return ""; }
+  }
+  return String(v);
+}
+
 function aggregate(
   values: unknown[],
   fn: AggregationFunction,
@@ -50,14 +58,13 @@ function aggregate(
       return nums.length > 0 ? Math.max(...nums) : "";
     }
     case "concat": {
-      const unique = [...new Set(values.map((v) => String(v ?? "")))];
+      const unique = [...new Set(values.map((v) => stringifyValue(v)))];
       return unique.join(", ");
     }
     case "first":
       return values[0] ?? "";
     case "ai_merge":
-      // AI merge is handled server-side; fall back to concat on the client
-      return [...new Set(values.map((v) => String(v ?? "")))].join(", ");
+      return [...new Set(values.map((v) => stringifyValue(v)))].join(", ");
     default:
       return values[0] ?? "";
   }
@@ -77,7 +84,12 @@ export function applyMappings(
     return rawRows.map((raw) => {
       const out: Record<string, unknown> = {};
       for (const m of columnMappings) {
-        setByPath(out, m.targetPath, raw[m.rawColumn]);
+        const val = raw[m.rawColumn];
+        setByPath(
+          out,
+          m.targetPath,
+          (val == null || val === "") && m.defaultValue != null ? m.defaultValue : val,
+        );
       }
       return out;
     });
@@ -99,9 +111,17 @@ export function applyMappings(
     const out: Record<string, unknown> = {};
     for (const m of columnMappings) {
       if (groupBySet.has(m.rawColumn)) {
-        setByPath(out, m.targetPath, rows[0]![m.rawColumn]);
+        const val = rows[0]![m.rawColumn];
+        setByPath(
+          out,
+          m.targetPath,
+          (val == null || val === "") && m.defaultValue != null ? m.defaultValue : val,
+        );
       } else {
-        const values = rows.map((r) => r[m.rawColumn]);
+        const values = rows.map((r) => {
+          const v = r[m.rawColumn];
+          return (v == null || v === "") && m.defaultValue != null ? m.defaultValue : v;
+        });
         const fn = m.aggregation ?? "sum";
         setByPath(out, m.targetPath, aggregate(values, fn));
       }
@@ -128,6 +148,13 @@ export function formatDisplayValue(value: unknown): string {
       }
     }
     return str;
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "";
+    }
   }
   return String(value);
 }

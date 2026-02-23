@@ -76,6 +76,11 @@ export default function DataPreviewTable({
           h = Math.max(0, Math.min(idx, maxRowIdx));
           setHeaderRow(h);
           setDraftHeaderRow(String(h + 1));
+          if (h >= ds) {
+            ds = Math.min(h + 1, maxRowIdx);
+            setDataStart(ds);
+            setDraftDataStart(String(ds + 1));
+          }
           break;
         }
         case "dataStart": {
@@ -149,23 +154,19 @@ export default function DataPreviewTable({
 
   useEffect(() => () => clearTimeout(debounceRef.current), []);
 
-  const headerCells = useMemo(() => {
-    const row = grid[headerRow];
-    if (!row) return [];
-    return row.slice(startCol, endCol + 1);
-  }, [grid, headerRow, startCol, endCol]);
-
-  const previewRows = useMemo(() => {
-    const visibleStart = Math.min(dataStart, grid.length);
-    const visibleEnd = Math.min(dataEnd + 1, grid.length);
-    return grid.slice(visibleStart, visibleEnd).map((row) => row.slice(startCol, endCol + 1));
-  }, [grid, dataStart, dataEnd, startCol, endCol]);
+  const columnLabels = useMemo(() => {
+    const count = endCol - startCol + 1;
+    return Array.from({ length: count }, (_, i) => {
+      const colIdx = startCol + i;
+      return `Col ${colIdx + 1}`;
+    });
+  }, [startCol, endCol]);
 
   const dataRowCount = Math.min(dataEnd, maxRowIdx) - dataStart + 1;
   const colCount = endCol - startCol + 1;
 
   const getRowClass = (gridRowIndex: number): string => {
-    if (gridRowIndex === headerRow) return "bg-blue-100 dark:bg-blue-950/40";
+    if (gridRowIndex === headerRow) return "";
     if (gridRowIndex < dataStart || gridRowIndex > dataEnd)
       return "bg-zinc-100 dark:bg-zinc-800/50 opacity-50";
     return "";
@@ -296,13 +297,12 @@ export default function DataPreviewTable({
                 <TableHead className="w-12 text-center text-[10px] text-muted-foreground/60 font-mono">
                   #
                 </TableHead>
-                {headerCells.map((cell, i) => (
+                {columnLabels.map((label, i) => (
                   <TableHead
                     key={i}
-                    className="text-xs whitespace-nowrap max-w-[200px] truncate"
-                    title={cell}
+                    className="text-xs whitespace-nowrap max-w-[200px] truncate text-muted-foreground/60"
                   >
-                    {cell || <span className="text-muted-foreground/40 italic">empty</span>}
+                    {label}
                   </TableHead>
                 ))}
               </TableRow>
@@ -310,8 +310,7 @@ export default function DataPreviewTable({
             <TableBody>
               {grid.map((row, gridIdx) => {
                 const isHeader = gridIdx === headerRow;
-                const isOutside = gridIdx < dataStart || gridIdx > dataEnd;
-                if (isHeader) return null;
+                const isOutside = !isHeader && (gridIdx < dataStart || gridIdx > dataEnd);
 
                 return (
                   <TableRow
@@ -325,11 +324,15 @@ export default function DataPreviewTable({
                       <TableCell
                         key={ci}
                         className={`py-1.5 text-xs whitespace-nowrap max-w-[200px] truncate ${
-                          isOutside ? "text-muted-foreground/40" : ""
+                          isHeader
+                            ? "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-semibold"
+                            : isOutside
+                              ? "text-muted-foreground/40"
+                              : ""
                         }`}
                         title={String(cell)}
                       >
-                        {cell || ""}
+                        {cell || (isHeader ? <span className="text-blue-400/40 italic">empty</span> : "")}
                       </TableCell>
                     ))}
                   </TableRow>
@@ -342,7 +345,7 @@ export default function DataPreviewTable({
         <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <span className="inline-block h-2.5 w-2.5 rounded-sm bg-blue-200 dark:bg-blue-900" />
-            Header row
+            Header row (blue cells)
           </span>
           <span className="inline-flex items-center gap-1.5">
             <span className="inline-block h-2.5 w-2.5 rounded-sm bg-zinc-200 dark:bg-zinc-700" />

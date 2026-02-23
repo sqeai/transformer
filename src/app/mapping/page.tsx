@@ -11,6 +11,7 @@ import { flattenFields } from "@/lib/schema-store";
 import type { ColumnMapping, PivotConfig } from "@/lib/types";
 import { ArrowRight, ArrowLeft, Sparkles, Loader2, AlertTriangle } from "lucide-react";
 import PivotConfigPanel from "@/components/PivotConfigPanel";
+import DefaultValuesPanel from "@/components/DefaultValuesPanel";
 
 const NODE_WIDTH = 240;
 const NODE_GAP = 60;
@@ -206,10 +207,13 @@ export default function MappingPage() {
     setEdges(edgesFromMappings);
   }, [edgesFromMappings, setEdges]);
 
-  const aggLookup = useMemo(() => {
-    const map = new Map<string, ColumnMapping["aggregation"]>();
+  const mappingExtrasLookup = useMemo(() => {
+    const map = new Map<string, Pick<ColumnMapping, "aggregation" | "defaultValue">>();
     for (const m of workflow.columnMappings) {
-      if (m.aggregation) map.set(m.rawColumn, m.aggregation);
+      const extras: Pick<ColumnMapping, "aggregation" | "defaultValue"> = {};
+      if (m.aggregation) extras.aggregation = m.aggregation;
+      if (m.defaultValue != null) extras.defaultValue = m.defaultValue;
+      if (Object.keys(extras).length > 0) map.set(m.rawColumn, extras);
     }
     return map;
   }, [workflow.columnMappings]);
@@ -221,10 +225,10 @@ export default function MappingPage() {
       if (rawIdx == null || targetPath == null) return null;
       const col = rawColumns[Number(rawIdx)];
       if (!col) return null;
-      const existing = aggLookup.get(col);
-      return { rawColumn: col, targetPath, ...(existing ? { aggregation: existing } : {}) };
+      const extras = mappingExtrasLookup.get(col);
+      return { rawColumn: col, targetPath, ...extras };
     },
-    [rawColumns, nodeIdToTargetPath, aggLookup],
+    [rawColumns, nodeIdToTargetPath, mappingExtrasLookup],
   );
 
   const onConnect = useCallback(
@@ -235,15 +239,15 @@ export default function MappingPage() {
       if (rawIdx != null && targetPath != null) {
         const col = rawColumns[Number(rawIdx)];
         if (col) {
-          const existing = aggLookup.get(col);
+          const extras = mappingExtrasLookup.get(col);
           setColumnMappings([
             ...workflow.columnMappings.filter((m) => m.targetPath !== targetPath),
-            { rawColumn: col, targetPath, ...(existing ? { aggregation: existing } : {}) },
+            { rawColumn: col, targetPath, ...extras },
           ]);
         }
       }
     },
-    [rawColumns, workflow.columnMappings, setColumnMappings, setEdges, aggLookup, nodeIdToTargetPath],
+    [rawColumns, workflow.columnMappings, setColumnMappings, setEdges, mappingExtrasLookup, nodeIdToTargetPath],
   );
 
   const onEdgesDeleted = useCallback(
@@ -400,7 +404,11 @@ export default function MappingPage() {
             </ReactFlow>
           </div>
 
-          <div className="w-80 shrink-0 overflow-y-auto">
+          <div className="w-80 shrink-0 overflow-y-auto space-y-3">
+            <DefaultValuesPanel
+              columnMappings={workflow.columnMappings}
+              onColumnMappingsChange={setColumnMappings}
+            />
             <PivotConfigPanel
               rawColumns={rawColumns}
               columnMappings={workflow.columnMappings}

@@ -15,7 +15,7 @@ import { useSchemaStore } from "@/lib/schema-store";
 import type { ExportFormat } from "@/lib/types";
 import { Download, FileSpreadsheet, Database, FileText, Layers, ArrowLeft } from "lucide-react";
 import ExcelJS from "exceljs";
-import { applyMappings, getByPath } from "@/lib/pivot-transform";
+import { applyMappings, getByPath, formatDisplayValue } from "@/lib/pivot-transform";
 
 const EXPORT_FORMATS: ExportFormat[] = [
   {
@@ -63,9 +63,10 @@ export default function ExportPage() {
         const sheet = workbook.addWorksheet("Data");
         sheet.addRow(columns);
         mappedRows.forEach((row) => {
-          const values = columns.map((c) =>
-            getByPath(row as Record<string, unknown>, c),
-          );
+          const values = columns.map((c) => {
+            const v = getByPath(row as Record<string, unknown>, c);
+            return v != null && typeof v === "object" ? formatDisplayValue(v) : v;
+          });
           sheet.addRow(values);
         });
         const buffer = await workbook.xlsx.writeBuffer();
@@ -84,7 +85,7 @@ export default function ExportPage() {
           columns
             .map((c) => {
               const v = getByPath(row as Record<string, unknown>, c);
-              const s = v != null ? String(v) : "";
+              const s = v != null ? formatDisplayValue(v) : "";
               return `"${s.replace(/"/g, '""')}"`;
             })
             .join(","),

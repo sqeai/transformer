@@ -29,6 +29,7 @@ export interface ColumnMapping {
   rawColumn: string;
   targetPath: string; // final schema path, e.g. "customer.name"
   aggregation?: AggregationFunction;
+  defaultValue?: string;
 }
 
 export interface PivotConfig {
