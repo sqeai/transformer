@@ -1,7 +1,7 @@
 import { ChatAnthropic } from "@langchain/anthropic";
 import { HumanMessage, type BaseMessage } from "@langchain/core/messages";
 import { createAgent } from "langchain";
-import type { SchemaField, ColumnMapping } from "./types";
+import type { SchemaField, ColumnMapping, PivotConfig, AggregationFunction } from "./types";
 import {
   extractWorkbookPreview,
   formatPreviewAsText,
@@ -54,23 +54,43 @@ Respond ONLY with a JSON object (no markdown fences, no commentary):
   "notes": string                 // brief explanation of what was trimmed and why
 }`;
 
-const AUTO_MAP_PROMPT = `You are a data mapping specialist. Given a list of raw column headers from uploaded data and a list of target schema field paths, determine the best mapping between them.
+const AUTO_MAP_PROMPT = `You are a data mapping specialist. Given a list of raw column headers from uploaded data and a list of target schema field paths, determine the best mapping between them. Also recommend whether the data should be pivoted (grouped and aggregated).
 
-Rules:
+Rules for column mapping:
 1. Match columns by semantic meaning, not just exact name. E.g. "Kode Nasabah" should match "customerCode" or "nasabahCode", "Nama Nasabah" should match "customerName" or "nasabahName".
 2. Consider abbreviations, language differences (Indonesian ↔ English), and formatting differences (camelCase, snake_case, spaces, etc.).
 3. Only create mappings where you are reasonably confident (>70% match). Leave ambiguous ones unmapped.
 4. Each target path should have at most one source column.
 5. Each source column should map to at most one target path.
 
-Respond ONLY with a JSON array (no markdown fences, no commentary). Each element:
+Rules for pivot & aggregation:
+6. Analyse whether the data likely has repeated key columns (e.g. customer ID, account code) with multiple detail rows that should be rolled up. If so, recommend enabling pivot.
+7. Choose group-by columns: these are the identifier/key columns whose unique combination defines a single output row (e.g. customer code, customer name, account number).
+8. For every mapped column that is NOT a group-by column, recommend an aggregation function:
+   - "sum" for numeric/monetary values (amounts, balances, quantities)
+   - "concat" for text values that should be combined (descriptions, notes)
+   - "count" for columns where the count of occurrences matters
+   - "min" or "max" for date or numeric range values
+   - "first" for columns where any single value is representative
+9. If the data does not appear to need pivoting (each row is already unique), set pivot.enabled to false with empty groupByColumns.
+
+Respond ONLY with a JSON object (no markdown fences, no commentary):
 {
-  "rawColumn": string,    // exact raw column name as provided
-  "targetPath": string,   // exact target schema path as provided
-  "confidence": number    // 0.0 to 1.0 confidence score
+  "mappings": [
+    {
+      "rawColumn": string,       // exact raw column name as provided
+      "targetPath": string,      // exact target schema path as provided
+      "confidence": number,      // 0.0 to 1.0 confidence score
+      "aggregation": string|null // one of: "sum", "concat", "count", "min", "max", "first", or null for group-by columns
+    }
+  ],
+  "pivot": {
+    "enabled": boolean,          // true if data should be pivoted
+    "groupByColumns": string[]   // raw column names to group by (subset of mapped rawColumns)
+  }
 }
 
-Only include mappings with confidence >= 0.7. If no good mappings exist, return an empty array [].`;
+Only include mappings with confidence >= 0.7. If no good mappings exist, return empty mappings array with pivot disabled.`;
 
 interface LlmSchemaField {
   name: string;
@@ -92,6 +112,12 @@ export interface AutoMapResult {
   rawColumn: string;
   targetPath: string;
   confidence: number;
+  aggregation?: string | null;
+}
+
+export interface AutoMapResponse {
+  mappings: ColumnMapping[];
+  pivot: PivotConfig;
 }
 
 function buildFieldTree(flat: LlmSchemaField[]): SchemaField[] {
@@ -234,19 +260,22 @@ export async function analyzeRawDataWithLLM(
   return parsed;
 }
 
+const VALID_AGGREGATIONS = new Set<string>(["sum", "concat", "count", "min", "max", "first"]);
+
 /**
  * Auto-maps raw column headers to target schema paths using LLM semantic matching.
+ * Also recommends pivot configuration and aggregation functions.
  */
 export async function autoMapColumnsWithLLM(
   rawColumns: string[],
   targetPaths: string[],
-): Promise<ColumnMapping[]> {
+): Promise<AutoMapResponse> {
   const text = await callLlm(
     AUTO_MAP_PROMPT,
-    `Map these raw columns to the target schema paths.\n\nRaw columns:\n${rawColumns.map((c, i) => `${i + 1}. "${c}"`).join("\n")}\n\nTarget schema paths:\n${targetPaths.map((p, i) => `${i + 1}. "${p}"`).join("\n")}`,
+    `Map these raw columns to the target schema paths and recommend pivot/aggregation settings.\n\nRaw columns:\n${rawColumns.map((c, i) => `${i + 1}. "${c}"`).join("\n")}\n\nTarget schema paths:\n${targetPaths.map((p, i) => `${i + 1}. "${p}"`).join("\n")}`,
   );
 
-  let parsed: AutoMapResult[];
+  let parsed: { mappings: AutoMapResult[]; pivot?: { enabled?: boolean; groupByColumns?: string[] } };
   try {
     parsed = JSON.parse(cleanJsonResponse(text));
   } catch {
@@ -255,12 +284,29 @@ export async function autoMapColumnsWithLLM(
     );
   }
 
-  if (!Array.isArray(parsed)) {
-    throw new Error("LLM returned non-array for auto-mapping");
-  }
+  const rawMappings = Array.isArray(parsed.mappings) ? parsed.mappings : [];
 
-  return parsed
+  const groupBySet = new Set(parsed.pivot?.groupByColumns ?? []);
+
+  const mappings: ColumnMapping[] = rawMappings
     .filter((m) => m.confidence >= 0.7)
     .filter((m) => rawColumns.includes(m.rawColumn) && targetPaths.includes(m.targetPath))
-    .map(({ rawColumn, targetPath }) => ({ rawColumn, targetPath }));
+    .map(({ rawColumn, targetPath, aggregation }) => {
+      const mapping: ColumnMapping = { rawColumn, targetPath };
+      if (aggregation && VALID_AGGREGATIONS.has(aggregation) && !groupBySet.has(rawColumn)) {
+        mapping.aggregation = aggregation as AggregationFunction;
+      }
+      return mapping;
+    });
+
+  const validGroupByColumns = (parsed.pivot?.groupByColumns ?? []).filter(
+    (col) => mappings.some((m) => m.rawColumn === col),
+  );
+
+  const pivot: PivotConfig = {
+    enabled: parsed.pivot?.enabled === true && validGroupByColumns.length > 0,
+    groupByColumns: validGroupByColumns,
+  };
+
+  return { mappings, pivot };
 }

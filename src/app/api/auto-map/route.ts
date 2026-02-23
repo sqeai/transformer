@@ -16,8 +16,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const mappings = await autoMapColumnsWithLLM(rawColumns, targetPaths);
-    return NextResponse.json({ mappings });
+    const { mappings, pivot } = await autoMapColumnsWithLLM(rawColumns, targetPaths);
+    return NextResponse.json({ mappings, pivot });
   } catch (e) {
     console.error(e);
     return NextResponse.json(

@@ -8,7 +8,7 @@ import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
 import { useSchemaStore } from "@/lib/schema-store";
 import { flattenFields } from "@/lib/schema-store";
-import type { ColumnMapping } from "@/lib/types";
+import type { ColumnMapping, PivotConfig } from "@/lib/types";
 import { ArrowRight, Sparkles, Loader2 } from "lucide-react";
 import PivotConfigPanel from "@/components/PivotConfigPanel";
 
@@ -133,7 +133,10 @@ export default function MappingPage() {
         body: JSON.stringify({ rawColumns, targetPaths }),
       });
       if (!res.ok) return;
-      const { mappings } = (await res.json()) as { mappings: ColumnMapping[] };
+      const { mappings, pivot } = (await res.json()) as {
+        mappings: ColumnMapping[];
+        pivot?: PivotConfig;
+      };
       if (mappings.length > 0) {
         setColumnMappings(mappings);
         const newEdges: Edge[] = mappings.map((m, i) => ({
@@ -145,12 +148,15 @@ export default function MappingPage() {
         }));
         setEdges(newEdges);
       }
+      if (pivot) {
+        setPivotConfig(pivot);
+      }
     } catch {
       // auto-map failed silently — user can still map manually
     } finally {
       setAutoMapping(false);
     }
-  }, [rawColumns, targetPaths, setColumnMappings, setEdges]);
+  }, [rawColumns, targetPaths, setColumnMappings, setEdges, setPivotConfig]);
 
   useEffect(() => {
     if (
