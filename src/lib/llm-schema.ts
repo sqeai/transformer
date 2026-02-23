@@ -12,7 +12,7 @@ const SYSTEM_PROMPT = `You are a data-schema analyst. Given a preview of an Exce
 Rules:
 1. Identify which columns are meaningful data fields vs noise (row numbers, empty padding, internal IDs that are clearly auto-generated).
 2. Group related columns under a common parent when it makes semantic sense (e.g. "First Name" and "Last Name" → parent "name" with children "first" and "last"; or "Address Line 1", "City", "State", "Zip" → parent "address").
-3. Normalise field names to clean camelCase (e.g. "CUST_EMAIL" → "customerEmail", "Addr Line 1" → "addressLine1").
+3. Normalise field names to clean camelCase (e.g. "CUST_EMAIL" → "customerEmail", "Addr Line 1" → "addressLine1"). For bilingual headers (Vietnamese/English), prefer the English portion for the camelCase name (e.g. "Tên Công Ty\nCompany Name" → "companyName", "Đơn Giá\nUnit Price" → "unitPrice", "Thuế GTGT\nVAT" → "vat", "Tổng Cộng\nTotal Amount" → "totalAmount").
 4. Assign a nesting level: 0 for top-level, 1 for children of a group, etc.
 5. Preserve a logical ordering that groups related fields together.
 6. Keep the schema practical — don't over-nest. One level of nesting is usually enough.
@@ -36,19 +36,25 @@ const RAW_DATA_ANALYSIS_PROMPT = `You are a data analyst specialising in messy s
 - Title rows, disclaimers, or metadata rows above the actual data
 - Empty padding rows/columns
 - Merged header rows spanning multiple lines
+- Multi-line cell values where text within a single cell contains newlines (shown as " / " in the preview, e.g. "Tên Công Ty / Company Name")
+- Headers that span TWO consecutive rows (e.g. row 3 has Vietnamese names, row 4 has English names for the same columns)
 - Noise columns (row numbers, internal IDs, empty columns)
 
 Your job is to:
-1. Identify the HEADER ROW — the row that contains column names for the actual data. Common header fields include: Kode Nasabah, Nama Nasabah, Asset class, key_metrics_level_1, tenor, and similar financial/business terms. The header row is usually the first row where most cells contain short descriptive text (not data values or long sentences).
+1. Identify the HEADER ROW(S) — the row(s) that contain column names for the actual data. Common header fields include: Kode Nasabah, Nama Nasabah, Asset class, key_metrics_level_1, tenor, and similar financial/business terms. Headers may also be bilingual (Vietnamese/English) such as: "Tên Công Ty / Company Name", "Mã Khách Hàng EVN / EVN Customer's Code", "Đơn Vị Tính / Unit", "Sản Lượng / Generation", "Đơn Giá / Unit Price", "Thành Tiền / Amount", "Thuế GTGT / VAT", "Tổng Cộng / Total Amount", "Tiền thuê mái (chưa thuế GTGT) / Roof Rental fee (Excluding VAT)".
+   - If headers are in a SINGLE row (possibly with multi-line cell values shown as " / "), set headerRowIndex to that row.
+   - If headers span TWO rows (e.g. Vietnamese on row N, English on row N+1), set headerRowIndex to the FIRST header row. The system will merge both rows.
+   - The header row is usually the first row where most cells contain short descriptive text (not data values or long sentences).
 2. Identify which rows ABOVE the header are noise/metadata that should be trimmed.
 3. Identify which columns are meaningful vs noise (empty columns, row-number columns, padding).
 4. Return the cleaned structure.
 
 Respond ONLY with a JSON object (no markdown fences, no commentary):
 {
-  "headerRowIndex": number,       // 0-based index of the header row in the provided rows
-  "headers": string[],            // the cleaned header names from that row
-  "dataStartRowIndex": number,    // 0-based index where actual data rows begin (usually headerRowIndex + 1)
+  "headerRowIndex": number,       // 0-based index of the FIRST header row in the provided rows
+  "headerRowCount": number,       // number of rows that make up the header (1 for single-row headers, 2 if headers span two rows)
+  "headers": string[],            // the cleaned header names — if headers span 2 rows, combine them as "Vietnamese / English" for each column
+  "dataStartRowIndex": number,    // 0-based index where actual data rows begin (usually headerRowIndex + headerRowCount)
   "columnsToKeep": number[],      // 0-based column indices to keep (exclude noise/empty columns)
   "trimmedRowCount": number,      // how many top rows to skip (metadata/title rows)
   "notes": string                 // brief explanation of what was trimmed and why
@@ -57,8 +63,8 @@ Respond ONLY with a JSON object (no markdown fences, no commentary):
 const AUTO_MAP_PROMPT = `You are a data mapping specialist. Given a list of raw column headers from uploaded data and a list of target schema field paths, determine the best mapping between them. Also recommend whether the data should be pivoted (grouped and aggregated).
 
 Rules for column mapping:
-1. Match columns by semantic meaning, not just exact name. E.g. "Kode Nasabah" should match "customerCode" or "nasabahCode", "Nama Nasabah" should match "customerName" or "nasabahName".
-2. Consider abbreviations, language differences (Indonesian ↔ English), and formatting differences (camelCase, snake_case, spaces, etc.).
+1. Match columns by semantic meaning, not just exact name. E.g. "Kode Nasabah" should match "customerCode" or "nasabahCode", "Nama Nasabah" should match "customerName" or "nasabahName". Bilingual headers like "Tên Công Ty\nCompany Name" should match "companyName", "Sản Lượng\nGeneration" should match "generation", "Đơn Giá\nUnit Price" should match "unitPrice", "Thành Tiền\nAmount" should match "amount", "Thuế GTGT\nVAT" should match "vat", "Tổng Cộng\nTotal Amount" should match "totalAmount", "Tiền thuê mái (chưa thuế GTGT)\nRoof Rental fee (Excluding VAT)" should match "roofRentalFee".
+2. Consider abbreviations, language differences (Indonesian ↔ English, Vietnamese ↔ English), and formatting differences (camelCase, snake_case, spaces, etc.). Headers may contain both Vietnamese and English text separated by newlines.
 3. Only create mappings where you are reasonably confident (>70% match). Leave ambiguous ones unmapped.
 4. Each target path should have at most one source column.
 5. Each source column should map to at most one target path.
@@ -101,6 +107,7 @@ interface LlmSchemaField {
 
 export interface RawDataAnalysis {
   headerRowIndex: number;
+  headerRowCount?: number;
   headers: string[];
   dataStartRowIndex: number;
   columnsToKeep: number[];

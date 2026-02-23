@@ -2,11 +2,22 @@ import ExcelJS from "exceljs";
 import type { RawDataAnalysis } from "./llm-schema";
 
 function extractCellText(v: ExcelJS.CellValue, fallback: string): string {
-  if (typeof v === "string") return v.trim() || fallback;
-  if (v && typeof v === "object" && "text" in v)
-    return String((v as { text: string }).text).trim() || fallback;
-  if (v != null) return String(v).trim() || fallback;
-  return fallback;
+  let raw: string;
+  if (typeof v === "string") {
+    raw = v;
+  } else if (v && typeof v === "object" && "richText" in v) {
+    raw = (v as ExcelJS.CellRichTextValue).richText
+      .map((seg) => seg.text)
+      .join("");
+  } else if (v && typeof v === "object" && "text" in v) {
+    raw = String((v as { text: string }).text);
+  } else if (v != null) {
+    raw = String(v);
+  } else {
+    return fallback;
+  }
+  raw = raw.replace(/\r\n/g, "\n").trim();
+  return raw || fallback;
 }
 
 export async function parseExcelColumns(buffer: ArrayBuffer): Promise<string[]> {
@@ -45,6 +56,7 @@ export async function parseExcelToRows(
 
   const analysis = options?.analysis;
   const headerRowNum = analysis ? analysis.headerRowIndex + 1 : 1;
+  const headerRowCount = analysis?.headerRowCount ?? 1;
   const dataStartRowNum = analysis ? analysis.dataStartRowIndex + 1 : 2;
   const columnsToKeep = analysis?.columnsToKeep;
 
@@ -52,10 +64,19 @@ export async function parseExcelToRows(
   const allColumns: { colIdx: number; name: string }[] = [];
   headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
     if (columnsToKeep && !columnsToKeep.includes(colNumber - 1)) return;
-    allColumns.push({
-      colIdx: colNumber,
-      name: extractCellText(cell.value, `Column_${colNumber}`),
-    });
+    let name = extractCellText(cell.value, `Column_${colNumber}`);
+
+    if (headerRowCount > 1) {
+      const parts = [name];
+      for (let extra = 1; extra < headerRowCount; extra++) {
+        const extraRow = sheet.getRow(headerRowNum + extra);
+        const extraText = extractCellText(extraRow.getCell(colNumber).value, "");
+        if (extraText && extraText !== name) parts.push(extraText);
+      }
+      name = parts.filter(Boolean).join("\n");
+    }
+
+    allColumns.push({ colIdx: colNumber, name });
   });
 
   const columns = allColumns.map((c) => c.name);

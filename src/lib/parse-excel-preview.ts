@@ -13,24 +13,46 @@ const MAX_RAW_PREVIEW_ROWS = 30;
 const MAX_COLUMNS = 60;
 
 function cellToString(value: ExcelJS.CellValue): string {
+  let raw: string;
   if (value == null) return "";
-  if (typeof value === "string") return value.trim();
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (value instanceof Date) return value.toISOString();
-  if (typeof value === "object") {
-    if ("text" in value) return String((value as { text: string }).text).trim();
-    if ("result" in value) {
-      const r = (value as { result: unknown }).result;
-      return r != null ? String(r).trim() : "";
-    }
+  if (typeof value === "string") {
+    raw = value;
+  } else if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  } else if (value instanceof Date) {
+    return value.toISOString();
+  } else if (typeof value === "object") {
     if ("richText" in value) {
-      return (value as ExcelJS.CellRichTextValue).richText
+      raw = (value as ExcelJS.CellRichTextValue).richText
         .map((seg) => seg.text)
-        .join("")
-        .trim();
+        .join("");
+    } else if ("text" in value) {
+      raw = String((value as { text: string }).text);
+    } else if ("result" in value) {
+      const r = (value as { result: unknown }).result;
+      raw = r != null ? String(r) : "";
+    } else {
+      raw = String(value);
     }
+  } else {
+    raw = String(value);
   }
-  return String(value).trim();
+  return raw.replace(/\r\n/g, "\n").trim();
+}
+
+/**
+ * Collapses multi-line cell text into a single line for contexts where
+ * newlines would break formatting (e.g. LLM row previews, pipe-delimited tables).
+ * Joins non-empty lines with " / " so "Tên Công Ty\nCompany Name" becomes
+ * "Tên Công Ty / Company Name".
+ */
+function collapseMultiline(text: string): string {
+  if (!text.includes("\n")) return text;
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .join(" / ");
 }
 
 export interface ExtractOptions {
@@ -65,7 +87,7 @@ export async function extractWorkbookPreview(
       const row = sheet.getRow(r);
       const values: string[] = [];
       for (let c = 1; c <= maxCol; c++) {
-        values.push(cellToString(row.getCell(c).value));
+        values.push(collapseMultiline(cellToString(row.getCell(c).value)));
       }
       sampleRows.push(values);
     }
@@ -138,11 +160,11 @@ export function formatPreviewAsText(preview: WorkbookPreview): string {
   lines.push(`Sheet: "${preview.sheetName}" (${preview.totalRows} data rows, ${preview.totalColumns} columns)`);
   lines.push("");
   lines.push("Headers:");
-  lines.push(preview.headers.join(" | "));
+  lines.push(preview.headers.map(collapseMultiline).join(" | "));
   lines.push("");
   lines.push(`Sample data (first ${preview.sampleRows.length} rows):`);
   for (const row of preview.sampleRows) {
-    lines.push(row.join(" | "));
+    lines.push(row.map(collapseMultiline).join(" | "));
   }
   return lines.join("\n");
 }
