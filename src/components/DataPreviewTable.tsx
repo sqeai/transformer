@@ -115,6 +115,8 @@ export default function DataPreviewTable({
     [maxRowIdx, maxColIdx, headerRow, dataStart, dataEnd, startCol, endCol, onBoundaryChange],
   );
 
+  const pendingArrowField = useRef<"headerRow" | "dataStart" | "dataEnd" | "startCol" | "endCol" | null>(null);
+
   const handleDraftChange = useCallback(
     (field: "headerRow" | "dataStart" | "dataEnd" | "startCol" | "endCol", raw: string) => {
       switch (field) {
@@ -126,9 +128,23 @@ export default function DataPreviewTable({
       }
 
       clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => commitBoundary(field, raw), DEBOUNCE_MS);
+      if (pendingArrowField.current === field) {
+        pendingArrowField.current = null;
+        commitBoundary(field, raw);
+      } else {
+        debounceRef.current = setTimeout(() => commitBoundary(field, raw), DEBOUNCE_MS);
+      }
     },
     [commitBoundary],
+  );
+
+  const handleArrowKey = useCallback(
+    (field: "headerRow" | "dataStart" | "dataEnd" | "startCol" | "endCol", e: React.KeyboardEvent) => {
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        pendingArrowField.current = field;
+      }
+    },
+    [],
   );
 
   useEffect(() => () => clearTimeout(debounceRef.current), []);
@@ -198,6 +214,7 @@ export default function DataPreviewTable({
                 min={1}
                 max={maxRowIdx + 1}
                 value={draftHeaderRow}
+                onKeyDown={(e) => handleArrowKey("headerRow", e)}
                 onChange={(e) => handleDraftChange("headerRow", e.target.value)}
                 className="h-8 text-sm"
               />
@@ -213,6 +230,7 @@ export default function DataPreviewTable({
                 min={1}
                 max={maxRowIdx + 1}
                 value={draftDataStart}
+                onKeyDown={(e) => handleArrowKey("dataStart", e)}
                 onChange={(e) => handleDraftChange("dataStart", e.target.value)}
                 className="h-8 text-sm"
               />
@@ -228,6 +246,7 @@ export default function DataPreviewTable({
                 min={1}
                 max={totalRows}
                 value={draftDataEnd}
+                onKeyDown={(e) => handleArrowKey("dataEnd", e)}
                 onChange={(e) => handleDraftChange("dataEnd", e.target.value)}
                 className="h-8 text-sm"
               />
@@ -243,6 +262,7 @@ export default function DataPreviewTable({
                 min={1}
                 max={maxColIdx + 1}
                 value={draftStartCol}
+                onKeyDown={(e) => handleArrowKey("startCol", e)}
                 onChange={(e) => handleDraftChange("startCol", e.target.value)}
                 className="h-8 text-sm"
               />
@@ -258,6 +278,7 @@ export default function DataPreviewTable({
                 min={1}
                 max={totalColumns}
                 value={draftEndCol}
+                onKeyDown={(e) => handleArrowKey("endCol", e)}
                 onChange={(e) => handleDraftChange("endCol", e.target.value)}
                 className="h-8 text-sm"
               />
