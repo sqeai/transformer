@@ -58,6 +58,11 @@ export default function DataPreviewTable({
   const [startCol, setStartCol] = useState(initialBoundary?.startColumn ?? 0);
   const [endCol, setEndCol] = useState(initialBoundary?.endColumn ?? maxColIdx);
   const [showSettings, setShowSettings] = useState(false);
+  /** Selected row (originalIndex) — centered in view with 5 rows above/below */
+  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(
+    initialBoundary != null ? (initialBoundary.headerRowIndex ?? 0) : null,
+  );
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const [draftHeaderRow, setDraftHeaderRow] = useState(String(headerRow + 1));
   const [draftDataStart, setDraftDataStart] = useState(String(dataStart + 1));
@@ -84,6 +89,7 @@ export default function DataPreviewTable({
           ds = Math.min(h + 1, maxRowIdx);
           setDataStart(ds);
           setDraftDataStart(String(ds + 1));
+          setSelectedRowIndex(h);
           break;
         }
         case "dataStart": {
@@ -196,6 +202,23 @@ export default function DataPreviewTable({
 
   useEffect(() => () => clearTimeout(debounceRef.current), []);
 
+  // Keep selected row in sync with header when boundary is set from outside
+  useEffect(() => {
+    if (initialBoundary != null)
+      setSelectedRowIndex(initialBoundary.headerRowIndex ?? 0);
+  }, [initialBoundary?.headerRowIndex]);
+
+  // Scroll selected row to center (5 rows up, 5 rows down)
+  useEffect(() => {
+    if (selectedRowIndex == null || !scrollContainerRef.current) return;
+    const rowEl = scrollContainerRef.current.querySelector(
+      `[data-original-index="${selectedRowIndex}"]`,
+    );
+    if (rowEl) {
+      rowEl.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [selectedRowIndex]);
+
   const columnLabels = useMemo(() => {
     const count = endCol - startCol + 1;
     return Array.from({ length: count }, (_, i) => {
@@ -240,6 +263,8 @@ export default function DataPreviewTable({
       return "bg-zinc-100 dark:bg-zinc-800/50 opacity-50";
     return "";
   };
+
+  const isSelected = (originalIndex: number) => selectedRowIndex === originalIndex;
 
   const previewDescription = useMemo(() => {
     const rowDesc = dataRowCount > 0
@@ -479,7 +504,10 @@ export default function DataPreviewTable({
       )}
 
       <CardContent className={showSettings ? "pt-0" : ""}>
-        <div className="rounded-md border overflow-auto min-h-0 max-w-full">
+        <div
+          ref={scrollContainerRef}
+          className="rounded-md border overflow-auto min-h-0 max-w-full"
+        >
           <Table>
             <TableHeader className="sticky top-0 z-10 bg-background">
               <TableRow>
@@ -523,7 +551,13 @@ export default function DataPreviewTable({
                 return (
                   <TableRow
                     key={rowIdx}
-                    className={getRowClass(rowIdx)}
+                    data-original-index={rowIdx}
+                    className={`${getRowClass(rowIdx)} cursor-pointer ${
+                      isSelected(rowIdx)
+                        ? "ring-2 ring-inset ring-primary bg-primary/10 dark:bg-primary/20"
+                        : "hover:bg-muted/50"
+                    }`}
+                    onClick={() => setSelectedRowIndex(rowIdx)}
                   >
                     <TableCell className="text-center text-[10px] text-muted-foreground/60 font-mono py-1.5">
                       {rowIdx + 1}
