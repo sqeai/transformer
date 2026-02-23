@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   closestCenter,
@@ -302,7 +302,13 @@ export default function FinalSchemaTable({
   const [collapsed, setCollapsed] = useState(false);
   const [showPreview, setShowPreview] = useState(true);
 
-  const flat = useMemo(() => flattenWithPath(schema.fields), [schema.fields]);
+  const schemaFlat = useMemo(() => flattenWithPath(schema.fields), [schema.fields]);
+  const [draftFlat, setDraftFlat] = useState<FlatField[] | null>(null);
+  const flat = draftFlat ?? schemaFlat;
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const pendingCommitRef = useRef<FlatField[] | null>(null);
+  const DEBOUNCE_MS = 500;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -317,6 +323,46 @@ export default function FinalSchemaTable({
     [schema.id, onUpdateSchema],
   );
 
+  const flushCommit = useCallback(() => {
+    if (pendingCommitRef.current) {
+      const toCommit = pendingCommitRef.current;
+      pendingCommitRef.current = null;
+      commitFields(toCommit);
+    }
+  }, [commitFields]);
+
+  const debouncedCommit = useCallback(
+    (next: FlatField[]) => {
+      pendingCommitRef.current = next;
+      clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = undefined;
+        flushCommit();
+      }, DEBOUNCE_MS);
+    },
+    [flushCommit],
+  );
+
+  const cancelDebounceAndCommit = useCallback(
+    (next: FlatField[]) => {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = undefined;
+      pendingCommitRef.current = null;
+      setDraftFlat(next);
+      commitFields(next);
+    },
+    [commitFields],
+  );
+
+  useEffect(() => () => clearTimeout(debounceRef.current), []);
+
+  useEffect(() => {
+    setDraftFlat(null);
+    pendingCommitRef.current = null;
+    clearTimeout(debounceRef.current);
+    debounceRef.current = undefined;
+  }, [schema.id]);
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const { active, over } = event;
@@ -325,9 +371,9 @@ export default function FinalSchemaTable({
       const newIdx = flat.findIndex((f) => f.field.id === over.id);
       if (oldIdx === -1 || newIdx === -1) return;
       const reordered = arrayMove([...flat], oldIdx, newIdx);
-      commitFields(reordered);
+      cancelDebounceAndCommit(reordered);
     },
-    [flat, commitFields],
+    [flat, cancelDebounceAndCommit],
   );
 
   const handleRename = useCallback(
@@ -340,9 +386,10 @@ export default function FinalSchemaTable({
           path: basePath ? `${basePath}.${newName}` : newName,
         };
       });
-      commitFields(next);
+      setDraftFlat(next);
+      debouncedCommit(next);
     },
-    [flat, commitFields],
+    [flat, debouncedCommit],
   );
 
   const handleDescriptionChange = useCallback(
@@ -350,9 +397,10 @@ export default function FinalSchemaTable({
       const next = flat.map((item, i) =>
         i === index ? { ...item, field: { ...item.field, description: desc } } : item,
       );
-      commitFields(next);
+      setDraftFlat(next);
+      debouncedCommit(next);
     },
-    [flat, commitFields],
+    [flat, debouncedCommit],
   );
 
   const handleDefaultValueChange = useCallback(
@@ -360,17 +408,18 @@ export default function FinalSchemaTable({
       const next = flat.map((item, i) =>
         i === index ? { ...item, field: { ...item.field, defaultValue: val } } : item,
       );
-      commitFields(next);
+      setDraftFlat(next);
+      debouncedCommit(next);
     },
-    [flat, commitFields],
+    [flat, debouncedCommit],
   );
 
   const handleRemove = useCallback(
     (index: number) => {
       const next = flat.filter((_, i) => i !== index);
-      commitFields(next);
+      cancelDebounceAndCommit(next);
     },
-    [flat, commitFields],
+    [flat, cancelDebounceAndCommit],
   );
 
   const handleAddField = useCallback(() => {
@@ -381,8 +430,8 @@ export default function FinalSchemaTable({
       level: 0,
       order: flat.length,
     };
-    commitFields([...flat, { field: newField, path: newField.name }]);
-  }, [flat, commitFields]);
+    cancelDebounceAndCommit([...flat, { field: newField, path: newField.name }]);
+  }, [flat, cancelDebounceAndCommit]);
 
   const itemIds = useMemo(() => flat.map((f) => f.field.id), [flat]);
 
@@ -429,7 +478,7 @@ export default function FinalSchemaTable({
 
       {!collapsed && (
         <CardContent className="pt-0">
-          <div className="rounded-md border overflow-auto max-h-[420px]">
+          <div className="rounded-md border overflow-auto">
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
