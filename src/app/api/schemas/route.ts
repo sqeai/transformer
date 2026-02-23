@@ -12,7 +12,6 @@ export async function GET() {
   const { data: schemaRows, error: schemaError } = await supabase!
     .from("schemas")
     .select("id, name, created_at, user_id")
-    .eq("user_id", userId!)
     .order("created_at", { ascending: false });
 
   if (schemaError) {
@@ -23,21 +22,27 @@ export async function GET() {
     );
   }
 
-  const { data: profile } = await supabase!
-    .from("users")
-    .select("id, email, full_name")
-    .eq("id", userId!)
-    .single();
+  const profileIds = [...new Set((schemaRows ?? []).map((s: { user_id: string }) => s.user_id))];
+  const creatorMap = new Map<string, { id: string; email: string; name: string }>();
+  if (profileIds.length > 0) {
+    const { data: profiles } = await supabase!
+      .from("users")
+      .select("id, email, full_name")
+      .in("id", profileIds);
+    for (const p of profiles ?? []) {
+      creatorMap.set(p.id, {
+        id: p.id,
+        email: p.email ?? "",
+        name: p.full_name ?? "",
+      });
+    }
+  }
 
-  const creator = profile
-    ? { id: profile.id, email: profile.email ?? "", name: profile.full_name ?? "" }
-    : undefined;
-
-  const schemas = (schemaRows ?? []).map((s: { id: string; name: string; created_at: string }) => ({
+  const schemas = (schemaRows ?? []).map((s: { id: string; name: string; created_at: string; user_id: string }) => ({
     id: s.id,
     name: s.name,
     createdAt: s.created_at ?? new Date().toISOString(),
-    creator,
+    creator: creatorMap.get(s.user_id),
     fields: [] as ReturnType<typeof rowsToFields>,
   }));
 

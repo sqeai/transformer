@@ -26,7 +26,15 @@ export async function GET(
     );
   }
 
-  if (schema.user_id !== userId) {
+  const isOwner = schema.user_id === userId;
+  const { data: grantRow } = await supabase!
+    .from("schema_grants")
+    .select("schema_id")
+    .eq("schema_id", id)
+    .eq("granted_to_user_id", userId!)
+    .maybeSingle();
+  const hasGrant = !!grantRow;
+  if (!isOwner && !hasGrant) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

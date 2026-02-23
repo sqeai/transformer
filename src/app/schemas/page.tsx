@@ -32,8 +32,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import type { FinalSchema } from "@/lib/types";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function SchemasPage() {
+  const { user } = useAuth();
   const { schemas, schemasLoading, deleteSchema, addSchema, setCurrentSchema, resetWorkflow } = useSchemaStore();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -185,6 +187,7 @@ export default function SchemasPage() {
                               <Play className="mr-1 h-4 w-4" />
                               Use
                             </Button>
+                            {user && s.creator && s.creator.id === user.id && (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -196,6 +199,7 @@ export default function SchemasPage() {
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell>

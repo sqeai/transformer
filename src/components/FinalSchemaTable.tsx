@@ -52,6 +52,8 @@ interface FinalSchemaTableProps {
   onUpdateSchema: (id: string, updates: Partial<FinalSchema>) => void;
   rawRows?: Record<string, unknown>[];
   columnMappings?: { rawColumn: string; targetPath: string }[];
+  /** When true, fields are read-only (e.g. for shared access). */
+  readOnly?: boolean;
 }
 
 interface FlatField {
@@ -117,6 +119,7 @@ function SortableRow({
   onDescriptionChange,
   onDefaultValueChange,
   onRemove,
+  readOnly = false,
 }: {
   item: FlatField;
   index: number;
@@ -124,6 +127,7 @@ function SortableRow({
   onDescriptionChange: (index: number, desc: string) => void;
   onDefaultValueChange: (index: number, val: string) => void;
   onRemove: (index: number) => void;
+  readOnly?: boolean;
 }) {
   const {
     attributes,
@@ -143,14 +147,16 @@ function SortableRow({
   return (
     <TableRow ref={setNodeRef} style={style} className="group">
       <TableCell className="w-8 px-1">
-        <button
-          type="button"
-          className="cursor-grab active:cursor-grabbing touch-none p-1 rounded hover:bg-muted"
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            className="cursor-grab active:cursor-grabbing touch-none p-1 rounded hover:bg-muted"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
+          </button>
+        )}
       </TableCell>
       <TableCell className="text-xs text-muted-foreground font-mono w-8 text-center">
         {index + 1}
@@ -159,6 +165,7 @@ function SortableRow({
         <Input
           value={item.field.name}
           onChange={(e) => onRename(index, e.target.value)}
+          readOnly={readOnly}
           className="h-7 text-xs border-transparent bg-transparent hover:border-border focus:border-border shadow-none"
         />
       </TableCell>
@@ -167,6 +174,7 @@ function SortableRow({
           value={item.field.description ?? ""}
           onChange={(e) => onDescriptionChange(index, e.target.value)}
           placeholder="No description"
+          readOnly={readOnly}
           className="h-7 text-xs border-transparent bg-transparent hover:border-border focus:border-border shadow-none"
         />
       </TableCell>
@@ -175,6 +183,7 @@ function SortableRow({
           value={item.field.defaultValue ?? ""}
           onChange={(e) => onDefaultValueChange(index, e.target.value)}
           placeholder="—"
+          readOnly={readOnly}
           className="h-7 text-xs border-transparent bg-transparent hover:border-border focus:border-border shadow-none"
         />
       </TableCell>
@@ -182,14 +191,16 @@ function SortableRow({
         {item.path}
       </TableCell>
       <TableCell className="w-8 px-1">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-          onClick={() => onRemove(index)}
-        >
-          <Trash2 className="h-3 w-3" />
-        </Button>
+        {!readOnly && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+            onClick={() => onRemove(index)}
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        )}
       </TableCell>
     </TableRow>
   );
@@ -298,6 +309,7 @@ export default function FinalSchemaTable({
   onUpdateSchema,
   rawRows = [],
   columnMappings = [],
+  readOnly = false,
 }: FinalSchemaTableProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [showPreview, setShowPreview] = useState(true);
@@ -317,10 +329,11 @@ export default function FinalSchemaTable({
 
   const commitFields = useCallback(
     (newFlat: FlatField[]) => {
+      if (readOnly) return;
       const fields = rebuildFields(newFlat);
       onUpdateSchema(schema.id, { fields });
     },
-    [schema.id, onUpdateSchema],
+    [schema.id, onUpdateSchema, readOnly],
   );
 
   const flushCommit = useCallback(() => {
@@ -365,6 +378,7 @@ export default function FinalSchemaTable({
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
+      if (readOnly) return;
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const oldIdx = flat.findIndex((f) => f.field.id === active.id);
@@ -373,7 +387,7 @@ export default function FinalSchemaTable({
       const reordered = arrayMove([...flat], oldIdx, newIdx);
       cancelDebounceAndCommit(reordered);
     },
-    [flat, cancelDebounceAndCommit],
+    [flat, cancelDebounceAndCommit, readOnly],
   );
 
   const handleRename = useCallback(
@@ -507,6 +521,7 @@ export default function FinalSchemaTable({
                         onDescriptionChange={handleDescriptionChange}
                         onDefaultValueChange={handleDefaultValueChange}
                         onRemove={handleRemove}
+                        readOnly={readOnly}
                       />
                     ))}
                   </TableBody>
@@ -515,15 +530,17 @@ export default function FinalSchemaTable({
             </DndContext>
           </div>
 
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-2 w-full"
-            onClick={handleAddField}
-          >
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            Add Field
-          </Button>
+          {!readOnly && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2 w-full"
+              onClick={handleAddField}
+            >
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              Add Field
+            </Button>
+          )}
 
           {hasPreviewData && showPreview && (
             <DataPreviewSection

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -21,18 +21,44 @@ import {
   Layers,
   CalendarDays,
   ArrowRight,
+  User,
+  UserPlus,
+  Loader2,
+  X,
 } from "lucide-react";
 import FinalSchemaTable from "@/components/FinalSchemaTable";
 import type { FinalSchema } from "@/lib/types";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function SchemaDetailPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
+  const { user } = useAuth();
   const { getSchema, updateSchema, setCurrentSchema, workflow } = useSchemaStore();
   const schema = getSchema(id);
   const [name, setName] = useState(schema?.name ?? "");
   const [saved, setSaved] = useState(false);
+  const [grants, setGrants] = useState<{ id: string; grantedToUserId: string; grantedAt: string; user: { id: string; email: string; name: string } }[]>([]);
+  const [grantsLoading, setGrantsLoading] = useState(false);
+  const [grantEmail, setGrantEmail] = useState("");
+  const [granting, setGranting] = useState(false);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+
+  const isOwner = !!user && !!schema?.creator && schema.creator.id === user.id;
+
+  const fetchGrants = useCallback(() => {
+    if (!id || !isOwner) return;
+    setGrantsLoading(true);
+    fetch(`/api/schemas/${id}/grants`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : { grants: [] }))
+      .then((data) => setGrants(Array.isArray(data?.grants) ? data.grants : []))
+      .finally(() => setGrantsLoading(false));
+  }, [id, isOwner]);
+
+  useEffect(() => {
+    if (isOwner) fetchGrants();
+  }, [isOwner, fetchGrants]);
 
   if (!schema) {
     return (
@@ -73,6 +99,49 @@ export default function SchemaDetailPage() {
     router.push("/upload");
   };
 
+  const handleGrant = async () => {
+    const email = grantEmail.trim();
+    if (!email || granting) return;
+    setGranting(true);
+    try {
+      const res = await fetch(`/api/schemas/${id}/grants`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to grant access");
+      setGrantEmail("");
+      fetchGrants();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to grant access");
+    } finally {
+      setGranting(false);
+    }
+  };
+
+  const handleRevoke = async (grantedToUserId: string) => {
+    const g = grants.find((x) => x.grantedToUserId === grantedToUserId);
+    if (!g || revokingId) return;
+    setRevokingId(g.id);
+    try {
+      const res = await fetch(`/api/schemas/${id}/grants/${grantedToUserId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to revoke");
+      }
+      fetchGrants();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to revoke");
+    } finally {
+      setRevokingId(null);
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6 animate-fade-in">
@@ -87,6 +156,11 @@ export default function SchemaDetailPage() {
               <p className="text-muted-foreground">
                 Configure fields, descriptions, ordering, and default values.
               </p>
+              {!isOwner && schema.creator && (
+                <p className="text-sm text-amber-600 dark:text-amber-500 mt-1">
+                  You have view-only access. Only the creator can edit this schema.
+                </p>
+              )}
             </div>
           </div>
           <Button onClick={handleUseSchema}>
@@ -127,20 +201,23 @@ export default function SchemaDetailPage() {
           <Card>
             <CardHeader className="pb-2">
               <CardDescription className="flex items-center gap-1.5 text-xs">
-                <FileStack className="h-3.5 w-3.5" />
-                Usage Stats
+                <User className="h-3.5 w-3.5" />
+                Creator
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">Coming soon</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Track how often this schema is used
+              <p className="text-sm font-medium">
+                {schema.creator?.name || schema.creator?.email || "—"}
               </p>
+              {schema.creator?.email && schema.creator?.name && (
+                <p className="text-xs text-muted-foreground">{schema.creator.email}</p>
+              )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Schema name editor */}
+        {/* Schema name editor — only for owner */}
+        {isOwner && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Schema Name</CardTitle>
@@ -161,6 +238,81 @@ export default function SchemaDetailPage() {
             </div>
           </CardContent>
         </Card>
+        )}
+
+        {!isOwner && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Schema Name</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm font-medium">{schema.name}</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {isOwner && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Shared access</CardTitle>
+              <CardDescription>
+                Grant view access so others can see this schema. They will not be able to edit or delete it.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex-1 min-w-[200px]">
+                  <label className="text-xs text-muted-foreground mb-1 block">Grant access by email</label>
+                  <Input
+                    type="email"
+                    placeholder="colleague@example.com"
+                    value={grantEmail}
+                    onChange={(e) => setGrantEmail(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleGrant())}
+                  />
+                </div>
+                <Button
+                  onClick={handleGrant}
+                  disabled={!grantEmail.trim() || granting}
+                >
+                  {granting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4 mr-1.5" />}
+                  Grant access
+                </Button>
+              </div>
+              {grantsLoading ? (
+                <p className="text-sm text-muted-foreground flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+                </p>
+              ) : grants.length > 0 ? (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-2">People with access</p>
+                  <ul className="space-y-1.5">
+                    {grants.map((g) => (
+                      <li
+                        key={g.id}
+                        className="flex items-center justify-between gap-2 text-sm py-1.5 px-2 rounded-md bg-muted/50"
+                      >
+                        <span>
+                          {g.user.name || g.user.email || g.grantedToUserId}
+                          {g.user.email && <span className="text-muted-foreground ml-1">({g.user.email})</span>}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive h-8 w-8 p-0"
+                          onClick={() => handleRevoke(g.grantedToUserId)}
+                          disabled={revokingId === g.id}
+                        >
+                          {revokingId === g.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        )}
 
         <Separator />
 
@@ -170,6 +322,7 @@ export default function SchemaDetailPage() {
           onUpdateSchema={handleUpdateSchema}
           rawRows={workflow.currentSchemaId === id ? workflow.rawRows : []}
           columnMappings={workflow.currentSchemaId === id ? workflow.columnMappings : []}
+          readOnly={!isOwner}
         />
       </div>
     </DashboardLayout>
