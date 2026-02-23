@@ -329,6 +329,89 @@ export async function extractExcelGrid(
   return { grid, totalRows: sheet.rowCount, totalColumns: sheet.columnCount };
 }
 
+export interface TopBottomBoundary {
+  headerRowIndex?: number;
+  dataStartRowIndex?: number;
+  dataEndRowIndex?: number;
+}
+
+/**
+ * Extracts a "top N + bottom N" grid preview from an Excel buffer.
+ *
+ * When a boundary is provided the top/bottom window is computed relative to
+ * the selected data range (dataStartRowIndex..dataEndRowIndex) while also
+ * including the header row and any rows before dataStartRowIndex that fit
+ * in the topN budget. This ensures the preview always reflects the user's
+ * current selection.
+ *
+ * Each entry in the returned `rows` array has an `originalIndex` (0-based)
+ * and the cell `data`.
+ */
+export async function extractExcelGridTopBottom(
+  buffer: ArrayBuffer,
+  topN: number,
+  bottomN: number,
+  maxCols: number,
+  sheetIndex: number,
+  boundary?: TopBottomBoundary,
+): Promise<{
+  rows: { originalIndex: number; data: string[] }[];
+  totalRows: number;
+  totalColumns: number;
+}> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const sheet = workbook.worksheets[sheetIndex] ?? workbook.worksheets[0];
+  if (!sheet) return { rows: [], totalRows: 0, totalColumns: 0 };
+
+  const totalRows = sheet.rowCount;
+  const totalColumns = Math.min(sheet.columnCount, maxCols);
+
+  const readRow = (r0based: number): string[] => {
+    const row = sheet.getRow(r0based + 1);
+    const cells: string[] = [];
+    for (let c = 1; c <= totalColumns; c++) {
+      cells.push(cellToString(row.getCell(c).value));
+    }
+    return cells;
+  };
+
+  const collected = new Set<number>();
+  const rows: { originalIndex: number; data: string[] }[] = [];
+
+  const addRow = (idx: number) => {
+    if (idx < 0 || idx >= totalRows || collected.has(idx)) return;
+    collected.add(idx);
+    rows.push({ originalIndex: idx, data: readRow(idx) });
+  };
+
+  if (boundary) {
+    const hdr = boundary.headerRowIndex ?? 0;
+    const ds = boundary.dataStartRowIndex ?? (hdr + 1);
+    const de = Math.min(boundary.dataEndRowIndex ?? totalRows - 1, totalRows - 1);
+
+    for (let r = 0; r <= hdr; r++) addRow(r);
+    for (let r = hdr + 1; r < ds; r++) addRow(r);
+
+    const dataLen = de - ds + 1;
+    if (dataLen <= topN + bottomN) {
+      for (let r = ds; r <= de; r++) addRow(r);
+    } else {
+      for (let r = ds; r < ds + topN; r++) addRow(r);
+      for (let r = de - bottomN + 1; r <= de; r++) addRow(r);
+    }
+  } else {
+    const topEnd = Math.min(topN, totalRows);
+    const bottomStart = Math.max(topEnd, totalRows - bottomN);
+    for (let r = 0; r < topEnd; r++) addRow(r);
+    for (let r = bottomStart; r < totalRows; r++) addRow(r);
+  }
+
+  rows.sort((a, b) => a.originalIndex - b.originalIndex);
+
+  return { rows, totalRows, totalColumns };
+}
+
 /**
  * Formats the preview into a concise text table for the LLM prompt.
  */

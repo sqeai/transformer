@@ -490,7 +490,7 @@ export default function MappingPage() {
 
         <div className="flex-1 min-h-0">
           <ResizablePanelGroup orientation="horizontal" className="h-full rounded-lg border">
-            <ResizablePanel defaultSize={70} minSize={30}>
+            <ResizablePanel defaultSize={55} minSize={30}>
               <div className="h-full relative overflow-hidden bg-muted/20">
                 <ReactFlow
                   nodes={nodes}
@@ -512,7 +512,7 @@ export default function MappingPage() {
               </div>
             </ResizablePanel>
             <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={30} minSize={30}>
+            <ResizablePanel defaultSize={45} minSize={30}>
               <div className="h-full overflow-y-auto p-3 space-y-3">
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-semibold text-muted-foreground">Configuration</h2>

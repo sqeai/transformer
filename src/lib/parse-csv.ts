@@ -42,6 +42,76 @@ export function extractCsvPreview(
   return { grid, totalRows: lines.length, totalColumns: maxCols };
 }
 
+export interface CsvTopBottomBoundary {
+  headerRowIndex?: number;
+  dataStartRowIndex?: number;
+  dataEndRowIndex?: number;
+}
+
+/**
+ * Extracts a "top N + bottom N" grid preview from CSV text.
+ *
+ * When a boundary is provided the window is relative to the selected
+ * data range, including the header and any rows above dataStartRowIndex.
+ */
+export function extractCsvPreviewTopBottom(
+  csvText: string,
+  topN: number,
+  bottomN: number,
+  boundary?: CsvTopBottomBoundary,
+): {
+  rows: { originalIndex: number; data: string[] }[];
+  totalRows: number;
+  totalColumns: number;
+} {
+  const lines = csvText.split(/\r?\n/).filter((line) => line.trim() !== "");
+  if (lines.length === 0) return { rows: [], totalRows: 0, totalColumns: 0 };
+
+  let maxCols = 0;
+  const parsedLines: string[][] = [];
+  for (const line of lines) {
+    const cells = parseRow(line).map((c) => c.replace(/^"|"$/g, ""));
+    maxCols = Math.max(maxCols, cells.length);
+    parsedLines.push(cells);
+  }
+
+  const totalRows = parsedLines.length;
+  const collected = new Set<number>();
+  const rows: { originalIndex: number; data: string[] }[] = [];
+
+  const addRow = (idx: number) => {
+    if (idx < 0 || idx >= totalRows || collected.has(idx)) return;
+    collected.add(idx);
+    rows.push({ originalIndex: idx, data: parsedLines[idx] });
+  };
+
+  if (boundary) {
+    const hdr = boundary.headerRowIndex ?? 0;
+    const ds = boundary.dataStartRowIndex ?? (hdr + 1);
+    const de = Math.min(boundary.dataEndRowIndex ?? totalRows - 1, totalRows - 1);
+
+    for (let r = 0; r <= hdr; r++) addRow(r);
+    for (let r = hdr + 1; r < ds; r++) addRow(r);
+
+    const dataLen = de - ds + 1;
+    if (dataLen <= topN + bottomN) {
+      for (let r = ds; r <= de; r++) addRow(r);
+    } else {
+      for (let r = ds; r < ds + topN; r++) addRow(r);
+      for (let r = de - bottomN + 1; r <= de; r++) addRow(r);
+    }
+  } else {
+    const topEnd = Math.min(topN, totalRows);
+    const bottomStart = Math.max(topEnd, totalRows - bottomN);
+    for (let r = 0; r < topEnd; r++) addRow(r);
+    for (let r = bottomStart; r < totalRows; r++) addRow(r);
+  }
+
+  rows.sort((a, b) => a.originalIndex - b.originalIndex);
+
+  return { rows, totalRows, totalColumns: maxCols };
+}
+
 export interface CsvParseOptions {
   headerRowIndex?: number;
   dataStartRowIndex?: number;

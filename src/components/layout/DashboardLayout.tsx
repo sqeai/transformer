@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useState, useEffect, useRef } from "react";
 import {
   LogOut,
   Sparkles,
@@ -34,10 +34,26 @@ const nav = [
   { name: "Export", href: "/export", icon: Download },
 ];
 
+const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
+
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+  const hasLoadedRef = useRef(false);
+
+  useEffect(() => {
+    const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+    if (stored !== null) {
+      setCollapsed(stored === "true");
+    }
+    hasLoadedRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedRef.current) return;
+    localStorage.setItem(SIDEBAR_STORAGE_KEY, String(collapsed));
+  }, [collapsed]);
 
   return (
     <ProtectedRoute>

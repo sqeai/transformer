@@ -14,10 +14,10 @@ import {
 import { useSchemaStore } from "@/lib/schema-store";
 import { flattenFields } from "@/lib/schema-store";
 import { parseExcelToRows } from "@/lib/parse-excel";
-import { parseCsvToRows, extractCsvPreview } from "@/lib/parse-csv";
-import { extractExcelGrid, getExcelSheetNames } from "@/lib/parse-excel-preview";
+import { parseCsvToRows, extractCsvPreviewTopBottom } from "@/lib/parse-csv";
+import { extractExcelGridTopBottom, getExcelSheetNames } from "@/lib/parse-excel-preview";
 import type { RawDataAnalysis } from "@/lib/llm-schema";
-import DataPreviewTable, { type DataBoundary } from "@/components/DataPreviewTable";
+import DataPreviewTable, { type DataBoundary, type IndexedRow } from "@/components/DataPreviewTable";
 import {
   Upload,
   FileSpreadsheet,
@@ -31,8 +31,12 @@ import {
 
 type Step = "idle" | "loading_preview" | "analyzing" | "preview" | "parsing";
 
+const PREVIEW_TOP_N = 10;
+const PREVIEW_BOTTOM_N = 10;
+const PREVIEW_MAX_COLS = 500;
+
 interface PreviewData {
-  grid: string[][];
+  rows: IndexedRow[];
   totalRows: number;
   totalColumns: number;
   fileName: string;
@@ -105,7 +109,9 @@ export default function UploadPage() {
         if (isExcel) {
           const buffer = await file.arrayBuffer();
           const sheetNames = await getExcelSheetNames(buffer);
-          const { grid, totalRows, totalColumns } = await extractExcelGrid(buffer, 50, 60, 0);
+          const { rows: previewRows, totalRows, totalColumns } = await extractExcelGridTopBottom(
+            buffer, PREVIEW_TOP_N, PREVIEW_BOTTOM_N, PREVIEW_MAX_COLS, 0,
+          );
 
           let llmBoundary: RawDataAnalysis | undefined;
           setStep("analyzing");
@@ -136,7 +142,7 @@ export default function UploadPage() {
 
           setBoundary(defaultBoundary);
           setPreview({
-            grid,
+            rows: previewRows,
             totalRows,
             totalColumns,
             fileName: file.name,
@@ -147,7 +153,9 @@ export default function UploadPage() {
           });
         } else {
           const csvText = await file.text();
-          const { grid, totalRows, totalColumns } = extractCsvPreview(csvText, 50);
+          const { rows: previewRows, totalRows, totalColumns } = extractCsvPreviewTopBottom(
+            csvText, PREVIEW_TOP_N, PREVIEW_BOTTOM_N,
+          );
 
           const defaultBoundary: DataBoundary = {
             headerRowIndex: 0,
@@ -159,7 +167,7 @@ export default function UploadPage() {
 
           setBoundary(defaultBoundary);
           setPreview({
-            grid,
+            rows: previewRows,
             totalRows,
             totalColumns,
             fileName: file.name,
@@ -223,10 +231,11 @@ export default function UploadPage() {
     async (sheetIndex: number) => {
       if (!preview?.isExcel || !preview.excelBuffer || preview.activeSheetIndex === sheetIndex)
         return;
-      const { grid, totalRows, totalColumns } = await extractExcelGrid(
+      const { rows: previewRows, totalRows, totalColumns } = await extractExcelGridTopBottom(
         preview.excelBuffer,
-        50,
-        60,
+        PREVIEW_TOP_N,
+        PREVIEW_BOTTOM_N,
+        PREVIEW_MAX_COLS,
         sheetIndex,
       );
       const defaultBoundary: DataBoundary = {
@@ -241,7 +250,7 @@ export default function UploadPage() {
         prev
           ? {
               ...prev,
-              grid,
+              rows: previewRows,
               totalRows,
               totalColumns,
               activeSheetIndex: sheetIndex,
@@ -249,6 +258,46 @@ export default function UploadPage() {
           : prev,
       );
       if (sheetIndex !== 0) setAnalysis(null);
+    },
+    [preview],
+  );
+
+  const handleBoundaryChange = useCallback(
+    (newBoundary: DataBoundary) => {
+      setBoundary(newBoundary);
+
+      if (!preview) return;
+
+      const bnd = {
+        headerRowIndex: newBoundary.headerRowIndex,
+        dataStartRowIndex: newBoundary.dataStartRowIndex,
+        dataEndRowIndex: newBoundary.dataEndRowIndex,
+      };
+
+      const refresh = async () => {
+        try {
+          if (preview.isExcel && preview.excelBuffer) {
+            const { rows: newRows, totalRows, totalColumns } = await extractExcelGridTopBottom(
+              preview.excelBuffer,
+              PREVIEW_TOP_N,
+              PREVIEW_BOTTOM_N,
+              PREVIEW_MAX_COLS,
+              preview.activeSheetIndex ?? 0,
+              bnd,
+            );
+            setPreview((prev) => prev ? { ...prev, rows: newRows, totalRows, totalColumns } : prev);
+          } else if (preview.csvText) {
+            const { rows: newRows, totalRows, totalColumns } = extractCsvPreviewTopBottom(
+              preview.csvText, PREVIEW_TOP_N, PREVIEW_BOTTOM_N, bnd,
+            );
+            setPreview((prev) => prev ? { ...prev, rows: newRows, totalRows, totalColumns } : prev);
+          }
+        } catch {
+          // Keep existing preview on error
+        }
+      };
+
+      refresh();
     },
     [preview],
   );
@@ -346,6 +395,65 @@ export default function UploadPage() {
           </Card>
         )}
 
+        {step === "preview" && analysis && preview && (
+          <Card className="border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/20">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Info className="h-4 w-4 text-blue-500" />
+                AI Analysis Result
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 text-sm text-muted-foreground">
+              <p>
+                Header detected at row {analysis.headerRowIndex + 1}, data rows{" "}
+                {analysis.dataStartRowIndex + 1}–{analysis.dataEndRowIndex + 1}
+              </p>
+              <p>
+                Columns {analysis.startColumn + 1}–{analysis.endColumn + 1} ({analysis.endColumn - analysis.startColumn + 1} of{" "}
+                {preview!.totalColumns} columns)
+              </p>
+              {analysis.notes && <p className="italic">{analysis.notes}</p>}
+            </CardContent>
+          </Card>
+        )}
+
+        {step === "preview" && preview && boundary && (
+          <>
+            {preview.isExcel && preview.sheetNames && preview.sheetNames.length > 1 && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Sheets</p>
+                <div className="flex flex-wrap gap-1 border-b border-border pb-0">
+                  {preview.sheetNames.map((name, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => switchToSheet(index)}
+                      className={`rounded-t-md px-3 py-2 text-sm font-medium transition-colors ${
+                        (preview.activeSheetIndex ?? 0) === index
+                          ? "border border-b-0 border-border bg-background text-foreground -mb-px"
+                          : "border border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                      }`}
+                    >
+                      {name || `Sheet ${index + 1}`}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Only the active sheet will be processed. Click a sheet to switch.
+                </p>
+              </div>
+            )}
+
+            <DataPreviewTable
+              rows={preview.rows}
+              totalRows={preview.totalRows}
+              totalColumns={preview.totalColumns}
+              initialBoundary={boundary}
+              onBoundaryChange={handleBoundaryChange}
+            />
+          </>
+        )}
+
         <Card
           className={`border-2 border-dashed transition-colors ${
             dragging ? "border-primary bg-primary/5" : "border-muted-foreground/25"
@@ -408,65 +516,6 @@ export default function UploadPage() {
             )}
           </CardContent>
         </Card>
-
-        {step === "preview" && analysis && (
-          <Card className="border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/20">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Info className="h-4 w-4 text-blue-500" />
-                AI Analysis Result
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1 text-sm text-muted-foreground">
-              <p>
-                Header detected at row {analysis.headerRowIndex + 1}, data rows{" "}
-                {analysis.dataStartRowIndex + 1}–{analysis.dataEndRowIndex + 1}
-              </p>
-              <p>
-                Columns {analysis.startColumn + 1}–{analysis.endColumn + 1} ({analysis.endColumn - analysis.startColumn + 1} of{" "}
-                {preview!.totalColumns} columns)
-              </p>
-              {analysis.notes && <p className="italic">{analysis.notes}</p>}
-            </CardContent>
-          </Card>
-        )}
-
-        {step === "preview" && preview && boundary && (
-          <>
-            {preview.isExcel && preview.sheetNames && preview.sheetNames.length > 1 && (
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-muted-foreground">Sheets</p>
-                <div className="flex flex-wrap gap-1 border-b border-border pb-0">
-                  {preview.sheetNames.map((name, index) => (
-                    <button
-                      key={index}
-                      type="button"
-                      onClick={() => switchToSheet(index)}
-                      className={`rounded-t-md px-3 py-2 text-sm font-medium transition-colors ${
-                        (preview.activeSheetIndex ?? 0) === index
-                          ? "border border-b-0 border-border bg-background text-foreground -mb-px"
-                          : "border border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                      }`}
-                    >
-                      {name || `Sheet ${index + 1}`}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[10px] text-muted-foreground">
-                  Only the active sheet will be processed. Click a sheet to switch.
-                </p>
-              </div>
-            )}
-
-            <DataPreviewTable
-              grid={preview.grid}
-              totalRows={preview.totalRows}
-              totalColumns={preview.totalColumns}
-              initialBoundary={boundary}
-              onBoundaryChange={setBoundary}
-            />
-          </>
-        )}
 
         {step === "idle" && targetPaths.length > 0 && (
           <Card>
