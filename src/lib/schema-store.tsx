@@ -11,6 +11,7 @@ import {
 } from "react";
 import type {
   ColumnMapping,
+  DefaultValues,
   FinalSchema,
   PivotConfig,
   RawColumn,
@@ -40,6 +41,7 @@ interface WorkflowState {
   rawRows: Record<string, unknown>[];
   columnMappings: ColumnMapping[];
   pivotConfig: PivotConfig;
+  defaultValues: DefaultValues;
   /** Persisted upload page state so we can restore when navigating back to /upload */
   uploadState: {
     schemaId: string;
@@ -61,6 +63,7 @@ interface SchemaStoreContextType {
   setRawData: (columns: RawColumn[], rows: Record<string, unknown>[]) => void;
   setColumnMappings: (mappings: ColumnMapping[]) => void;
   setPivotConfig: (config: PivotConfig) => void;
+  setDefaultValues: (values: DefaultValues) => void;
   resetWorkflow: () => void;
   setUploadState: (state: WorkflowState["uploadState"]) => void;
 }
@@ -71,6 +74,7 @@ const defaultWorkflow: WorkflowState = {
   rawRows: [],
   columnMappings: [],
   pivotConfig: { enabled: false, groupByColumns: [] },
+  defaultValues: {},
   uploadState: null,
 };
 
@@ -140,6 +144,10 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
     setWorkflow((w) => ({ ...w, pivotConfig }));
   }, []);
 
+  const setDefaultValues = useCallback((defaultValues: DefaultValues) => {
+    setWorkflow((w) => ({ ...w, defaultValues }));
+  }, []);
+
   const resetWorkflow = useCallback(() => {
     setWorkflow(defaultWorkflow);
   }, []);
@@ -163,6 +171,7 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
       setRawData,
       setColumnMappings,
       setPivotConfig,
+      setDefaultValues,
       resetWorkflow,
       setUploadState,
     }),
@@ -177,6 +186,7 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
       setRawData,
       setColumnMappings,
       setPivotConfig,
+      setDefaultValues,
       resetWorkflow,
       setUploadState,
     ],

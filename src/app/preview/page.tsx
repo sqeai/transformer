@@ -38,19 +38,22 @@ const AGG_LABELS: Record<AggregationFunction, string> = {
 export default function PreviewPage() {
   const router = useRouter();
   const { workflow, getSchema } = useSchemaStore();
-  const { rawRows, columnMappings, currentSchemaId, pivotConfig } = workflow;
+  const { rawRows, columnMappings, currentSchemaId, pivotConfig, defaultValues } = workflow;
   const schema = currentSchemaId ? getSchema(currentSchemaId) : null;
 
   const previewRows = useMemo(
-    () => applyMappings(rawRows, columnMappings, pivotConfig),
-    [rawRows, columnMappings, pivotConfig],
+    () => applyMappings(rawRows, columnMappings, pivotConfig, defaultValues),
+    [rawRows, columnMappings, pivotConfig, defaultValues],
   );
 
   const previewColumns = useMemo(() => {
     const cols = new Set<string>();
     columnMappings.forEach((m) => cols.add(m.targetPath));
+    for (const path of Object.keys(defaultValues)) {
+      cols.add(path);
+    }
     return Array.from(cols).sort();
-  }, [columnMappings]);
+  }, [columnMappings, defaultValues]);
 
   if (!schema || rawRows.length === 0) {
     return (

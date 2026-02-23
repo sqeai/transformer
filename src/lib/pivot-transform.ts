@@ -1,4 +1,4 @@
-import type { AggregationFunction, ColumnMapping, PivotConfig } from "./types";
+import type { AggregationFunction, ColumnMapping, DefaultValues, PivotConfig } from "./types";
 
 function setByPath(
   obj: Record<string, unknown>,
@@ -79,17 +79,16 @@ export function applyMappings(
   rawRows: Record<string, unknown>[],
   columnMappings: ColumnMapping[],
   pivotConfig: PivotConfig,
+  defaultValues: DefaultValues = {},
 ): Record<string, unknown>[] {
   if (!pivotConfig.enabled || pivotConfig.groupByColumns.length === 0) {
     return rawRows.map((raw) => {
       const out: Record<string, unknown> = {};
       for (const m of columnMappings) {
-        const val = raw[m.rawColumn];
-        setByPath(
-          out,
-          m.targetPath,
-          (val == null || val === "") && m.defaultValue != null ? m.defaultValue : val,
-        );
+        setByPath(out, m.targetPath, raw[m.rawColumn]);
+      }
+      for (const [path, value] of Object.entries(defaultValues)) {
+        setByPath(out, path, value);
       }
       return out;
     });
@@ -111,20 +110,15 @@ export function applyMappings(
     const out: Record<string, unknown> = {};
     for (const m of columnMappings) {
       if (groupBySet.has(m.rawColumn)) {
-        const val = rows[0]![m.rawColumn];
-        setByPath(
-          out,
-          m.targetPath,
-          (val == null || val === "") && m.defaultValue != null ? m.defaultValue : val,
-        );
+        setByPath(out, m.targetPath, rows[0]![m.rawColumn]);
       } else {
-        const values = rows.map((r) => {
-          const v = r[m.rawColumn];
-          return (v == null || v === "") && m.defaultValue != null ? m.defaultValue : v;
-        });
+        const values = rows.map((r) => r[m.rawColumn]);
         const fn = m.aggregation ?? "sum";
         setByPath(out, m.targetPath, aggregate(values, fn));
       }
+    }
+    for (const [path, value] of Object.entries(defaultValues)) {
+      setByPath(out, path, value);
     }
     result.push(out);
   }

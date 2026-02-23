@@ -29,8 +29,10 @@ export interface ColumnMapping {
   rawColumn: string;
   targetPath: string; // final schema path, e.g. "customer.name"
   aggregation?: AggregationFunction;
-  defaultValue?: string;
 }
+
+/** Static default values for target fields that have no mapping (no edge). Keyed by target path. */
+export type DefaultValues = Record<string, string>;
 
 export interface PivotConfig {
   enabled: boolean;

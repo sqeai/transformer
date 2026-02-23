@@ -76,11 +76,9 @@ export default function DataPreviewTable({
           h = Math.max(0, Math.min(idx, maxRowIdx));
           setHeaderRow(h);
           setDraftHeaderRow(String(h + 1));
-          if (h >= ds) {
-            ds = Math.min(h + 1, maxRowIdx);
-            setDataStart(ds);
-            setDraftDataStart(String(ds + 1));
-          }
+          ds = Math.min(h + 1, maxRowIdx);
+          setDataStart(ds);
+          setDraftDataStart(String(ds + 1));
           break;
         }
         case "dataStart": {

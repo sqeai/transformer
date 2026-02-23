@@ -110,11 +110,10 @@ export default function PivotConfigPanel({
     });
     if (!next) {
       onColumnMappingsChange(
-        columnMappings.map((m) => {
-          const cleaned: ColumnMapping = { rawColumn: m.rawColumn, targetPath: m.targetPath };
-          if (m.defaultValue != null) cleaned.defaultValue = m.defaultValue;
-          return cleaned;
-        }),
+        columnMappings.map((m) => ({
+          rawColumn: m.rawColumn,
+          targetPath: m.targetPath,
+        })),
       );
     } else if (pivotConfig.groupByColumns.length > 0) {
       ensureAggregations(new Set(pivotConfig.groupByColumns));

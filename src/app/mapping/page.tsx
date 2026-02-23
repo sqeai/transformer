@@ -8,7 +8,7 @@ import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
 import { useSchemaStore } from "@/lib/schema-store";
 import { flattenFields } from "@/lib/schema-store";
-import type { ColumnMapping, PivotConfig } from "@/lib/types";
+import type { ColumnMapping, DefaultValues, PivotConfig } from "@/lib/types";
 import { ArrowRight, ArrowLeft, Sparkles, Loader2, AlertTriangle } from "lucide-react";
 import PivotConfigPanel from "@/components/PivotConfigPanel";
 import DefaultValuesPanel from "@/components/DefaultValuesPanel";
@@ -74,13 +74,18 @@ const nodeTypes = { mapping: MappingNode };
 
 export default function MappingPage() {
   const router = useRouter();
-  const { workflow, getSchema, setColumnMappings, setPivotConfig } = useSchemaStore();
-  const { currentSchemaId, rawColumns, rawRows, pivotConfig } = workflow;
+  const { workflow, getSchema, setColumnMappings, setPivotConfig, setDefaultValues } = useSchemaStore();
+  const { currentSchemaId, rawColumns, rawRows, pivotConfig, defaultValues } = workflow;
   const schema = currentSchemaId ? getSchema(currentSchemaId) : null;
   const targetPaths = useMemo(
     () => (schema ? flattenFields(schema.fields).filter((f) => !f.children?.length).map((f) => f.path) : []),
     [schema],
   );
+
+  const unmappedTargetPaths = useMemo(() => {
+    const mappedPaths = new Set(workflow.columnMappings.map((m) => m.targetPath));
+    return targetPaths.filter((p) => !mappedPaths.has(p));
+  }, [targetPaths, workflow.columnMappings]);
 
   const [autoMapping, setAutoMapping] = useState(false);
   const autoMapDone = useRef(false);
@@ -208,12 +213,9 @@ export default function MappingPage() {
   }, [edgesFromMappings, setEdges]);
 
   const mappingExtrasLookup = useMemo(() => {
-    const map = new Map<string, Pick<ColumnMapping, "aggregation" | "defaultValue">>();
+    const map = new Map<string, Pick<ColumnMapping, "aggregation">>();
     for (const m of workflow.columnMappings) {
-      const extras: Pick<ColumnMapping, "aggregation" | "defaultValue"> = {};
-      if (m.aggregation) extras.aggregation = m.aggregation;
-      if (m.defaultValue != null) extras.defaultValue = m.defaultValue;
-      if (Object.keys(extras).length > 0) map.set(m.rawColumn, extras);
+      if (m.aggregation) map.set(m.rawColumn, { aggregation: m.aggregation });
     }
     return map;
   }, [workflow.columnMappings]);
@@ -279,9 +281,10 @@ export default function MappingPage() {
         body: JSON.stringify({ rawColumns, targetPaths }),
       });
       if (!res.ok) return;
-      const { mappings, pivot } = (await res.json()) as {
+      const { mappings, pivot, defaultValues: dv } = (await res.json()) as {
         mappings: ColumnMapping[];
         pivot?: PivotConfig;
+        defaultValues?: DefaultValues;
       };
       if (mappings.length > 0) {
         setColumnMappings(mappings);
@@ -299,6 +302,9 @@ export default function MappingPage() {
       }
       if (pivot) {
         setPivotConfig(pivot);
+      }
+      if (dv && Object.keys(dv).length > 0) {
+        setDefaultValues(dv);
       }
     } catch {
       // auto-map failed silently — user can still map manually
@@ -406,8 +412,9 @@ export default function MappingPage() {
 
           <div className="w-80 shrink-0 overflow-y-auto space-y-3">
             <DefaultValuesPanel
-              columnMappings={workflow.columnMappings}
-              onColumnMappingsChange={setColumnMappings}
+              unmappedTargetPaths={unmappedTargetPaths}
+              defaultValues={defaultValues}
+              onDefaultValuesChange={setDefaultValues}
             />
             <PivotConfigPanel
               rawColumns={rawColumns}

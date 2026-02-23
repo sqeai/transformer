@@ -38,20 +38,23 @@ const EXPORT_FORMATS: ExportFormat[] = [
 export default function ExportPage() {
   const router = useRouter();
   const { workflow, getSchema } = useSchemaStore();
-  const { rawRows, columnMappings, currentSchemaId, pivotConfig } = workflow;
+  const { rawRows, columnMappings, currentSchemaId, pivotConfig, defaultValues } = workflow;
   const schema = currentSchemaId ? getSchema(currentSchemaId) : null;
   const [exporting, setExporting] = useState<string | null>(null);
 
   const mappedRows = useMemo(
-    () => applyMappings(rawRows, columnMappings, pivotConfig),
-    [rawRows, columnMappings, pivotConfig],
+    () => applyMappings(rawRows, columnMappings, pivotConfig, defaultValues),
+    [rawRows, columnMappings, pivotConfig, defaultValues],
   );
 
   const columns = useMemo(() => {
     const cols = new Set<string>();
     columnMappings.forEach((m) => cols.add(m.targetPath));
+    for (const path of Object.keys(defaultValues)) {
+      cols.add(path);
+    }
     return Array.from(cols).sort();
-  }, [columnMappings]);
+  }, [columnMappings, defaultValues]);
 
   const handleExport = async (formatId: string) => {
     if (!schema || mappedRows.length === 0) return;

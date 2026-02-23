@@ -1,7 +1,7 @@
 import { ChatAnthropic } from "@langchain/anthropic";
 import { HumanMessage, type BaseMessage } from "@langchain/core/messages";
 import { createAgent } from "langchain";
-import type { SchemaField, ColumnMapping, PivotConfig, AggregationFunction } from "./types";
+import type { SchemaField, ColumnMapping, DefaultValues, PivotConfig, AggregationFunction } from "./types";
 import {
   extractWorkbookPreview,
   formatPreviewAsText,
@@ -71,11 +71,11 @@ Rules for column mapping:
 5. Each source column should map to at most one target path.
 
 Rules for default values:
-10. For each mapping, analyse the raw column name and the target field semantics to determine if a sensible default value should be applied when the raw data cell is empty or missing.
-11. Default values are used as fallback — they fill in when the raw data has blank/null cells for that column.
-12. Common examples: a status field might default to "active", a currency field might default to "IDR" or "USD", a country field might default to the most likely country based on the data context, a boolean might default to "false", a numeric amount might default to "0".
-13. Only suggest a default when it is clearly reasonable. For most columns (names, IDs, descriptions) do NOT set a default — leave it as null.
-14. Use the raw column names and target path names as context clues for what the default should be.
+10. Default values apply ONLY to target schema fields that have NO mapping (no raw column maps to them). For mapped fields, do NOT suggest a default — set defaultValue to null.
+11. For unmapped target fields, analyse the field name/path to determine if a sensible static default value should be applied to every output row.
+12. Common examples: a status field might default to "active", a currency field might default to "IDR" or "USD", a country field might default to the most likely country based on the data context, a boolean might default to "false".
+13. Only suggest a default when it is clearly reasonable. For most unmapped fields (names, IDs, descriptions) do NOT set a default — leave it as null.
+14. For target fields that have a mapping (a rawColumn), always set defaultValue to null.
 
 Rules for pivot & aggregation:
 6. Analyse whether the data likely has repeated key columns (e.g. customer ID, account code) with multiple detail rows that should be rolled up. If so, recommend enabling pivot.
@@ -134,6 +134,7 @@ export interface AutoMapResult {
 export interface AutoMapResponse {
   mappings: ColumnMapping[];
   pivot: PivotConfig;
+  defaultValues: DefaultValues;
 }
 
 function buildFieldTree(flat: LlmSchemaField[]): SchemaField[] {
@@ -309,16 +310,26 @@ export async function autoMapColumnsWithLLM(
   const mappings: ColumnMapping[] = rawMappings
     .filter((m) => m.confidence >= 0.7)
     .filter((m) => rawColumns.includes(m.rawColumn) && targetPaths.includes(m.targetPath))
-    .map(({ rawColumn, targetPath, aggregation, defaultValue }) => {
+    .map(({ rawColumn, targetPath, aggregation }) => {
       const mapping: ColumnMapping = { rawColumn, targetPath };
       if (aggregation && VALID_AGGREGATIONS.has(aggregation) && !groupBySet.has(rawColumn)) {
         mapping.aggregation = aggregation as AggregationFunction;
       }
-      if (defaultValue != null && String(defaultValue).trim() !== "") {
-        mapping.defaultValue = String(defaultValue);
-      }
       return mapping;
     });
+
+  const mappedTargetPaths = new Set(mappings.map((m) => m.targetPath));
+  const defaultValues: DefaultValues = {};
+  for (const m of rawMappings) {
+    if (
+      m.defaultValue != null &&
+      String(m.defaultValue).trim() !== "" &&
+      targetPaths.includes(m.targetPath) &&
+      !mappedTargetPaths.has(m.targetPath)
+    ) {
+      defaultValues[m.targetPath] = String(m.defaultValue);
+    }
+  }
 
   const validGroupByColumns = (parsed.pivot?.groupByColumns ?? []).filter(
     (col) => mappings.some((m) => m.rawColumn === col),
@@ -329,5 +340,5 @@ export async function autoMapColumnsWithLLM(
     groupByColumns: validGroupByColumns,
   };
 
-  return { mappings, pivot };
+  return { mappings, pivot, defaultValues };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useEffect, useState } from "react";
+import { useCallback, useRef, useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import {
   Card,
@@ -10,30 +10,22 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import type { ColumnMapping } from "@/lib/types";
-import { ShieldCheck, X, Sparkles } from "lucide-react";
+import type { DefaultValues } from "@/lib/types";
+import { ShieldCheck, X } from "lucide-react";
 
 interface DefaultValuesPanelProps {
-  columnMappings: ColumnMapping[];
-  onColumnMappingsChange: (mappings: ColumnMapping[]) => void;
+  unmappedTargetPaths: string[];
+  defaultValues: DefaultValues;
+  onDefaultValuesChange: (values: DefaultValues) => void;
 }
 
 export default function DefaultValuesPanel({
-  columnMappings,
-  onColumnMappingsChange,
+  unmappedTargetPaths,
+  defaultValues,
+  onDefaultValuesChange,
 }: DefaultValuesPanelProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const debounceRefs = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-
-  const mappingsWithDefaults = useMemo(
-    () => columnMappings.filter((m) => m.defaultValue != null && m.defaultValue !== ""),
-    [columnMappings],
-  );
-
-  const mappingsWithoutDefaults = useMemo(
-    () => columnMappings.filter((m) => m.defaultValue == null || m.defaultValue === ""),
-    [columnMappings],
-  );
 
   useEffect(() => {
     return () => {
@@ -42,27 +34,27 @@ export default function DefaultValuesPanel({
   }, []);
 
   const commitDefault = useCallback(
-    (rawColumn: string, value: string) => {
-      onColumnMappingsChange(
-        columnMappings.map((m) =>
-          m.rawColumn === rawColumn
-            ? { ...m, defaultValue: value || undefined }
-            : m,
-        ),
-      );
+    (targetPath: string, value: string) => {
+      const next = { ...defaultValues };
+      if (value) {
+        next[targetPath] = value;
+      } else {
+        delete next[targetPath];
+      }
+      onDefaultValuesChange(next);
     },
-    [columnMappings, onColumnMappingsChange],
+    [defaultValues, onDefaultValuesChange],
   );
 
   const handleChange = useCallback(
-    (rawColumn: string, value: string) => {
-      setDrafts((d) => ({ ...d, [rawColumn]: value }));
-      clearTimeout(debounceRefs.current[rawColumn]);
-      debounceRefs.current[rawColumn] = setTimeout(() => {
-        commitDefault(rawColumn, value);
+    (targetPath: string, value: string) => {
+      setDrafts((d) => ({ ...d, [targetPath]: value }));
+      clearTimeout(debounceRefs.current[targetPath]);
+      debounceRefs.current[targetPath] = setTimeout(() => {
+        commitDefault(targetPath, value);
         setDrafts((d) => {
           const next = { ...d };
-          delete next[rawColumn];
+          delete next[targetPath];
           return next;
         });
       }, 400);
@@ -71,25 +63,26 @@ export default function DefaultValuesPanel({
   );
 
   const clearDefault = useCallback(
-    (rawColumn: string) => {
+    (targetPath: string) => {
       setDrafts((d) => {
         const next = { ...d };
-        delete next[rawColumn];
+        delete next[targetPath];
         return next;
       });
-      commitDefault(rawColumn, "");
+      commitDefault(targetPath, "");
     },
     [commitDefault],
   );
 
-  const getDisplayValue = (m: ColumnMapping) => {
-    if (m.rawColumn in drafts) return drafts[m.rawColumn];
-    return m.defaultValue ?? "";
+  const getDisplayValue = (targetPath: string) => {
+    if (targetPath in drafts) return drafts[targetPath];
+    return defaultValues[targetPath] ?? "";
   };
 
-  if (columnMappings.length === 0) return null;
+  if (unmappedTargetPaths.length === 0) return null;
 
-  const hasAnyDefaults = mappingsWithDefaults.length > 0;
+  const withValues = unmappedTargetPaths.filter((p) => defaultValues[p]);
+  const withoutValues = unmappedTargetPaths.filter((p) => !defaultValues[p]);
 
   return (
     <Card className="border-dashed">
@@ -99,42 +92,33 @@ export default function DefaultValuesPanel({
           <CardTitle className="text-base">Default Values</CardTitle>
         </div>
         <CardDescription>
-          Fallback values used when a raw data cell is empty or missing.
-          {hasAnyDefaults && (
-            <span className="flex items-center gap-1 mt-1 text-primary">
-              <Sparkles className="h-3 w-3" />
-              AI-suggested defaults are pre-filled below.
-            </span>
-          )}
+          Set static values for output fields that have no mapped source column.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {mappingsWithDefaults.length > 0 && (
+        {withValues.length > 0 && (
           <div className="space-y-1.5">
-            {mappingsWithDefaults.map((m) => (
+            {withValues.map((path) => (
               <div
-                key={m.rawColumn}
+                key={path}
                 className="rounded-md border bg-muted/30 px-3 py-2 space-y-1.5"
               >
                 <div className="flex items-center justify-between">
-                  <div className="text-sm break-words min-w-0">
-                    <span className="font-medium">{m.rawColumn}</span>
-                    <span className="text-muted-foreground">
-                      {" "}&rarr; {m.targetPath}
-                    </span>
-                  </div>
+                  <span className="text-sm font-medium break-words min-w-0">
+                    {path}
+                  </span>
                   <Button
                     variant="ghost"
                     size="icon"
                     className="h-5 w-5 shrink-0"
-                    onClick={() => clearDefault(m.rawColumn)}
+                    onClick={() => clearDefault(path)}
                   >
                     <X className="h-3 w-3" />
                   </Button>
                 </div>
                 <Input
-                  value={getDisplayValue(m)}
-                  onChange={(e) => handleChange(m.rawColumn, e.target.value)}
+                  value={getDisplayValue(path)}
+                  onChange={(e) => handleChange(path, e.target.value)}
                   placeholder="No default"
                   className="h-7 text-xs"
                 />
@@ -143,27 +127,24 @@ export default function DefaultValuesPanel({
           </div>
         )}
 
-        {mappingsWithoutDefaults.length > 0 && (
+        {withoutValues.length > 0 && (
           <div className="space-y-1.5">
-            {hasAnyDefaults && (
+            {withValues.length > 0 && (
               <label className="text-xs font-medium text-muted-foreground">
                 No default set
               </label>
             )}
-            {mappingsWithoutDefaults.map((m) => (
+            {withoutValues.map((path) => (
               <div
-                key={m.rawColumn}
+                key={path}
                 className="rounded-md border bg-muted/10 px-3 py-2 space-y-1.5"
               >
-                <div className="text-sm break-words">
-                  <span className="font-medium">{m.rawColumn}</span>
-                  <span className="text-muted-foreground">
-                    {" "}&rarr; {m.targetPath}
-                  </span>
-                </div>
+                <span className="text-sm font-medium break-words">
+                  {path}
+                </span>
                 <Input
-                  value={getDisplayValue(m)}
-                  onChange={(e) => handleChange(m.rawColumn, e.target.value)}
+                  value={getDisplayValue(path)}
+                  onChange={(e) => handleChange(path, e.target.value)}
                   placeholder="No default"
                   className="h-7 text-xs"
                 />
