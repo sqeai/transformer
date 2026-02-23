@@ -4,6 +4,8 @@ export interface SchemaField {
   path: string; // e.g. "customer.name" for nesting
   level: number; // 0 = top level
   order: number;
+  description?: string;
+  defaultValue?: string;
   children?: SchemaField[];
 }
 

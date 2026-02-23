@@ -19,8 +19,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useSchemaStore } from "@/lib/schema-store";
-import { FileUp, Plus, Pencil, Trash2, Loader2 } from "lucide-react";
+import { useSchemaStore, flattenFields } from "@/lib/schema-store";
+import { FileUp, Plus, Trash2, Loader2, ChevronRight } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,9 +31,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import type { FinalSchema } from "@/lib/types";
 
 export default function SchemasPage() {
-  const { schemas, deleteSchema, addSchema, setCurrentSchema } = useSchemaStore();
+  const { schemas, deleteSchema, addSchema } = useSchemaStore();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -54,7 +55,7 @@ export default function SchemasPage() {
         throw new Error(data.error || "Upload failed");
       }
       const { fields } = await res.json();
-      const schema = {
+      const schema: FinalSchema = {
         id: crypto.randomUUID(),
         name: file.name.replace(/\.xlsx?$/i, "") || "New Schema",
         fields: fields.map((f: { id: string; name: string; path: string; level: number; order: number }) => ({
@@ -64,7 +65,7 @@ export default function SchemasPage() {
         createdAt: new Date().toISOString(),
       };
       addSchema(schema);
-      router.push(`/schemas/${schema.id}/edit`);
+      router.push(`/schemas/${schema.id}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -80,7 +81,7 @@ export default function SchemasPage() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Final Schemas</h1>
             <p className="text-muted-foreground">
-              Upload an Excel sheet to define your target structure. You can reorder, rename, and nest fields.
+              Define and manage your target data structures. Click a schema to configure fields, descriptions, and defaults.
             </p>
           </div>
           <div className="flex gap-2">
@@ -97,7 +98,7 @@ export default function SchemasPage() {
               ) : (
                 <FileUp className="mr-2 h-4 w-4" />
               )}
-              Upload Excel schema
+              Upload Excel Schema
             </Button>
           </div>
         </div>
@@ -107,7 +108,7 @@ export default function SchemasPage() {
             <CardHeader>
               <CardTitle>No schemas yet</CardTitle>
               <CardDescription>
-                Upload an Excel file with a header row. The placeholder agent will parse it into a final mapping. You can then edit order, names, and nesting.
+                Upload an Excel file with a header row. The AI agent will parse it into a final schema that you can fully configure.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -120,8 +121,8 @@ export default function SchemasPage() {
         ) : (
           <Card>
             <CardHeader>
-              <CardTitle>Your schemas</CardTitle>
-              <CardDescription>Click Edit to reorder, rename, or nest fields.</CardDescription>
+              <CardTitle>Your Schemas</CardTitle>
+              <CardDescription>Click a schema to view and configure its fields.</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
@@ -129,47 +130,54 @@ export default function SchemasPage() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Fields</TableHead>
-                    <TableHead className="w-[120px]">Actions</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="w-[100px]">Actions</TableHead>
+                    <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {schemas.map((s) => (
-                    <TableRow key={s.id}>
-                      <TableCell className="font-medium">{s.name}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {s.fields.length} field{s.fields.length !== 1 ? "s" : ""}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => router.push(`/schemas/${s.id}/edit`)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setCurrentSchema(s.id);
-                              router.push("/upload");
-                            }}
-                          >
-                            Use
-                          </Button>
+                  {schemas.map((s) => {
+                    const fieldCount = flattenFields(s.fields).filter(
+                      (f) => !f.children?.length,
+                    ).length;
+                    const createdDate = new Date(s.createdAt).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    });
+
+                    return (
+                      <TableRow
+                        key={s.id}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => router.push(`/schemas/${s.id}`)}
+                      >
+                        <TableCell className="font-medium">{s.name}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {fieldCount} field{fieldCount !== 1 ? "s" : ""}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-sm">
+                          {createdDate}
+                        </TableCell>
+                        <TableCell>
                           <Button
                             variant="ghost"
                             size="sm"
                             className="text-destructive hover:text-destructive"
-                            onClick={() => setDeleteId(s.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteId(s.id);
+                            }}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        </TableCell>
+                        <TableCell>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </CardContent>
