@@ -22,24 +22,35 @@ const RIGHT_X = LEFT_X + NODE_WIDTH + 160;
 interface MappingNodeData {
   label: string;
   internalId: string;
+  isTarget?: boolean;
   isDuplicate?: boolean;
   duplicateIndex?: number;
   [key: string]: unknown;
 }
 
 const MappingNode = memo(({ data }: NodeProps) => {
-  const { label, internalId, isDuplicate, duplicateIndex } = data as MappingNodeData;
+  const { label, internalId, isTarget, isDuplicate, duplicateIndex } = data as MappingNodeData;
   const lines = label.split("\n").map((l: string) => l.trim()).filter(Boolean);
   const isMultiLine = lines.length >= 2;
 
-  const bgClass = isDuplicate
+  const bgClass = isTarget
+    ? "border-border/60 bg-white dark:bg-zinc-900"
+    : isDuplicate
     ? "border-amber-400 bg-amber-50 dark:bg-amber-950/30"
     : "border-border/60 bg-white dark:bg-zinc-900";
 
   return (
     <div
-      className={`rounded-md border px-3 py-2 shadow-sm ${bgClass}`}
-      style={{ minWidth: NODE_WIDTH }}
+      className={`rounded-md border px-3 py-2 shadow-sm ${bgClass} relative overflow-hidden`}
+      style={{
+        minWidth: NODE_WIDTH,
+        ...(isTarget
+          ? {
+              background:
+                "linear-gradient(135deg, rgba(255,99,71,0.06), rgba(255,165,0,0.06), rgba(255,215,0,0.06), rgba(154,205,50,0.06), rgba(100,149,237,0.06), rgba(186,85,211,0.06))",
+            }
+          : {}),
+      }}
     >
       <Handle type="target" position={Position.Left} />
       <div className="flex items-start justify-between gap-1.5">
@@ -153,6 +164,7 @@ export default function MappingPage() {
         data: {
           label: path,
           internalId: `T${i}`,
+          isTarget: true,
           isDuplicate: targetDuplicates[i].isDuplicate,
           duplicateIndex: targetDuplicates[i].duplicateIndex,
         } satisfies MappingNodeData,
@@ -200,8 +212,37 @@ export default function MappingPage() {
     return result;
   }, [workflow.columnMappings, rawColumns, targetPathToNodeId]);
 
+  const edgesFromUnpivot: Edge[] = useMemo(() => {
+    if (!verticalPivotConfig.enabled || verticalPivotConfig.outputTargetPaths.length === 0)
+      return [];
+    const result: Edge[] = [];
+    verticalPivotConfig.columns.forEach((col) => {
+      const rawIdx = rawColumns.indexOf(col.rawColumn);
+      if (rawIdx === -1) return;
+      verticalPivotConfig.outputTargetPaths.forEach((targetPath) => {
+        const targetNodeId = targetPathToNodeId.get(targetPath);
+        if (!targetNodeId) return;
+        result.push({
+          id: `vp_${rawIdx}__${targetPath}`,
+          source: `raw_${rawIdx}`,
+          target: targetNodeId,
+          data: { isUnpivot: true },
+          style: { stroke: "hsl(262 83% 58%)", strokeWidth: 1 },
+          deletable: true,
+          selectable: true,
+        });
+      });
+    });
+    return result;
+  }, [verticalPivotConfig, rawColumns, targetPathToNodeId]);
+
+  const allEdges = useMemo(
+    () => [...edgesFromMappings, ...edgesFromUnpivot],
+    [edgesFromMappings, edgesFromUnpivot],
+  );
+
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(edgesFromMappings);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(allEdges);
   const edgesRef = useRef(edges);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
 
@@ -210,8 +251,8 @@ export default function MappingPage() {
   }, [initialNodes, setNodes]);
 
   useEffect(() => {
-    setEdges(edgesFromMappings);
-  }, [edgesFromMappings, setEdges]);
+    setEdges(allEdges);
+  }, [allEdges, setEdges]);
 
   const mappingExtrasLookup = useMemo(() => {
     const map = new Map<string, Pick<ColumnMapping, "aggregation">>();
@@ -255,14 +296,66 @@ export default function MappingPage() {
 
   const onEdgesDeleted = useCallback(
     (deletedEdges: Edge[]) => {
-      const deletedIds = new Set(deletedEdges.map((e) => e.id));
-      const remaining = edgesRef.current.filter((e) => !deletedIds.has(e.id));
-      const mappings = remaining
-        .map(extractMappingFromEdge)
-        .filter((m): m is ColumnMapping => m != null);
-      setColumnMappings(mappings);
+      const vpDeleted: { rawIdx: number; targetPath: string }[] = [];
+      const mappingDeleted: Edge[] = [];
+      for (const e of deletedEdges) {
+        if (e.id.startsWith("vp_")) {
+          const rest = e.id.slice(3);
+          const sep = rest.indexOf("__");
+          if (sep === -1) continue;
+          const rawIdx = parseInt(rest.slice(0, sep), 10);
+          const targetPath = rest.slice(sep + 2);
+          if (!Number.isNaN(rawIdx) && targetPath) vpDeleted.push({ rawIdx, targetPath });
+        } else {
+          mappingDeleted.push(e);
+        }
+      }
+      if (vpDeleted.length > 0) {
+        let next = { ...verticalPivotConfig };
+        for (const { rawIdx, targetPath } of vpDeleted) {
+          const rawColumn = rawColumns[rawIdx];
+          if (!rawColumn) continue;
+          const col = next.columns.find((c) => c.rawColumn === rawColumn);
+          if (!col) continue;
+          const { [targetPath]: _, ...restFieldValues } = col.fieldValues;
+          const newFieldValues = restFieldValues;
+          if (Object.keys(newFieldValues).length === 0) {
+            next = {
+              ...next,
+              columns: next.columns.filter((c) => c.rawColumn !== rawColumn),
+            };
+          } else {
+            next = {
+              ...next,
+              columns: next.columns.map((c) =>
+                c.rawColumn === rawColumn ? { ...c, fieldValues: newFieldValues } : c,
+              ),
+            };
+          }
+          const stillUsed = next.columns.some((c) => targetPath in c.fieldValues);
+          if (!stillUsed) {
+            next = {
+              ...next,
+              outputTargetPaths: next.outputTargetPaths.filter((p) => p !== targetPath),
+              columns: next.columns.map((c) => {
+                const { [targetPath]: __, ...fv } = c.fieldValues;
+                return { ...c, fieldValues: fv };
+              }),
+            };
+          }
+        }
+        setVerticalPivotConfig(next);
+      }
+      if (mappingDeleted.length > 0) {
+        const deletedIds = new Set(mappingDeleted.map((e) => e.id));
+        const remaining = edgesRef.current.filter((e) => !deletedIds.has(e.id));
+        const mappings = remaining
+          .map(extractMappingFromEdge)
+          .filter((m): m is ColumnMapping => m != null);
+        setColumnMappings(mappings);
+      }
     },
-    [extractMappingFromEdge, setColumnMappings],
+    [rawColumns, verticalPivotConfig, extractMappingFromEdge, setColumnMappings, setVerticalPivotConfig],
   );
 
   const syncMappingsFromEdges = useCallback(() => {
