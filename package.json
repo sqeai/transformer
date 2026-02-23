@@ -35,6 +35,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "exceljs": "^4.4.0",
+    "framer-motion": "^12.34.3",
     "langchain": "^1.2.15",
     "lucide-react": "^0.462.0",
     "next": "^16.1.6",

@@ -70,9 +70,6 @@ export default function SignupPage() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center p-4 overflow-hidden">
-      <div className="animated-bg">
-        <div className="grain" />
-      </div>
       <div className="relative z-10 w-full flex justify-center">
         <Card className="w-full max-w-md min-h-[420px] flex flex-col rounded-lg border-white/20 bg-white/80 dark:bg-card/90 backdrop-blur-xl shadow-lg">
           <CardHeader className="text-center">
