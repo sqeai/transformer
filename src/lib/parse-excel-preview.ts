@@ -9,6 +9,7 @@ export interface WorkbookPreview {
 }
 
 const MAX_SAMPLE_ROWS = 8;
+const MAX_RAW_PREVIEW_ROWS = 30;
 const MAX_COLUMNS = 60;
 
 function cellToString(value: ExcelJS.CellValue): string {
@@ -32,18 +33,50 @@ function cellToString(value: ExcelJS.CellValue): string {
   return String(value).trim();
 }
 
+export interface ExtractOptions {
+  /** When true, returns all rows from row 1 (including potential metadata/title rows) instead of assuming row 1 is the header. */
+  useAllRows?: boolean;
+}
+
 /**
  * Trims a workbook down to a compact preview suitable for LLM consumption.
  * Strips empty columns, limits row count, and returns a structured summary.
+ *
+ * When `useAllRows` is true, all rows (up to MAX_RAW_PREVIEW_ROWS) are returned
+ * in `sampleRows` with `headers` left empty — useful for LLM-based header detection.
  */
 export async function extractWorkbookPreview(
   buffer: ArrayBuffer,
+  options?: ExtractOptions,
 ): Promise<WorkbookPreview> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
   const sheet = workbook.worksheets[0];
   if (!sheet) {
     return { sheetName: "", headers: [], sampleRows: [], totalRows: 0, totalColumns: 0 };
+  }
+
+  if (options?.useAllRows) {
+    const rowCount = Math.min(sheet.rowCount, MAX_RAW_PREVIEW_ROWS);
+    const maxCol = Math.min(sheet.columnCount, MAX_COLUMNS);
+
+    const sampleRows: string[][] = [];
+    for (let r = 1; r <= rowCount; r++) {
+      const row = sheet.getRow(r);
+      const values: string[] = [];
+      for (let c = 1; c <= maxCol; c++) {
+        values.push(cellToString(row.getCell(c).value));
+      }
+      sampleRows.push(values);
+    }
+
+    return {
+      sheetName: sheet.name,
+      headers: [],
+      sampleRows,
+      totalRows: sheet.rowCount,
+      totalColumns: maxCol,
+    };
   }
 
   const headerRow = sheet.getRow(1);
