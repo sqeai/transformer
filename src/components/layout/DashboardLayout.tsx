@@ -26,6 +26,7 @@ import {
   TooltipTrigger,
   TooltipProvider,
 } from "@/components/ui/tooltip";
+import { useSchemaStore } from "@/lib/schema-store";
 
 const nav = [
   { name: "Final Schemas", href: "/schemas", icon: FileStack },
@@ -39,6 +40,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+  const { workflow } = useSchemaStore();
+  const uploadHref = workflow.currentSchemaId
+    ? `/upload?schemaId=${workflow.currentSchemaId}`
+    : "/upload";
 
   return (
     <ProtectedRoute>
@@ -70,12 +75,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             </div>
             <nav className="flex-1 space-y-1 p-2">
               {nav.map((item) => {
+                const href = item.href === "/upload" ? uploadHref : item.href;
                 const isActive =
                   pathname === item.href || pathname.startsWith(item.href + "/");
                 const link = (
                   <Link
                     key={item.href}
-                    href={item.href}
+                    href={href}
                     className={cn(
                       "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                       isActive
@@ -163,7 +169,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </TooltipProvider>
         <main
           className={cn(
-            "flex-1 transition-[padding-left] duration-200",
+            "flex-1 min-w-0 overflow-y-auto transition-[padding-left] duration-200",
             collapsed ? "pl-16" : "pl-64",
           )}
         >

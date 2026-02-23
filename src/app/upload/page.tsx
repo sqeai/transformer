@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import { useSchemaStore } from "@/lib/schema-store";
 import { flattenFields } from "@/lib/schema-store";
 import { parseExcelToRows } from "@/lib/parse-excel";
 import { parseCsvToRows, extractCsvPreview } from "@/lib/parse-csv";
-import { extractExcelGrid } from "@/lib/parse-excel-preview";
+import { extractExcelGrid, getExcelSheetNames } from "@/lib/parse-excel-preview";
 import type { RawDataAnalysis } from "@/lib/llm-schema";
 import DataPreviewTable, { type DataBoundary } from "@/components/DataPreviewTable";
 import {
@@ -40,13 +40,17 @@ interface PreviewData {
   csvText?: string;
   excelBuffer?: ArrayBuffer;
   llmAnalysis?: RawDataAnalysis;
+  /** Excel only: names of all sheets */
+  sheetNames?: string[];
+  /** Excel only: 0-based index of the sheet to process */
+  activeSheetIndex?: number;
 }
 
 export default function UploadPage() {
   const searchParams = useSearchParams();
   const schemaId = searchParams.get("schemaId");
   const router = useRouter();
-  const { getSchema, setCurrentSchema, setRawData, resetWorkflow } = useSchemaStore();
+  const { getSchema, setCurrentSchema, setRawData, resetWorkflow, workflow, setUploadState } = useSchemaStore();
   const [dragging, setDragging] = useState(false);
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -54,8 +58,34 @@ export default function UploadPage() {
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [boundary, setBoundary] = useState<DataBoundary | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const restoredRef = useRef(false);
 
   const schema = schemaId ? getSchema(schemaId) : null;
+
+  // Restore persisted upload state when returning to this page with the same schema
+  useEffect(() => {
+    if (!schemaId || !schema || restoredRef.current) return;
+    const saved = workflow.uploadState;
+    if (saved?.schemaId === schemaId && saved.step === "preview" && saved.preview && saved.boundary) {
+      restoredRef.current = true;
+      setStep("preview");
+      setPreview(saved.preview as PreviewData);
+      setBoundary(saved.boundary as DataBoundary);
+      setAnalysis((saved.analysis as RawDataAnalysis) ?? null);
+    }
+  }, [schemaId, schema, workflow.uploadState]);
+
+  // Persist upload state so we can refer back when navigating away and back
+  const stateToPersist = useMemo(
+    () =>
+      step === "preview" && preview && boundary && schemaId
+        ? { schemaId, step, preview, boundary, analysis }
+        : null,
+    [step, preview, boundary, analysis, schemaId],
+  );
+  useEffect(() => {
+    if (stateToPersist) setUploadState(stateToPersist);
+  }, [stateToPersist, setUploadState]);
 
   const loadPreview = useCallback(
     async (file: File) => {
@@ -81,6 +111,7 @@ export default function UploadPage() {
 
         if (isExcel) {
           const buffer = await file.arrayBuffer();
+          const sheetNames = await getExcelSheetNames(buffer);
 
           setStep("analyzing");
           try {
@@ -98,7 +129,7 @@ export default function UploadPage() {
             // LLM analysis failed — user can still set boundaries manually
           }
 
-          const { grid, totalRows, totalColumns } = await extractExcelGrid(buffer);
+          const { grid, totalRows, totalColumns } = await extractExcelGrid(buffer, 50, 60, 0);
 
           const defaultBoundary: DataBoundary = {
             headerRowIndex: llmAnalysis?.headerRowIndex ?? 0,
@@ -121,6 +152,8 @@ export default function UploadPage() {
             isExcel: true,
             excelBuffer: buffer,
             llmAnalysis,
+            sheetNames,
+            activeSheetIndex: 0,
           });
         } else {
           const csvText = await file.text();
@@ -159,6 +192,7 @@ export default function UploadPage() {
 
     try {
       setStep("parsing");
+      setUploadState(null);
 
       const columnsToKeep: number[] = [];
       for (let i = boundary.startColumn; i <= boundary.endColumn; i++) {
@@ -173,6 +207,7 @@ export default function UploadPage() {
           dataStartRowIndex: boundary.dataStartRowIndex,
           dataEndRowIndex: boundary.dataEndRowIndex,
           columnsToKeep,
+          sheetIndex: preview.activeSheetIndex ?? 0,
         });
         setRawData(columns, rows);
       } else if (preview.csvText) {
@@ -191,7 +226,42 @@ export default function UploadPage() {
       setError(e instanceof Error ? e.message : "Failed to parse file");
       setStep("preview");
     }
-  }, [preview, boundary, schemaId, setCurrentSchema, setRawData, router]);
+  }, [preview, boundary, schemaId, setCurrentSchema, setRawData, router, setUploadState]);
+
+  const switchToSheet = useCallback(
+    async (sheetIndex: number) => {
+      if (!preview?.isExcel || !preview.excelBuffer || preview.activeSheetIndex === sheetIndex)
+        return;
+      const { grid, totalRows, totalColumns } = await extractExcelGrid(
+        preview.excelBuffer,
+        50,
+        60,
+        sheetIndex,
+      );
+      const defaultBoundary: DataBoundary = {
+        headerRowIndex: 0,
+        dataStartRowIndex: 1,
+        dataEndRowIndex: Math.max(0, totalRows - 1),
+        startColumn: 0,
+        endColumn: Math.max(0, totalColumns - 1),
+      };
+      setBoundary(defaultBoundary);
+      setPreview((prev) =>
+        prev
+          ? {
+              ...prev,
+              grid,
+              totalRows,
+              totalColumns,
+              activeSheetIndex: sheetIndex,
+              llmAnalysis: sheetIndex === 0 ? prev.llmAnalysis : undefined,
+            }
+          : prev,
+      );
+      if (sheetIndex !== 0) setAnalysis(null);
+    },
+    [preview],
+  );
 
   const resetToIdle = () => {
     setStep("idle");
@@ -199,6 +269,7 @@ export default function UploadPage() {
     setBoundary(null);
     setAnalysis(null);
     setError(null);
+    setUploadState(null);
   };
 
   const onDrop = useCallback(
@@ -239,8 +310,8 @@ export default function UploadPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 animate-fade-in">
-        <div className="flex items-center gap-4">
+      <div className="flex h-[calc(100vh-6rem)] flex-col animate-fade-in min-w-0">
+        <div className="shrink-0 flex items-center gap-4 pb-3">
           <Button variant="ghost" size="icon" onClick={() => router.push("/schemas")}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -252,6 +323,7 @@ export default function UploadPage() {
           </div>
         </div>
 
+        <div className="flex flex-1 min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
         {step === "idle" && (
           <Card className="border border-primary/20 bg-primary/5">
             <CardHeader className="pb-2">
@@ -362,6 +434,31 @@ export default function UploadPage() {
 
         {step === "preview" && preview && boundary && (
           <>
+            {preview.isExcel && preview.sheetNames && preview.sheetNames.length > 1 && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Sheets</p>
+                <div className="flex flex-wrap gap-1 border-b border-border pb-0">
+                  {preview.sheetNames.map((name, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => switchToSheet(index)}
+                      className={`rounded-t-md px-3 py-2 text-sm font-medium transition-colors ${
+                        (preview.activeSheetIndex ?? 0) === index
+                          ? "border border-b-0 border-border bg-background text-foreground -mb-px"
+                          : "border border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                      }`}
+                    >
+                      {name || `Sheet ${index + 1}`}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Only the active sheet will be processed. Click a sheet to switch.
+                </p>
+              </div>
+            )}
+
             <DataPreviewTable
               grid={preview.grid}
               totalRows={preview.totalRows}
@@ -395,6 +492,7 @@ export default function UploadPage() {
             </CardHeader>
           </Card>
         )}
+        </div>
       </div>
     </DashboardLayout>
   );

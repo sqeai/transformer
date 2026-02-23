@@ -180,6 +180,8 @@ export interface ParseOptions {
   dataStartRowIndex?: number;
   dataEndRowIndex?: number;
   columnsToKeep?: number[];
+  /** 0-based sheet index (default 0). Only this sheet is parsed. */
+  sheetIndex?: number;
 }
 
 /**
@@ -196,7 +198,8 @@ export async function parseExcelToRows(
 }> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
-  const sheet = workbook.worksheets[0];
+  const sheetIndex = options?.sheetIndex ?? 0;
+  const sheet = workbook.worksheets[sheetIndex] ?? workbook.worksheets[0];
   if (!sheet) return { columns: [], rows: [] };
 
   const analysis = options?.analysis;

@@ -67,41 +67,53 @@ export default function DataPreviewTable({
     [onBoundaryChange],
   );
 
-  const updateHeaderRow = (v: number) => {
-    const clamped = Math.max(0, Math.min(v, maxRowIdx));
-    setHeaderRow(clamped);
-    const newDataStart = Math.max(dataStart, clamped + 1);
-    setDataStart(newDataStart);
-    emitBoundary(clamped, newDataStart, dataEnd, startCol, endCol);
-  };
+  const handleChange = useCallback(
+    (field: "headerRow" | "dataStart" | "dataEnd" | "startCol" | "endCol", raw: string) => {
+      const v = Number(raw);
+      if (Number.isNaN(v) || raw.trim() === "") return;
+      const idx = v - 1;
 
-  const updateDataStart = (v: number) => {
-    const clamped = Math.max(headerRow + 1, Math.min(v, maxRowIdx));
-    setDataStart(clamped);
-    const newDataEnd = Math.max(dataEnd, clamped);
-    setDataEnd(newDataEnd);
-    emitBoundary(headerRow, clamped, newDataEnd, startCol, endCol);
-  };
-
-  const updateDataEnd = (v: number) => {
-    const clamped = Math.max(dataStart, Math.min(v, maxRowIdx));
-    setDataEnd(clamped);
-    emitBoundary(headerRow, dataStart, clamped, startCol, endCol);
-  };
-
-  const updateStartCol = (v: number) => {
-    const clamped = Math.max(0, Math.min(v, maxColIdx));
-    setStartCol(clamped);
-    const newEndCol = Math.max(endCol, clamped);
-    setEndCol(newEndCol);
-    emitBoundary(headerRow, dataStart, dataEnd, clamped, newEndCol);
-  };
-
-  const updateEndCol = (v: number) => {
-    const clamped = Math.max(startCol, Math.min(v, maxColIdx));
-    setEndCol(clamped);
-    emitBoundary(headerRow, dataStart, dataEnd, startCol, clamped);
-  };
+      switch (field) {
+        case "headerRow": {
+          const clamped = Math.max(0, Math.min(idx, maxRowIdx));
+          setHeaderRow(clamped);
+          const newDataStart = Math.max(dataStart, clamped + 1);
+          setDataStart(newDataStart);
+          emitBoundary(clamped, newDataStart, dataEnd, startCol, endCol);
+          break;
+        }
+        case "dataStart": {
+          const clamped = Math.max(headerRow + 1, Math.min(idx, maxRowIdx));
+          setDataStart(clamped);
+          const newDataEnd = Math.max(dataEnd, clamped);
+          setDataEnd(newDataEnd);
+          emitBoundary(headerRow, clamped, newDataEnd, startCol, endCol);
+          break;
+        }
+        case "dataEnd": {
+          const clamped = Math.max(dataStart, Math.min(idx, maxRowIdx));
+          setDataEnd(clamped);
+          emitBoundary(headerRow, dataStart, clamped, startCol, endCol);
+          break;
+        }
+        case "startCol": {
+          const clamped = Math.max(0, Math.min(idx, maxColIdx));
+          setStartCol(clamped);
+          const newEndCol = Math.max(endCol, clamped);
+          setEndCol(newEndCol);
+          emitBoundary(headerRow, dataStart, dataEnd, clamped, newEndCol);
+          break;
+        }
+        case "endCol": {
+          const clamped = Math.max(startCol, Math.min(idx, maxColIdx));
+          setEndCol(clamped);
+          emitBoundary(headerRow, dataStart, dataEnd, startCol, clamped);
+          break;
+        }
+      }
+    },
+    [maxRowIdx, maxColIdx, headerRow, dataStart, dataEnd, startCol, endCol, emitBoundary],
+  );
 
   const headerCells = useMemo(() => {
     const row = grid[headerRow];
@@ -126,7 +138,7 @@ export default function DataPreviewTable({
   };
 
   return (
-    <Card>
+    <Card className="min-w-0 overflow-hidden">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <div>
@@ -165,10 +177,10 @@ export default function DataPreviewTable({
               </Label>
               <Input
                 type="number"
-                min={0}
-                max={maxRowIdx}
+                min={1}
+                max={maxRowIdx + 1}
                 value={headerRow + 1}
-                onChange={(e) => updateHeaderRow(Number(e.target.value) - 1)}
+                onChange={(e) => handleChange("headerRow", e.target.value)}
                 className="h-8 text-sm"
               />
               <p className="text-[10px] text-muted-foreground">1-indexed row number</p>
@@ -183,7 +195,7 @@ export default function DataPreviewTable({
                 min={headerRow + 2}
                 max={maxRowIdx + 1}
                 value={dataStart + 1}
-                onChange={(e) => updateDataStart(Number(e.target.value) - 1)}
+                onChange={(e) => handleChange("dataStart", e.target.value)}
                 className="h-8 text-sm"
               />
               <p className="text-[10px] text-muted-foreground">First data row</p>
@@ -198,7 +210,7 @@ export default function DataPreviewTable({
                 min={dataStart + 1}
                 max={totalRows}
                 value={dataEnd + 1}
-                onChange={(e) => updateDataEnd(Number(e.target.value) - 1)}
+                onChange={(e) => handleChange("dataEnd", e.target.value)}
                 className="h-8 text-sm"
               />
               <p className="text-[10px] text-muted-foreground">Last data row</p>
@@ -213,7 +225,7 @@ export default function DataPreviewTable({
                 min={1}
                 max={maxColIdx + 1}
                 value={startCol + 1}
-                onChange={(e) => updateStartCol(Number(e.target.value) - 1)}
+                onChange={(e) => handleChange("startCol", e.target.value)}
                 className="h-8 text-sm"
               />
               <p className="text-[10px] text-muted-foreground">First column</p>
@@ -228,7 +240,7 @@ export default function DataPreviewTable({
                 min={startCol + 1}
                 max={totalColumns}
                 value={endCol + 1}
-                onChange={(e) => updateEndCol(Number(e.target.value) - 1)}
+                onChange={(e) => handleChange("endCol", e.target.value)}
                 className="h-8 text-sm"
               />
               <p className="text-[10px] text-muted-foreground">Last column</p>
@@ -238,7 +250,7 @@ export default function DataPreviewTable({
       )}
 
       <CardContent className={showSettings ? "pt-0" : ""}>
-        <div className="rounded-md border overflow-auto max-h-[420px]">
+        <div className="rounded-md border overflow-auto max-h-[420px] max-w-full">
           <Table>
             <TableHeader className="sticky top-0 z-10 bg-background">
               <TableRow>

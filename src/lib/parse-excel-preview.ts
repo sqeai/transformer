@@ -289,17 +289,28 @@ export async function extractWorkbookPreview(
 }
 
 /**
+ * Returns the list of sheet names in an Excel workbook.
+ */
+export async function getExcelSheetNames(buffer: ArrayBuffer): Promise<string[]> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  return workbook.worksheets.map((s) => s.name);
+}
+
+/**
  * Extracts a raw grid (array of string arrays) from an Excel buffer
  * for client-side preview. Returns up to `maxRows` rows and `maxCols` columns.
+ * @param sheetIndex 0-based index of the sheet to extract (default 0).
  */
 export async function extractExcelGrid(
   buffer: ArrayBuffer,
   maxRows = 50,
   maxCols = 60,
+  sheetIndex = 0,
 ): Promise<{ grid: string[][]; totalRows: number; totalColumns: number }> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
-  const sheet = workbook.worksheets[0];
+  const sheet = workbook.worksheets[sheetIndex] ?? workbook.worksheets[0];
   if (!sheet) return { grid: [], totalRows: 0, totalColumns: 0 };
 
   const rowCount = Math.min(sheet.rowCount, maxRows);
