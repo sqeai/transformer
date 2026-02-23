@@ -39,7 +39,6 @@ interface PreviewData {
   isExcel: boolean;
   csvText?: string;
   excelBuffer?: ArrayBuffer;
-  llmAnalysis?: RawDataAnalysis;
   /** Excel only: names of all sheets */
   sheetNames?: string[];
   /** Excel only: 0-based index of the sheet to process */
@@ -74,17 +73,12 @@ export default function UploadPage() {
     }
   }, [schemaId, schema, workflow.uploadState]);
 
-  // Persist upload state so we can refer back when navigating away and back
-  const stateToPersist = useMemo(
-    () =>
-      step === "preview" && preview && boundary && schemaId
-        ? { schemaId, step, preview, boundary, analysis }
-        : null,
-    [step, preview, boundary, analysis, schemaId],
-  );
+  // Persist upload state while in preview so navigating back restores the data
   useEffect(() => {
-    if (stateToPersist) setUploadState(stateToPersist);
-  }, [stateToPersist, setUploadState]);
+    if (step === "preview" && preview && boundary && schemaId) {
+      setUploadState({ schemaId, step: "preview", preview, boundary, analysis });
+    }
+  }, [step, preview, boundary, analysis, schemaId, setUploadState]);
 
   const loadPreview = useCallback(
     async (file: File) => {
@@ -108,40 +102,36 @@ export default function UploadPage() {
       try {
         setStep("loading_preview");
 
-        let llmAnalysis: RawDataAnalysis | undefined;
-
         if (isExcel) {
           const buffer = await file.arrayBuffer();
           const sheetNames = await getExcelSheetNames(buffer);
+          const { grid, totalRows, totalColumns } = await extractExcelGrid(buffer, 50, 60, 0);
 
+          let llmBoundary: RawDataAnalysis | undefined;
           setStep("analyzing");
           try {
             const formData = new FormData();
             formData.append("file", file);
+            formData.append("totalRows", String(totalRows));
+            formData.append("totalColumns", String(totalColumns));
             const res = await fetch("/api/analyze-raw", {
               method: "POST",
               body: formData,
             });
             if (res.ok) {
-              llmAnalysis = await res.json();
-              setAnalysis(llmAnalysis!);
+              llmBoundary = await res.json();
+              setAnalysis(llmBoundary!);
             }
           } catch {
             // LLM analysis failed — user can still set boundaries manually
           }
 
-          const { grid, totalRows, totalColumns } = await extractExcelGrid(buffer, 50, 60, 0);
-
           const defaultBoundary: DataBoundary = {
-            headerRowIndex: llmAnalysis?.headerRowIndex ?? 0,
-            dataStartRowIndex: llmAnalysis?.dataStartRowIndex ?? 1,
-            dataEndRowIndex: totalRows - 1,
-            startColumn: llmAnalysis?.columnsToKeep
-              ? Math.min(...llmAnalysis.columnsToKeep)
-              : 0,
-            endColumn: llmAnalysis?.columnsToKeep
-              ? Math.max(...llmAnalysis.columnsToKeep)
-              : totalColumns - 1,
+            headerRowIndex: llmBoundary?.headerRowIndex ?? 0,
+            dataStartRowIndex: llmBoundary?.dataStartRowIndex ?? 1,
+            dataEndRowIndex: llmBoundary?.dataEndRowIndex ?? totalRows - 1,
+            startColumn: llmBoundary?.startColumn ?? 0,
+            endColumn: llmBoundary?.endColumn ?? totalColumns - 1,
           };
 
           setBoundary(defaultBoundary);
@@ -152,7 +142,6 @@ export default function UploadPage() {
             fileName: file.name,
             isExcel: true,
             excelBuffer: buffer,
-            llmAnalysis,
             sheetNames,
             activeSheetIndex: 0,
           });
@@ -193,7 +182,6 @@ export default function UploadPage() {
 
     try {
       setStep("parsing");
-      setUploadState(null);
 
       const columnsToKeep: number[] = [];
       for (let i = boundary.startColumn; i <= boundary.endColumn; i++) {
@@ -202,9 +190,7 @@ export default function UploadPage() {
 
       if (preview.isExcel && preview.excelBuffer) {
         const { columns, rows } = await parseExcelToRows(preview.excelBuffer, {
-          analysis: preview.llmAnalysis,
           headerRowIndex: boundary.headerRowIndex,
-          headerRowCount: preview.llmAnalysis?.headerRowCount,
           dataStartRowIndex: boundary.dataStartRowIndex,
           dataEndRowIndex: boundary.dataEndRowIndex,
           columnsToKeep,
@@ -221,12 +207,17 @@ export default function UploadPage() {
         setRawData(columns, rows);
       }
 
+      // Persist upload state so navigating back restores the preview
+      if (schemaId) {
+        setUploadState({ schemaId, step: "preview", preview, boundary, analysis });
+      }
+
       router.push("/mapping");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to parse file");
       setStep("preview");
     }
-  }, [preview, boundary, setRawData, router, setUploadState]);
+  }, [preview, boundary, schemaId, analysis, setRawData, router, setUploadState]);
 
   const switchToSheet = useCallback(
     async (sheetIndex: number) => {
@@ -254,7 +245,6 @@ export default function UploadPage() {
               totalRows,
               totalColumns,
               activeSheetIndex: sheetIndex,
-              llmAnalysis: sheetIndex === 0 ? prev.llmAnalysis : undefined,
             }
           : prev,
       );
@@ -429,17 +419,12 @@ export default function UploadPage() {
             </CardHeader>
             <CardContent className="space-y-1 text-sm text-muted-foreground">
               <p>
-                Header detected at row {analysis.headerRowIndex + 1} — trimmed{" "}
-                {analysis.trimmedRowCount} metadata row(s)
+                Header detected at row {analysis.headerRowIndex + 1}, data rows{" "}
+                {analysis.dataStartRowIndex + 1}–{analysis.dataEndRowIndex + 1}
               </p>
               <p>
-                Keeping {analysis.columnsToKeep.length} of{" "}
-                {preview!.totalColumns} columns
-              </p>
-              <p>
-                Headers found:{" "}
-                {analysis.headers.slice(0, 10).join(", ")}
-                {analysis.headers.length > 10 ? "…" : ""}
+                Columns {analysis.startColumn + 1}–{analysis.endColumn + 1} ({analysis.endColumn - analysis.startColumn + 1} of{" "}
+                {preview!.totalColumns} columns)
               </p>
               {analysis.notes && <p className="italic">{analysis.notes}</p>}
             </CardContent>

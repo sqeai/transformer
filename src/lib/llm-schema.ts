@@ -40,24 +40,25 @@ const RAW_DATA_ANALYSIS_PROMPT = `You are a data analyst specialising in messy s
 - Headers that span TWO consecutive rows (e.g. row 3 has Vietnamese names, row 4 has English names for the same columns)
 - Noise columns (row numbers, internal IDs, empty columns)
 
+You will also receive totalRows and totalColumns for the entire file. Use totalRows to set a sensible dataEndRowIndex.
+
 Your job is to:
 1. Identify the HEADER ROW(S) — the row(s) that contain column names for the actual data. Common header fields include: Kode Nasabah, Nama Nasabah, Asset class, key_metrics_level_1, tenor, and similar financial/business terms. Headers may also be bilingual (Vietnamese/English) such as: "Tên Công Ty / Company Name", "Mã Khách Hàng EVN / EVN Customer's Code", "Đơn Vị Tính / Unit", "Sản Lượng / Generation", "Đơn Giá / Unit Price", "Thành Tiền / Amount", "Thuế GTGT / VAT", "Tổng Cộng / Total Amount", "Tiền thuê mái (chưa thuế GTGT) / Roof Rental fee (Excluding VAT)".
    - If headers are in a SINGLE row (possibly with multi-line cell values shown as " / "), set headerRowIndex to that row.
-   - If headers span TWO rows (e.g. Vietnamese on row N, English on row N+1), set headerRowIndex to the FIRST header row. The system will merge both rows.
+   - If headers span TWO rows (e.g. Vietnamese on row N, English on row N+1), set headerRowIndex to the FIRST header row.
    - The header row is usually the first row where most cells contain short descriptive text (not data values or long sentences).
 2. Identify which rows ABOVE the header are noise/metadata that should be trimmed.
 3. Identify which columns are meaningful vs noise (empty columns, row-number columns, padding).
-4. Return the cleaned structure.
+4. Return the detected data boundaries.
 
 Respond ONLY with a JSON object (no markdown fences, no commentary):
 {
   "headerRowIndex": number,       // 0-based index of the FIRST header row in the provided rows
-  "headerRowCount": number,       // number of rows that make up the header (1 for single-row headers, 2 if headers span two rows)
-  "headers": string[],            // the cleaned header names — if headers span 2 rows, combine them as "Vietnamese / English" for each column
-  "dataStartRowIndex": number,    // 0-based index where actual data rows begin (usually headerRowIndex + headerRowCount)
-  "columnsToKeep": number[],      // 0-based column indices to keep (exclude noise/empty columns)
-  "trimmedRowCount": number,      // how many top rows to skip (metadata/title rows)
-  "notes": string                 // brief explanation of what was trimmed and why
+  "dataStartRowIndex": number,    // 0-based index where actual data rows begin (usually headerRowIndex + 1, or headerRowIndex + 2 if headers span two rows)
+  "dataEndRowIndex": number,      // 0-based index of the last data row (usually totalRows - 1)
+  "startColumn": number,          // 0-based index of the first meaningful column
+  "endColumn": number,            // 0-based index of the last meaningful column
+  "notes": string                 // brief explanation of what was detected and why
 }`;
 
 const AUTO_MAP_PROMPT = `You are a data mapping specialist. Given a list of raw column headers from uploaded data and a list of target schema field paths, determine the best mapping between them. Also recommend whether the data should be pivoted (grouped and aggregated).
@@ -107,11 +108,10 @@ interface LlmSchemaField {
 
 export interface RawDataAnalysis {
   headerRowIndex: number;
-  headerRowCount?: number;
-  headers: string[];
   dataStartRowIndex: number;
-  columnsToKeep: number[];
-  trimmedRowCount: number;
+  dataEndRowIndex: number;
+  startColumn: number;
+  endColumn: number;
   notes: string;
 }
 
@@ -236,6 +236,8 @@ export async function detectSchemaWithLLM(
  */
 export async function analyzeRawDataWithLLM(
   buffer: ArrayBuffer,
+  totalRows: number,
+  totalColumns: number,
 ): Promise<RawDataAnalysis> {
   const preview = await extractWorkbookPreview(buffer, { useAllRows: true });
   if (preview.sampleRows.length === 0) {
@@ -243,7 +245,7 @@ export async function analyzeRawDataWithLLM(
   }
 
   const lines: string[] = [];
-  lines.push(`Sheet: "${preview.sheetName}" (${preview.totalRows} total rows, ${preview.totalColumns} columns)`);
+  lines.push(`Sheet: "${preview.sheetName}" (${totalRows} total rows, ${totalColumns} columns)`);
   lines.push("");
   lines.push("All rows (including potential metadata/title rows above the header):");
   for (let i = 0; i < preview.sampleRows.length; i++) {
@@ -252,7 +254,7 @@ export async function analyzeRawDataWithLLM(
 
   const text = await callLlm(
     RAW_DATA_ANALYSIS_PROMPT,
-    `Analyse this raw spreadsheet data and identify the header row, noise rows, and columns to keep:\n\n${lines.join("\n")}`,
+    `Analyse this raw spreadsheet data and identify the data boundaries (header row, data start/end rows, and column range):\n\n${lines.join("\n")}`,
   );
 
   let parsed: RawDataAnalysis;

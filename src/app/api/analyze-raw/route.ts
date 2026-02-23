@@ -5,6 +5,8 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
+    const totalRows = Number(formData.get("totalRows") ?? 0);
+    const totalColumns = Number(formData.get("totalColumns") ?? 0);
     if (!file) {
       return NextResponse.json(
         { error: "No file provided" },
@@ -12,7 +14,7 @@ export async function POST(request: NextRequest) {
       );
     }
     const buffer = await file.arrayBuffer();
-    const analysis = await analyzeRawDataWithLLM(buffer);
+    const analysis = await analyzeRawDataWithLLM(buffer, totalRows, totalColumns);
     return NextResponse.json(analysis);
   } catch (e) {
     console.error(e);

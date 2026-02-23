@@ -1,5 +1,4 @@
 import ExcelJS from "exceljs";
-import type { RawDataAnalysis } from "./llm-schema";
 
 const MAX_DETECT_ROWS = 500;
 const MAX_DETECT_COLS = 60;
@@ -174,9 +173,7 @@ export async function parseExcelColumns(buffer: ArrayBuffer): Promise<string[]> 
 }
 
 export interface ParseOptions {
-  analysis?: RawDataAnalysis;
   headerRowIndex?: number;
-  headerRowCount?: number;
   dataStartRowIndex?: number;
   dataEndRowIndex?: number;
   columnsToKeep?: number[];
@@ -185,9 +182,9 @@ export interface ParseOptions {
 }
 
 /**
- * Parses an Excel file into columns + rows.
- * When an `analysis` is provided, uses the LLM-detected header row and column filter.
- * Otherwise, auto-detects the main table region within the sheet.
+ * Parses an Excel file into columns + rows using the provided boundary options.
+ * When boundary options are given they are used directly; otherwise auto-detects
+ * the main table region within the sheet.
  */
 export async function parseExcelToRows(
   buffer: ArrayBuffer,
@@ -202,56 +199,34 @@ export async function parseExcelToRows(
   const sheet = workbook.worksheets[sheetIndex] ?? workbook.worksheets[0];
   if (!sheet) return { columns: [], rows: [] };
 
-  const analysis = options?.analysis;
+  let headerRowNum: number;
+  let dataStartRowNum: number;
+  let lastDataRow: number;
+  let columnsToKeep: number[] | undefined;
 
-  let baseHeaderRowNum: number;
-  let baseHeaderRowCount: number;
-  let baseDataStartRowNum: number;
-  let baseLastDataRow: number;
-  let baseColumnsToKeep: number[] | undefined;
-
-  if (analysis) {
-    baseHeaderRowNum = analysis.headerRowIndex + 1;
-    baseHeaderRowCount = analysis.headerRowCount ?? 1;
-    baseDataStartRowNum = analysis.dataStartRowIndex + 1;
-    baseLastDataRow = sheet.rowCount;
-    baseColumnsToKeep = analysis.columnsToKeep;
+  if (options?.headerRowIndex != null) {
+    headerRowNum = options.headerRowIndex + 1;
+    dataStartRowNum = options.dataStartRowIndex != null ? options.dataStartRowIndex + 1 : headerRowNum + 1;
+    lastDataRow = options.dataEndRowIndex != null ? options.dataEndRowIndex + 1 : sheet.rowCount;
+    columnsToKeep = options.columnsToKeep;
   } else {
     const bounds = detectTableBounds(sheet);
-    baseHeaderRowNum = bounds.startRow;
-    baseHeaderRowCount = 1;
-    baseDataStartRowNum = bounds.startRow + 1;
-    baseLastDataRow = bounds.endRow;
+    headerRowNum = bounds.startRow;
+    dataStartRowNum = bounds.startRow + 1;
+    lastDataRow = bounds.endRow;
 
     const colIndices: number[] = [];
     for (let c = bounds.startCol; c <= bounds.endCol; c++) {
       colIndices.push(c - 1);
     }
-    baseColumnsToKeep = colIndices;
+    columnsToKeep = colIndices;
   }
-
-  const headerRowNum = options?.headerRowIndex != null ? options.headerRowIndex + 1 : baseHeaderRowNum;
-  const headerRowCount = options?.headerRowCount ?? baseHeaderRowCount;
-  const dataStartRowNum = options?.dataStartRowIndex != null ? options.dataStartRowIndex + 1 : baseDataStartRowNum;
-  const lastDataRow = options?.dataEndRowIndex != null ? options.dataEndRowIndex + 1 : baseLastDataRow;
-  const columnsToKeep = options?.columnsToKeep ?? baseColumnsToKeep;
 
   const headerRow = sheet.getRow(headerRowNum);
   const allColumns: { colIdx: number; name: string }[] = [];
   headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
     if (columnsToKeep && !columnsToKeep.includes(colNumber - 1)) return;
-    let name = extractCellText(cell.value, `Column_${colNumber}`);
-
-    if (headerRowCount > 1) {
-      const parts = [name];
-      for (let extra = 1; extra < headerRowCount; extra++) {
-        const extraRow = sheet.getRow(headerRowNum + extra);
-        const extraText = extractCellText(extraRow.getCell(colNumber).value, "");
-        if (extraText && extraText !== name) parts.push(extraText);
-      }
-      name = parts.filter(Boolean).join("\n");
-    }
-
+    const name = extractCellText(cell.value, `Column_${colNumber}`);
     allColumns.push({ colIdx: colNumber, name });
   });
 
