@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,8 +35,19 @@ export default function LoginPage() {
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedEmail) {
+      setError("Please enter your email.");
+      return;
+    }
+    if (!password) {
+      setError("Please enter your password.");
+      return;
+    }
+
     setIsLoading(true);
-    const { error: err } = await signIn(email, password);
+    const { error: err } = await signIn(trimmedEmail, password);
     if (err) {
       setError(err.message);
       setIsLoading(false);
@@ -84,6 +96,7 @@ export default function LoginPage() {
                 <Input
                   id="signin-email"
                   type="email"
+                  autoComplete="email"
                   placeholder="you@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -96,10 +109,12 @@ export default function LoginPage() {
                 <Input
                   id="signin-password"
                   type="password"
-                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  placeholder="Enter your password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
+                  minLength={1}
                   disabled={isLoading}
                 />
               </div>
@@ -109,7 +124,11 @@ export default function LoginPage() {
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               )}
-              <Button type="submit" className="w-full" disabled={isLoading}>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={isLoading || !email.trim() || !password}
+              >
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -121,8 +140,14 @@ export default function LoginPage() {
               </Button>
             </form>
           </CardContent>
-          <CardFooter className="flex justify-center text-center text-xs text-muted-foreground">
-            Use any email and password to sign in (demo mode).
+          <CardFooter className="flex flex-col gap-2 justify-center text-center text-xs text-muted-foreground">
+            Sign in with your account.
+            <p>
+              No account?{" "}
+              <Link href="/signup" className="text-primary underline underline-offset-2">
+                Create one
+              </Link>
+            </p>
           </CardFooter>
         </Card>
       </div>

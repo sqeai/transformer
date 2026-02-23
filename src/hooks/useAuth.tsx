@@ -23,47 +23,52 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-const USER_STORAGE_KEY = "ai_data_cleanser_user";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(USER_STORAGE_KEY);
-      if (stored) {
-        setUser(JSON.parse(stored) as User);
-      }
-    } catch {
-      localStorage.removeItem(USER_STORAGE_KEY);
-    } finally {
-      setLoading(false);
-    }
+    let cancelled = false;
+    fetch("/api/auth/session", { credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && data?.user) setUser(data.user);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const signIn = useCallback(
     async (email: string, password: string): Promise<{ error: Error | null }> => {
       const normalizedEmail = email.toLowerCase().trim();
-      // Placeholder: accept any non-empty email/password
       if (!normalizedEmail || !password) {
         return { error: new Error("Email and password are required") };
       }
-      const u: User = {
-        id: crypto.randomUUID(),
-        email: normalizedEmail,
-        name: normalizedEmail.split("@")[0],
-      };
-      setUser(u);
-      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: normalizedEmail, password }),
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { error: new Error(data.error ?? "Sign in failed") };
+      }
+      if (data.user) setUser(data.user);
       return { error: null };
     },
     [],
   );
 
   const signOut = useCallback(async () => {
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     setUser(null);
-    localStorage.removeItem(USER_STORAGE_KEY);
   }, []);
 
   return (

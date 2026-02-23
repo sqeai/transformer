@@ -14,6 +14,15 @@ export interface FinalSchema {
   name: string;
   fields: SchemaField[];
   createdAt: string;
+  /** Set when loaded from API (creator = schema owner from users) */
+  creator?: SchemaCreator;
+}
+
+/** Creator info returned from API (from users) */
+export interface SchemaCreator {
+  id: string;
+  email: string;
+  name: string;
 }
 
 export type RawColumn = string;

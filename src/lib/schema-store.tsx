@@ -20,12 +20,15 @@ import type {
   VerticalPivotConfig,
 } from "./types";
 import { idbGet, idbSet, idbDelete } from "./idb-storage";
+import { useAuth } from "@/hooks/useAuth";
 
-const SCHEMAS_STORAGE_KEY = "ai_data_cleanser_schemas";
 const WORKFLOW_STORAGE_KEY = "ai_data_cleanser_workflow";
 const IDB_RAW_COLUMNS_KEY = "workflow_rawColumns";
 const IDB_RAW_ROWS_KEY = "workflow_rawRows";
 const IDB_UPLOAD_STATE_KEY = "workflow_uploadState";
+
+const api = (path: string, init?: RequestInit) =>
+  fetch(path, { ...init, credentials: "include" });
 
 interface WorkflowState {
   currentSchemaId: string | null;
@@ -52,21 +55,6 @@ interface WorkflowMeta {
   pivotConfig: PivotConfig;
   verticalPivotConfig: VerticalPivotConfig;
   defaultValues: DefaultValues;
-}
-
-function loadSchemas(): FinalSchema[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const s = localStorage.getItem(SCHEMAS_STORAGE_KEY);
-    return s ? JSON.parse(s) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveSchemas(schemas: FinalSchema[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(SCHEMAS_STORAGE_KEY, JSON.stringify(schemas));
 }
 
 function loadWorkflowMeta(): WorkflowMeta | null {
@@ -126,9 +114,10 @@ async function clearWorkflowLargeData() {
 
 interface SchemaStoreContextType {
   schemas: FinalSchema[];
-  addSchema: (schema: FinalSchema) => void;
-  updateSchema: (id: string, updates: Partial<FinalSchema>) => void;
-  deleteSchema: (id: string) => void;
+  schemasLoading: boolean;
+  addSchema: (schema: FinalSchema) => Promise<FinalSchema>;
+  updateSchema: (id: string, updates: Partial<FinalSchema>) => Promise<void>;
+  deleteSchema: (id: string) => Promise<void>;
   getSchema: (id: string) => FinalSchema | undefined;
   workflow: WorkflowState;
   setCurrentSchema: (id: string | null) => void;
@@ -163,13 +152,31 @@ const SchemaStoreContext = createContext<SchemaStoreContextType | undefined>(
 );
 
 export function SchemaStoreProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
   const [schemas, setSchemas] = useState<FinalSchema[]>([]);
+  const [schemasLoading, setSchemasLoading] = useState(true);
   const [workflow, setWorkflow] = useState<WorkflowState>(defaultWorkflow);
   const [hydrated, setHydrated] = useState(false);
   const prevWorkflowRef = useRef<WorkflowState>(defaultWorkflow);
 
+  // Load schemas from API when user is set
   useEffect(() => {
-    setSchemas(loadSchemas());
+    if (!user) {
+      setSchemas([]);
+      setSchemasLoading(false);
+      return;
+    }
+    setSchemasLoading(true);
+    api("/api/schemas")
+      .then((res) => (res.ok ? res.json() : { schemas: [] }))
+      .then((data) => {
+        setSchemas(Array.isArray(data?.schemas) ? data.schemas : []);
+      })
+      .catch(() => setSchemas([]))
+      .finally(() => setSchemasLoading(false));
+  }, [user?.id]);
+
+  useEffect(() => {
     const meta = loadWorkflowMeta();
 
     loadWorkflowLargeData()
@@ -213,30 +220,50 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
     }
   }, [workflow, hydrated]);
 
-  const addSchema = useCallback((schema: FinalSchema) => {
-    setSchemas((prev) => {
-      const next = [...prev, schema];
-      saveSchemas(next);
-      return next;
+  const addSchema = useCallback(async (schema: FinalSchema) => {
+    const res = await api("/api/schemas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: schema.name, fields: schema.fields }),
     });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error ?? "Failed to create schema");
+    }
+    const data = await res.json();
+    if (data?.schema) {
+      setSchemas((prev) => [...prev, data.schema]);
+      return data.schema;
+    }
+    setSchemas((prev) => [...prev, schema]);
+    return schema;
   }, []);
 
-  const updateSchema = useCallback((id: string, updates: Partial<FinalSchema>) => {
-    setSchemas((prev) => {
-      const next = prev.map((s) =>
-        s.id === id ? { ...s, ...updates } : s,
-      );
-      saveSchemas(next);
-      return next;
+  const updateSchema = useCallback(async (id: string, updates: Partial<FinalSchema>) => {
+    const res = await api(`/api/schemas/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(updates.name !== undefined && { name: updates.name }),
+        ...(updates.fields !== undefined && { fields: updates.fields }),
+      }),
     });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error ?? "Failed to update schema");
+    }
+    setSchemas((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, ...updates } : s)),
+    );
   }, []);
 
-  const deleteSchema = useCallback((id: string) => {
-    setSchemas((prev) => {
-      const next = prev.filter((s) => s.id !== id);
-      saveSchemas(next);
-      return next;
-    });
+  const deleteSchema = useCallback(async (id: string) => {
+    const res = await api(`/api/schemas/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error ?? "Failed to delete schema");
+    }
+    setSchemas((prev) => prev.filter((s) => s.id !== id));
   }, []);
 
   const getSchema = useCallback(
@@ -293,6 +320,7 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       schemas,
+      schemasLoading,
       addSchema,
       updateSchema,
       deleteSchema,
@@ -309,6 +337,7 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
     }),
     [
       schemas,
+      schemasLoading,
       addSchema,
       updateSchema,
       deleteSchema,

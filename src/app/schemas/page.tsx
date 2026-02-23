@@ -34,7 +34,7 @@ import {
 import type { FinalSchema } from "@/lib/types";
 
 export default function SchemasPage() {
-  const { schemas, deleteSchema, addSchema, setCurrentSchema, resetWorkflow } = useSchemaStore();
+  const { schemas, schemasLoading, deleteSchema, addSchema, setCurrentSchema, resetWorkflow } = useSchemaStore();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -64,8 +64,8 @@ export default function SchemasPage() {
         })),
         createdAt: new Date().toISOString(),
       };
-      addSchema(schema);
-      router.push(`/schemas/${schema.id}`);
+      const created = await addSchema(schema);
+      router.push(`/schemas/${created.id}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -129,6 +129,7 @@ export default function SchemasPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Name</TableHead>
+                    <TableHead>Creator</TableHead>
                     <TableHead>Fields</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead className="w-[100px]">Actions</TableHead>
@@ -136,7 +137,14 @@ export default function SchemasPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {schemas.map((s) => {
+                  {schemasLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                        Loading schemas...
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    schemas.map((s) => {
                     const fieldCount = flattenFields(s.fields).filter(
                       (f) => !f.children?.length,
                     ).length;
@@ -153,6 +161,9 @@ export default function SchemasPage() {
                         onClick={() => router.push(`/schemas/${s.id}`)}
                       >
                         <TableCell className="font-medium">{s.name}</TableCell>
+                        <TableCell className="text-muted-foreground text-sm">
+                          {s.creator?.name ?? s.creator?.email ?? "—"}
+                        </TableCell>
                         <TableCell className="text-muted-foreground">
                           {fieldCount} field{fieldCount !== 1 ? "s" : ""}
                         </TableCell>
@@ -192,7 +203,8 @@ export default function SchemasPage() {
                         </TableCell>
                       </TableRow>
                     );
-                  })}
+                  })
+                  )}
                 </TableBody>
               </Table>
             </CardContent>
@@ -212,10 +224,14 @@ export default function SchemasPage() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
+              onClick={async () => {
                 if (deleteId) {
-                  deleteSchema(deleteId);
-                  setDeleteId(null);
+                  try {
+                    await deleteSchema(deleteId);
+                    setDeleteId(null);
+                  } catch (err) {
+                    alert(err instanceof Error ? err.message : "Delete failed");
+                  }
                 }
               }}
             >
