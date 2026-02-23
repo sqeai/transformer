@@ -8,10 +8,11 @@ import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
 import { useSchemaStore } from "@/lib/schema-store";
 import { flattenFields } from "@/lib/schema-store";
-import type { ColumnMapping, DefaultValues, PivotConfig } from "@/lib/types";
+import type { ColumnMapping, DefaultValues, PivotConfig, VerticalPivotConfig } from "@/lib/types";
 import { ArrowRight, ArrowLeft, Sparkles, Loader2, AlertTriangle } from "lucide-react";
 import PivotConfigPanel from "@/components/PivotConfigPanel";
 import DefaultValuesPanel from "@/components/DefaultValuesPanel";
+import VerticalPivotPanel from "@/components/VerticalPivotPanel";
 
 const NODE_WIDTH = 240;
 const NODE_GAP = 60;
@@ -74,8 +75,8 @@ const nodeTypes = { mapping: MappingNode };
 
 export default function MappingPage() {
   const router = useRouter();
-  const { workflow, getSchema, setColumnMappings, setPivotConfig, setDefaultValues } = useSchemaStore();
-  const { currentSchemaId, rawColumns, rawRows, pivotConfig, defaultValues } = workflow;
+  const { workflow, getSchema, setColumnMappings, setPivotConfig, setVerticalPivotConfig, setDefaultValues } = useSchemaStore();
+  const { currentSchemaId, rawColumns, rawRows, pivotConfig, verticalPivotConfig, defaultValues } = workflow;
   const schema = currentSchemaId ? getSchema(currentSchemaId) : null;
   const targetPaths = useMemo(
     () => (schema ? flattenFields(schema.fields).filter((f) => !f.children?.length).map((f) => f.path) : []),
@@ -281,9 +282,10 @@ export default function MappingPage() {
         body: JSON.stringify({ rawColumns, targetPaths }),
       });
       if (!res.ok) return;
-      const { mappings, pivot, defaultValues: dv } = (await res.json()) as {
+      const { mappings, pivot, verticalPivot, defaultValues: dv } = (await res.json()) as {
         mappings: ColumnMapping[];
         pivot?: PivotConfig;
+        verticalPivot?: VerticalPivotConfig;
         defaultValues?: DefaultValues;
       };
       if (mappings.length > 0) {
@@ -303,6 +305,9 @@ export default function MappingPage() {
       if (pivot) {
         setPivotConfig(pivot);
       }
+      if (verticalPivot) {
+        setVerticalPivotConfig(verticalPivot);
+      }
       if (dv && Object.keys(dv).length > 0) {
         setDefaultValues(dv);
       }
@@ -311,7 +316,7 @@ export default function MappingPage() {
     } finally {
       setAutoMapping(false);
     }
-  }, [rawColumns, targetPaths, setColumnMappings, setEdges, setPivotConfig, targetPathToNodeId]);
+  }, [rawColumns, targetPaths, setColumnMappings, setEdges, setPivotConfig, setVerticalPivotConfig, targetPathToNodeId]);
 
   useEffect(() => {
     if (
@@ -415,6 +420,12 @@ export default function MappingPage() {
               unmappedTargetPaths={unmappedTargetPaths}
               defaultValues={defaultValues}
               onDefaultValuesChange={setDefaultValues}
+            />
+            <VerticalPivotPanel
+              rawColumns={rawColumns}
+              targetPaths={targetPaths}
+              verticalPivotConfig={verticalPivotConfig}
+              onVerticalPivotConfigChange={setVerticalPivotConfig}
             />
             <PivotConfigPanel
               rawColumns={rawColumns}

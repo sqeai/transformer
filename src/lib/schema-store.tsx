@@ -17,6 +17,7 @@ import type {
   PivotConfig,
   RawColumn,
   SchemaField,
+  VerticalPivotConfig,
 } from "./types";
 import { idbGet, idbSet, idbDelete } from "./idb-storage";
 
@@ -32,6 +33,7 @@ interface WorkflowState {
   rawRows: Record<string, unknown>[];
   columnMappings: ColumnMapping[];
   pivotConfig: PivotConfig;
+  verticalPivotConfig: VerticalPivotConfig;
   defaultValues: DefaultValues;
   /** Persisted upload page state so we can restore when navigating back to /upload */
   uploadState: {
@@ -48,6 +50,7 @@ interface WorkflowMeta {
   currentSchemaId: string | null;
   columnMappings: ColumnMapping[];
   pivotConfig: PivotConfig;
+  verticalPivotConfig: VerticalPivotConfig;
   defaultValues: DefaultValues;
 }
 
@@ -82,6 +85,7 @@ function saveWorkflowMeta(workflow: WorkflowState) {
     currentSchemaId: workflow.currentSchemaId,
     columnMappings: workflow.columnMappings,
     pivotConfig: workflow.pivotConfig,
+    verticalPivotConfig: workflow.verticalPivotConfig,
     defaultValues: workflow.defaultValues,
   };
   localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(meta));
@@ -131,10 +135,17 @@ interface SchemaStoreContextType {
   setRawData: (columns: RawColumn[], rows: Record<string, unknown>[]) => void;
   setColumnMappings: (mappings: ColumnMapping[]) => void;
   setPivotConfig: (config: PivotConfig) => void;
+  setVerticalPivotConfig: (config: VerticalPivotConfig) => void;
   setDefaultValues: (values: DefaultValues) => void;
   resetWorkflow: () => void;
   setUploadState: (state: WorkflowState["uploadState"]) => void;
 }
+
+const defaultVerticalPivotConfig: VerticalPivotConfig = {
+  enabled: false,
+  outputTargetPaths: [],
+  columns: [],
+};
 
 const defaultWorkflow: WorkflowState = {
   currentSchemaId: null,
@@ -142,6 +153,7 @@ const defaultWorkflow: WorkflowState = {
   rawRows: [],
   columnMappings: [],
   pivotConfig: { enabled: false, groupByColumns: [] },
+  verticalPivotConfig: defaultVerticalPivotConfig,
   defaultValues: {},
   uploadState: null,
 };
@@ -166,6 +178,7 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
           currentSchemaId: meta?.currentSchemaId ?? null,
           columnMappings: meta?.columnMappings ?? [],
           pivotConfig: meta?.pivotConfig ?? defaultWorkflow.pivotConfig,
+          verticalPivotConfig: meta?.verticalPivotConfig ?? defaultVerticalPivotConfig,
           defaultValues: meta?.defaultValues ?? {},
           rawColumns: large.rawColumns,
           rawRows: large.rawRows,
@@ -254,6 +267,10 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
     setWorkflow((w) => ({ ...w, pivotConfig }));
   }, []);
 
+  const setVerticalPivotConfig = useCallback((verticalPivotConfig: VerticalPivotConfig) => {
+    setWorkflow((w) => ({ ...w, verticalPivotConfig }));
+  }, []);
+
   const setDefaultValues = useCallback((defaultValues: DefaultValues) => {
     setWorkflow((w) => ({ ...w, defaultValues }));
   }, []);
@@ -285,6 +302,7 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
       setRawData,
       setColumnMappings,
       setPivotConfig,
+      setVerticalPivotConfig,
       setDefaultValues,
       resetWorkflow,
       setUploadState,
@@ -300,6 +318,7 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
       setRawData,
       setColumnMappings,
       setPivotConfig,
+      setVerticalPivotConfig,
       setDefaultValues,
       resetWorkflow,
       setUploadState,

@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/card";
 import { useSchemaStore, flattenFields } from "@/lib/schema-store";
 import type { ExportFormat } from "@/lib/types";
-import { Download, FileSpreadsheet, Database, FileText, Layers, ArrowLeft } from "lucide-react";
+import { Download, FileSpreadsheet, Database, FileText, Layers, ArrowLeft, CalendarDays } from "lucide-react";
 import ExcelJS from "exceljs";
 import { applyMappings, getByPath, formatDisplayValue } from "@/lib/pivot-transform";
 
@@ -38,7 +38,7 @@ const EXPORT_FORMATS: ExportFormat[] = [
 export default function ExportPage() {
   const router = useRouter();
   const { workflow, getSchema } = useSchemaStore();
-  const { rawRows, columnMappings, currentSchemaId, pivotConfig, defaultValues } = workflow;
+  const { rawRows, columnMappings, currentSchemaId, pivotConfig, verticalPivotConfig, defaultValues } = workflow;
   const schema = currentSchemaId ? getSchema(currentSchemaId) : null;
   const [exporting, setExporting] = useState<string | null>(null);
 
@@ -48,8 +48,8 @@ export default function ExportPage() {
   );
 
   const mappedRows = useMemo(
-    () => applyMappings(rawRows, columnMappings, pivotConfig, defaultValues, allTargetPaths),
-    [rawRows, columnMappings, pivotConfig, defaultValues, allTargetPaths],
+    () => applyMappings(rawRows, columnMappings, pivotConfig, defaultValues, allTargetPaths, verticalPivotConfig),
+    [rawRows, columnMappings, pivotConfig, defaultValues, allTargetPaths, verticalPivotConfig],
   );
 
   const columns = useMemo(() => {
@@ -198,6 +198,24 @@ export default function ExportPage() {
                   {rawRows.length !== mappedRows.length && (
                     <span className="text-muted-foreground">
                       {" "}({rawRows.length} raw rows aggregated into {mappedRows.length}.)
+                    </span>
+                  )}
+                </span>
+              </div>
+            </CardContent>
+          )}
+          {verticalPivotConfig.enabled && verticalPivotConfig.columns.length > 0 && (
+            <CardContent className={pivotConfig.enabled && pivotConfig.groupByColumns.length > 0 ? "pt-2" : "pt-0"}>
+              <div className="flex items-center gap-2 rounded-md border border-violet-300/30 bg-violet-50/50 dark:bg-violet-950/20 px-3 py-2 text-sm">
+                <CalendarDays className="h-4 w-4 text-violet-600 dark:text-violet-400 shrink-0" />
+                <span>
+                  Vertical pivot active — {verticalPivotConfig.columns.length} source column{verticalPivotConfig.columns.length !== 1 ? "s" : ""} expanded into rows
+                  {verticalPivotConfig.outputTargetPaths.length > 0 && (
+                    <> with output fields [{verticalPivotConfig.outputTargetPaths.join(", ")}]</>
+                  )}.
+                  {rawRows.length !== mappedRows.length && (
+                    <span className="text-muted-foreground">
+                      {" "}({rawRows.length} raw rows expanded to {mappedRows.length}.)
                     </span>
                   )}
                 </span>

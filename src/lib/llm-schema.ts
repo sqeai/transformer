@@ -1,7 +1,7 @@
 import { ChatAnthropic } from "@langchain/anthropic";
 import { HumanMessage, type BaseMessage } from "@langchain/core/messages";
 import { createAgent } from "langchain";
-import type { SchemaField, ColumnMapping, DefaultValues, PivotConfig, AggregationFunction } from "./types";
+import type { SchemaField, ColumnMapping, DefaultValues, PivotConfig, AggregationFunction, VerticalPivotConfig, VerticalPivotColumn } from "./types";
 import {
   extractWorkbookPreview,
   formatPreviewAsText,
@@ -88,6 +88,14 @@ Rules for pivot & aggregation:
    - "first" for columns where any single value is representative
 9. If the data does not appear to need pivoting (each row is already unique), set pivot.enabled to false with empty groupByColumns.
 
+Rules for vertical pivot (unpivot/melt):
+15. Look for multiple raw columns that represent repeating categories or time periods — e.g. "January 2025", "Feb 2026", "Mar-2026", "Q1 2025", "2025-01", or similar patterns. These are common in financial statements, budgets, and forecasts.
+16. If such columns exist, recommend a vertical pivot. This "unpivots" those columns into rows: each source column becomes a separate row with output fields populated from fieldValues.
+17. For each detected source column, provide a fieldValues object mapping target schema paths to the value for that field. Use the special token "$RAW" for exactly one field to mean "use the actual cell value from this source column". All other fields get static strings. For example, column "January 2025" with outputTargetPaths ["year", "month", "amount"] would have fieldValues: {"year": "2025", "month": "January", "amount": "$RAW"}.
+18. Choose outputTargetPaths: target schema paths that each source column will populate (e.g. ["year", "month", "amount"]). Include the field that should receive the raw cell data. Look for paths like "month", "year", "period", "date", "quarter", "amount", "value", "balance", or semantically similar fields.
+19. Do NOT include vertical-pivot columns in the regular mappings array — they are handled separately.
+20. If no repeating-category columns are detected, set verticalPivot.enabled to false with empty columns and outputTargetPaths arrays.
+
 Respond ONLY with a JSON object (no markdown fences, no commentary):
 {
   "mappings": [
@@ -102,6 +110,18 @@ Respond ONLY with a JSON object (no markdown fences, no commentary):
   "pivot": {
     "enabled": boolean,          // true if data should be pivoted
     "groupByColumns": string[]   // raw column names to group by (subset of mapped rawColumns)
+  },
+  "verticalPivot": {
+    "enabled": boolean,              // true if repeating-category columns were detected
+    "outputTargetPaths": string[],   // target schema paths for field values (e.g. ["year", "month", "amount"])
+    "columns": [                     // one entry per detected source column
+      {
+        "rawColumn": string,         // exact raw column name
+        "fieldValues": {             // maps each outputTargetPath to its value
+          "[targetPath]": string     // static string or "$RAW" for cell value, e.g. {"year": "2025", "month": "January", "amount": "$RAW"}
+        }
+      }
+    ]
   }
 }
 
@@ -134,6 +154,7 @@ export interface AutoMapResult {
 export interface AutoMapResponse {
   mappings: ColumnMapping[];
   pivot: PivotConfig;
+  verticalPivot: VerticalPivotConfig;
   defaultValues: DefaultValues;
 }
 
@@ -294,7 +315,15 @@ export async function autoMapColumnsWithLLM(
     `Map these raw columns to the target schema paths and recommend pivot/aggregation settings.\n\nRaw columns:\n${rawColumns.map((c, i) => `${i + 1}. "${c}"`).join("\n")}\n\nTarget schema paths:\n${targetPaths.map((p, i) => `${i + 1}. "${p}"`).join("\n")}`,
   );
 
-  let parsed: { mappings: AutoMapResult[]; pivot?: { enabled?: boolean; groupByColumns?: string[] } };
+  let parsed: {
+    mappings: AutoMapResult[];
+    pivot?: { enabled?: boolean; groupByColumns?: string[] };
+    verticalPivot?: {
+      enabled?: boolean;
+      outputTargetPaths?: string[];
+      columns?: { rawColumn: string; fieldValues: Record<string, string> }[];
+    };
+  };
   try {
     parsed = JSON.parse(cleanJsonResponse(text));
   } catch {
@@ -307,9 +336,15 @@ export async function autoMapColumnsWithLLM(
 
   const groupBySet = new Set(parsed.pivot?.groupByColumns ?? []);
 
+  const vpColumns: VerticalPivotColumn[] = (parsed.verticalPivot?.columns ?? [])
+    .filter((c) => rawColumns.includes(c.rawColumn) && c.fieldValues && typeof c.fieldValues === "object")
+    .map((c) => ({ rawColumn: c.rawColumn, fieldValues: c.fieldValues }));
+  const vpRawColumnSet = new Set(vpColumns.map((c) => c.rawColumn));
+
   const mappings: ColumnMapping[] = rawMappings
     .filter((m) => m.confidence >= 0.7)
     .filter((m) => rawColumns.includes(m.rawColumn) && targetPaths.includes(m.targetPath))
+    .filter((m) => !vpRawColumnSet.has(m.rawColumn))
     .map(({ rawColumn, targetPath, aggregation }) => {
       const mapping: ColumnMapping = { rawColumn, targetPath };
       if (aggregation && VALID_AGGREGATIONS.has(aggregation) && !groupBySet.has(rawColumn)) {
@@ -340,5 +375,15 @@ export async function autoMapColumnsWithLLM(
     groupByColumns: validGroupByColumns,
   };
 
-  return { mappings, pivot, defaultValues };
+  const vpOutputTargetPaths = (parsed.verticalPivot?.outputTargetPaths ?? []).filter(
+    (p) => targetPaths.includes(p),
+  );
+
+  const verticalPivot: VerticalPivotConfig = {
+    enabled: parsed.verticalPivot?.enabled === true && vpColumns.length > 0,
+    outputTargetPaths: vpOutputTargetPaths,
+    columns: vpColumns,
+  };
+
+  return { mappings, pivot, verticalPivot, defaultValues };
 }

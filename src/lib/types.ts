@@ -41,6 +41,38 @@ export interface PivotConfig {
   groupByColumns: string[]; // raw column names used to group rows
 }
 
+/**
+ * A single source column to be unpivoted.
+ * `fieldValues` maps each selected output target path to the value
+ * this column should produce for that field when expanded into a row.
+ * E.g. for "January 2025" with output targets ["year","month","amount"]:
+ *   fieldValues = { year: "2025", month: "January", amount: "$RAW" }
+ * The special token "$RAW" means "use the actual cell value from this source column".
+ */
+export interface VerticalPivotColumn {
+  rawColumn: string;
+  fieldValues: Record<string, string>;
+}
+
+/** Sentinel value indicating a field should be populated with the raw cell value */
+export const VP_RAW_VALUE_TOKEN = "$RAW";
+
+/**
+ * Configuration for "vertical pivot" (unpivot/melt).
+ * Multiple source columns are collapsed into rows. For each source column,
+ * a new row is produced with:
+ * - Regular mapped fields copied as-is
+ * - `outputTargetPaths` filled from the column's `fieldValues`
+ *   (static strings, or VP_RAW_VALUE_TOKEN for the actual cell data)
+ */
+export interface VerticalPivotConfig {
+  enabled: boolean;
+  /** Target schema paths selected as output fields (e.g. ["year", "month", "amount"]) */
+  outputTargetPaths: string[];
+  /** Source columns to unpivot */
+  columns: VerticalPivotColumn[];
+}
+
 export interface EdgeDefinition {
   rawColumn: string;
   targetPath: string;

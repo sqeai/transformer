@@ -1,4 +1,5 @@
-import type { AggregationFunction, ColumnMapping, DefaultValues, PivotConfig } from "./types";
+import type { AggregationFunction, ColumnMapping, DefaultValues, PivotConfig, VerticalPivotConfig } from "./types";
+import { VP_RAW_VALUE_TOKEN } from "./types";
 
 function setByPath(
   obj: Record<string, unknown>,
@@ -70,10 +71,17 @@ function aggregate(
   }
 }
 
+const defaultVerticalPivot: VerticalPivotConfig = {
+  enabled: false,
+  outputTargetPaths: [],
+  columns: [],
+};
+
 /**
- * Applies column mappings (with optional pivot aggregation) to raw rows.
+ * Applies column mappings (with optional pivot aggregation and vertical unpivot) to raw rows.
  * Without pivot: 1:1 row mapping.
  * With pivot: groups by the designated columns and aggregates the rest.
+ * With vertical pivot: each raw row is expanded into N rows (one per time-period column).
  *
  * When allTargetPaths is provided, every output row will contain all target
  * schema fields — mapped values take priority, then defaults, then empty string.
@@ -84,6 +92,7 @@ export function applyMappings(
   pivotConfig: PivotConfig,
   defaultValues: DefaultValues = {},
   allTargetPaths?: string[],
+  verticalPivotConfig: VerticalPivotConfig = defaultVerticalPivot,
 ): Record<string, unknown>[] {
   const fillSchemaFields = (out: Record<string, unknown>) => {
     if (allTargetPaths) {
@@ -100,15 +109,43 @@ export function applyMappings(
     }
   };
 
-  if (!pivotConfig.enabled || pivotConfig.groupByColumns.length === 0) {
-    return rawRows.map((raw) => {
-      const out: Record<string, unknown> = {};
-      for (const m of columnMappings) {
-        setByPath(out, m.targetPath, raw[m.rawColumn]);
+  const vpActive = verticalPivotConfig.enabled && verticalPivotConfig.columns.length > 0;
+
+  const applyRegularMappings = (raw: Record<string, unknown>): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const m of columnMappings) {
+      setByPath(out, m.targetPath, raw[m.rawColumn]);
+    }
+    return out;
+  };
+
+  const expandVerticalPivot = (baseRow: Record<string, unknown>, raw: Record<string, unknown>): Record<string, unknown>[] => {
+    if (!vpActive) return [baseRow];
+    return verticalPivotConfig.columns.map((col) => {
+      const expanded = structuredClone(baseRow);
+      for (const [targetPath, value] of Object.entries(col.fieldValues)) {
+        if (!targetPath) continue;
+        setByPath(
+          expanded,
+          targetPath,
+          value === VP_RAW_VALUE_TOKEN ? (raw[col.rawColumn] ?? "") : value,
+        );
       }
-      fillSchemaFields(out);
-      return out;
+      return expanded;
     });
+  };
+
+  if (!pivotConfig.enabled || pivotConfig.groupByColumns.length === 0) {
+    const result: Record<string, unknown>[] = [];
+    for (const raw of rawRows) {
+      const base = applyRegularMappings(raw);
+      const expanded = expandVerticalPivot(base, raw);
+      for (const row of expanded) {
+        fillSchemaFields(row);
+        result.push(row);
+      }
+    }
+    return result;
   }
 
   const groupBySet = new Set(pivotConfig.groupByColumns);
@@ -134,8 +171,26 @@ export function applyMappings(
         setByPath(out, m.targetPath, aggregate(values, fn));
       }
     }
-    fillSchemaFields(out);
-    result.push(out);
+
+    if (vpActive) {
+      for (const vpCol of verticalPivotConfig.columns) {
+        const expanded = structuredClone(out);
+        for (const [targetPath, value] of Object.entries(vpCol.fieldValues)) {
+          if (!targetPath) continue;
+          if (value === VP_RAW_VALUE_TOKEN) {
+            const values = rows.map((r) => r[vpCol.rawColumn]);
+            setByPath(expanded, targetPath, aggregate(values, "sum"));
+          } else {
+            setByPath(expanded, targetPath, value);
+          }
+        }
+        fillSchemaFields(expanded);
+        result.push(expanded);
+      }
+    } else {
+      fillSchemaFields(out);
+      result.push(out);
+    }
   }
 
   return result;

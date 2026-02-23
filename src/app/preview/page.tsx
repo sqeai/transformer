@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/table";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { useSchemaStore, flattenFields } from "@/lib/schema-store";
-import { ArrowRight, ArrowLeft, Layers, ArrowDownUp } from "lucide-react";
+import { ArrowRight, ArrowLeft, Layers, ArrowDownUp, CalendarDays } from "lucide-react";
 import { applyMappings, getByPath, formatDisplayValue } from "@/lib/pivot-transform";
 import type { AggregationFunction } from "@/lib/types";
 
@@ -38,7 +38,7 @@ const AGG_LABELS: Record<AggregationFunction, string> = {
 export default function PreviewPage() {
   const router = useRouter();
   const { workflow, getSchema } = useSchemaStore();
-  const { rawRows, columnMappings, currentSchemaId, pivotConfig, defaultValues } = workflow;
+  const { rawRows, columnMappings, currentSchemaId, pivotConfig, verticalPivotConfig, defaultValues } = workflow;
   const schema = currentSchemaId ? getSchema(currentSchemaId) : null;
 
   const allTargetPaths = useMemo(
@@ -47,8 +47,8 @@ export default function PreviewPage() {
   );
 
   const previewRows = useMemo(
-    () => applyMappings(rawRows, columnMappings, pivotConfig, defaultValues, allTargetPaths),
-    [rawRows, columnMappings, pivotConfig, defaultValues, allTargetPaths],
+    () => applyMappings(rawRows, columnMappings, pivotConfig, defaultValues, allTargetPaths, verticalPivotConfig),
+    [rawRows, columnMappings, pivotConfig, defaultValues, allTargetPaths, verticalPivotConfig],
   );
 
   const previewColumns = useMemo(() => {
@@ -82,6 +82,7 @@ export default function PreviewPage() {
   }
 
   const isPivoted = pivotConfig.enabled && pivotConfig.groupByColumns.length > 0;
+  const isVerticallyPivoted = verticalPivotConfig.enabled && verticalPivotConfig.columns.length > 0;
   const groupBySet = new Set(pivotConfig.groupByColumns);
   const aggregatedMappings = isPivoted
     ? columnMappings.filter((m) => !groupBySet.has(m.rawColumn))
@@ -154,6 +155,42 @@ export default function PreviewPage() {
                   ))}
                 </div>
               )}
+            </CardContent>
+          </Card>
+        )}
+
+        {isVerticallyPivoted && (
+          <Card className="border-violet-400/30 bg-violet-50/50 dark:bg-violet-950/20">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                <CardTitle className="text-base">Vertical Pivot (Unpivot) Applied</CardTitle>
+              </div>
+              <CardDescription>
+                Source columns were expanded into rows with output fields and a value column.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-start gap-6 text-sm">
+                <div>
+                  <span className="font-medium">Source columns:</span>{" "}
+                  <span className="text-muted-foreground">
+                    {verticalPivotConfig.columns.map((c) => c.rawColumn).join(", ")}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <ArrowDownUp className="h-3.5 w-3.5" />
+                  {rawRows.length} rows &rarr; {previewRows.length} rows
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {verticalPivotConfig.outputTargetPaths.map((p) => (
+                  <span key={p} className="inline-flex items-center gap-1 rounded-md bg-background border px-2 py-1 text-xs">
+                    <span className="font-medium">{p}</span>
+                    <span className="text-muted-foreground">(output field)</span>
+                  </span>
+                ))}
+              </div>
             </CardContent>
           </Card>
         )}

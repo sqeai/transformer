@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useSchemaStore, flattenFields } from "@/lib/schema-store";
-import { FileUp, Plus, Trash2, Loader2, ChevronRight } from "lucide-react";
+import { FileUp, Plus, Trash2, Loader2, ChevronRight, Play } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,7 +34,7 @@ import {
 import type { FinalSchema } from "@/lib/types";
 
 export default function SchemasPage() {
-  const { schemas, deleteSchema, addSchema } = useSchemaStore();
+  const { schemas, deleteSchema, addSchema, setCurrentSchema, resetWorkflow } = useSchemaStore();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -160,17 +160,32 @@ export default function SchemasPage() {
                           {createdDate}
                         </TableCell>
                         <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive hover:text-destructive"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteId(s.id);
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                resetWorkflow();
+                                setCurrentSchema(s.id);
+                                router.push("/upload");
+                              }}
+                            >
+                              <Play className="mr-1 h-4 w-4" />
+                              Use
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteId(s.id);
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                         <TableCell>
                           <ChevronRight className="h-4 w-4 text-muted-foreground" />
