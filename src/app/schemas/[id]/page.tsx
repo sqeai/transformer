@@ -25,7 +25,18 @@ import {
   UserPlus,
   Loader2,
   X,
+  Trash2,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import FinalSchemaTable from "@/components/FinalSchemaTable";
 import type { FinalSchema } from "@/lib/types";
 import { useAuth } from "@/hooks/useAuth";
@@ -35,7 +46,7 @@ export default function SchemaDetailPage() {
   const router = useRouter();
   const id = params.id as string;
   const { user } = useAuth();
-  const { getSchema, updateSchema, setCurrentSchema, workflow } = useSchemaStore();
+  const { getSchema, updateSchema, setCurrentSchema, deleteSchema, workflow } = useSchemaStore();
   const schema = getSchema(id);
   const [name, setName] = useState(schema?.name ?? "");
   const [saved, setSaved] = useState(false);
@@ -44,6 +55,8 @@ export default function SchemaDetailPage() {
   const [grantEmail, setGrantEmail] = useState("");
   const [granting, setGranting] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const isOwner = !!user && !!schema?.creator && schema.creator.id === user.id;
 
@@ -163,10 +176,22 @@ export default function SchemaDetailPage() {
               )}
             </div>
           </div>
-          <Button onClick={handleUseSchema}>
-            Use This Schema
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            {isOwner && (
+              <Button
+                variant="outline"
+                className="text-destructive border-destructive/30 hover:bg-destructive/10 hover:border-destructive/50"
+                onClick={() => setShowDeleteConfirm(true)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete this schema
+              </Button>
+            )}
+            <Button onClick={handleUseSchema}>
+              Use This Schema
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
         {/* Info + Name section */}
@@ -312,6 +337,39 @@ export default function SchemaDetailPage() {
           readOnly={false}
         />
       </div>
+
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this schema?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This cannot be undone. The schema &quot;{schema.name}&quot; and all its fields will be permanently removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                try {
+                  setDeleting(true);
+                  await deleteSchema(id);
+                  setShowDeleteConfirm(false);
+                  router.push("/schemas");
+                } catch (err) {
+                  alert(err instanceof Error ? err.message : "Delete failed");
+                } finally {
+                  setDeleting(false);
+                }
+              }}
+              disabled={deleting}
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }

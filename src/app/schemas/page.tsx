@@ -303,7 +303,7 @@ export default function SchemasPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete schema?</AlertDialogTitle>
             <AlertDialogDescription>
-              This cannot be undone.
+              This cannot be undone. The schema{deleteId ? ` "${schemas.find((s) => s.id === deleteId)?.name ?? ""}"` : ""} and all its fields will be permanently removed.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
