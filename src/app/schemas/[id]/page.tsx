@@ -157,8 +157,8 @@ export default function SchemaDetailPage() {
                 Configure fields, descriptions, ordering, and default values.
               </p>
               {!isOwner && schema.creator && (
-                <p className="text-sm text-amber-600 dark:text-amber-500 mt-1">
-                  You have view-only access. Only the creator can edit this schema.
+                <p className="text-sm text-muted-foreground mt-1">
+                  You can edit this schema. Only the creator can delete it.
                 </p>
               )}
             </div>
@@ -216,8 +216,7 @@ export default function SchemaDetailPage() {
           </Card>
         </div>
 
-        {/* Schema name editor — only for owner */}
-        {isOwner && (
+        {/* Schema name editor — owner and grantees can edit */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Schema Name</CardTitle>
@@ -238,25 +237,13 @@ export default function SchemaDetailPage() {
             </div>
           </CardContent>
         </Card>
-        )}
-
-        {!isOwner && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Schema Name</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm font-medium">{schema.name}</p>
-            </CardContent>
-          </Card>
-        )}
 
         {isOwner && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Shared access</CardTitle>
               <CardDescription>
-                Grant view access so others can see this schema. They will not be able to edit or delete it.
+                Grant access so others can see and edit this schema. Only you can delete it or manage access.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -322,7 +309,7 @@ export default function SchemaDetailPage() {
           onUpdateSchema={handleUpdateSchema}
           rawRows={workflow.currentSchemaId === id ? workflow.rawRows : []}
           columnMappings={workflow.currentSchemaId === id ? workflow.columnMappings : []}
-          readOnly={!isOwner}
+          readOnly={false}
         />
       </div>
     </DashboardLayout>
