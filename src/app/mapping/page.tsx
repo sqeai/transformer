@@ -6,6 +6,7 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 import { ReactFlow, Position, addEdge, Background, Controls, MiniMap, Handle, useNodesState, useEdgesState, type Connection, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useSchemaStore } from "@/lib/schema-store";
 import { flattenFields } from "@/lib/schema-store";
 import type { ColumnMapping, DefaultValues, PivotConfig, VerticalPivotConfig } from "@/lib/types";
@@ -432,14 +433,19 @@ export default function MappingPage() {
   if (!schema || rawColumns.length === 0) {
     return (
       <DashboardLayout>
-        <div className="rounded-lg border bg-card p-6">
-          <p className="text-muted-foreground">
-            No schema or raw data. Upload a schema, then upload raw data from the Upload page.
-          </p>
-          <Button className="mt-4" onClick={() => router.push("/schemas")}>
-            Go to Schemas
-          </Button>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>No schema or raw data</CardTitle>
+            <CardDescription>
+              Upload a schema from Final Schemas, then use it and upload raw data from the Upload page. Come back here to map columns.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => router.push("/schemas")}>
+              Go to Final Schemas
+            </Button>
+          </CardContent>
+        </Card>
       </DashboardLayout>
     );
   }

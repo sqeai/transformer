@@ -130,18 +130,19 @@ export default function SchemasPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-[140px]">Step 1 — Use schema</TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead>Creator</TableHead>
                     <TableHead>Fields</TableHead>
                     <TableHead>Created</TableHead>
-                    <TableHead className="w-[100px]">Actions</TableHead>
+                    <TableHead className="w-[80px]">Actions</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {schemasLoading ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                         Loading schemas...
                       </TableCell>
                     </TableRow>
@@ -162,6 +163,20 @@ export default function SchemasPage() {
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() => router.push(`/schemas/${s.id}`)}
                       >
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              resetWorkflow();
+                              setCurrentSchema(s.id);
+                              router.push("/upload");
+                            }}
+                            className="font-medium"
+                          >
+                            <Play className="mr-1.5 h-4 w-4" />
+                            Use this schema
+                          </Button>
+                        </TableCell>
                         <TableCell className="font-medium">{s.name}</TableCell>
                         <TableCell className="text-muted-foreground text-sm">
                           {s.creator?.name ?? s.creator?.email ?? "—"}
@@ -174,19 +189,6 @@ export default function SchemasPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                resetWorkflow();
-                                setCurrentSchema(s.id);
-                                router.push("/upload");
-                              }}
-                            >
-                              <Play className="mr-1 h-4 w-4" />
-                              Use
-                            </Button>
                             {user && s.creator && s.creator.id === user.id && (
                             <Button
                               variant="ghost"
