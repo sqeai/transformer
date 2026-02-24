@@ -1,14 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,7 +11,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Columns3, Rows3, Settings2, ChevronDown, ChevronUp, MoreHorizontal } from "lucide-react";
+import { Columns3, Rows3, Settings2, ChevronDown, ChevronUp, MoreHorizontal, AlertTriangle, Loader2 } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export interface DataBoundary {
   headerRowIndex: number;
@@ -40,6 +33,8 @@ interface DataPreviewTableProps {
   totalColumns: number;
   initialBoundary?: Partial<DataBoundary>;
   onBoundaryChange: (boundary: DataBoundary) => void;
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
 }
 
 export default function DataPreviewTable({
@@ -48,6 +43,8 @@ export default function DataPreviewTable({
   totalColumns,
   initialBoundary,
   onBoundaryChange,
+  onLoadMore,
+  loadingMore,
 }: DataPreviewTableProps) {
   const maxRowIdx = Math.max(0, totalRows - 1);
   const maxColIdx = Math.max(0, totalColumns - 1);
@@ -208,17 +205,6 @@ export default function DataPreviewTable({
       setSelectedRowIndex(initialBoundary.headerRowIndex ?? 0);
   }, [initialBoundary?.headerRowIndex]);
 
-  // Scroll selected row to center (5 rows up, 5 rows down)
-  useEffect(() => {
-    if (selectedRowIndex == null || !scrollContainerRef.current) return;
-    const rowEl = scrollContainerRef.current.querySelector(
-      `[data-original-index="${selectedRowIndex}"]`,
-    );
-    if (rowEl) {
-      rowEl.scrollIntoView({ block: "center", behavior: "smooth" });
-    }
-  }, [selectedRowIndex]);
-
   const columnLabels = useMemo(() => {
     const count = endCol - startCol + 1;
     return Array.from({ length: count }, (_, i) => {
@@ -237,16 +223,32 @@ export default function DataPreviewTable({
     return false;
   }, [rows]);
 
+  const hasTrailingGap = useMemo(
+    () =>
+      totalRows > rows.length &&
+      rows.length > 0 &&
+      rows[rows.length - 1].originalIndex < totalRows - 1,
+    [totalRows, rows],
+  );
+  const trailingGapCount = useMemo(
+    () =>
+      hasTrailingGap && rows.length > 0
+        ? totalRows - 1 - rows[rows.length - 1].originalIndex
+        : 0,
+    [hasTrailingGap, totalRows, rows],
+  );
+
   const rowsWithGaps = useMemo(() => {
-    const result: (IndexedRow | "gap")[] = [];
+    const result: (IndexedRow | "gap" | "trailingGap")[] = [];
     for (let i = 0; i < rows.length; i++) {
       if (i > 0 && rows[i].originalIndex - rows[i - 1].originalIndex > 1) {
         result.push("gap");
       }
       result.push(rows[i]);
     }
+    if (hasTrailingGap) result.push("trailingGap");
     return result;
-  }, [rows]);
+  }, [rows, hasTrailingGap]);
 
   const skippedCount = useMemo(() => {
     if (!hasGap) return 0;
@@ -504,84 +506,146 @@ export default function DataPreviewTable({
       )}
 
       <CardContent className={showSettings ? "pt-0" : ""}>
+        {totalRows > rows.length && rows.length > 0 && (
+          <Alert variant="default" className="mb-3 border-amber-500/50 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-500/30">
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+            <AlertDescription>
+              Only the first {rows.length} of {totalRows} rows are shown in this preview to keep loading fast. Your boundary settings and full data will still be used when you continue.
+            </AlertDescription>
+          </Alert>
+        )}
         <div
           ref={scrollContainerRef}
-          className="rounded-md border overflow-auto min-h-0 max-w-full"
+          className="rounded-md border overflow-x-auto overflow-y-visible max-w-full"
         >
-          <Table>
-            <TableHeader className="sticky top-0 z-10 bg-background">
-              <TableRow>
-                <TableHead className="w-12 text-center text-[10px] text-muted-foreground/60 font-mono">
-                  #
-                </TableHead>
-                {columnLabels.map((label, i) => (
-                  <TableHead
-                    key={i}
-                    className="text-xs whitespace-nowrap max-w-[200px] truncate text-muted-foreground/60"
-                  >
-                    {label}
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rowsWithGaps.map((entry, idx) => {
-                if (entry === "gap") {
-                  return (
-                    <TableRow key={`gap-${idx}`} className="border-y-2 border-dashed border-muted-foreground/20 bg-zinc-800/70 dark:bg-zinc-950/80 hover:bg-zinc-800/70 dark:hover:bg-zinc-950/80">
-                      <TableCell
-                        colSpan={colCount + 1}
-                        className="py-2"
-                      >
-                        <span className="inline-flex items-center gap-2 text-xs text-white dark:text-zinc-100">
-                          <MoreHorizontal className="h-3 w-3" />
-                          {skippedCount} rows hidden
-                          <MoreHorizontal className="h-3 w-3" />
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  );
-                }
-
-                const rowIdx = entry.originalIndex;
-                const rowData = entry.data;
-                const isHeader = rowIdx === headerRow;
-                const isOutside = !isHeader && (rowIdx < dataStart || rowIdx > dataEnd);
-
+          <div className="w-fit min-w-full">
+          <div
+            role="row"
+            className="grid w-full bg-background border-b border-border"
+            style={{ gridTemplateColumns: `48px repeat(${colCount}, minmax(80px, 1fr))` }}
+          >
+              <div
+                role="columnheader"
+                className="text-center text-[10px] text-muted-foreground/60 font-mono py-2 px-1 w-12"
+              >
+                #
+              </div>
+              {columnLabels.map((label, i) => (
+                <div
+                  key={i}
+                  role="columnheader"
+                  className="text-xs whitespace-nowrap max-w-[200px] truncate text-muted-foreground/60 py-2 px-2"
+                >
+                  {label}
+                </div>
+              ))}
+            </div>
+            {rowsWithGaps.map((entry, idx) => {
+              if (entry === "gap") {
                 return (
-                  <TableRow
-                    key={rowIdx}
-                    data-original-index={rowIdx}
-                    className={`${getRowClass(rowIdx)} cursor-pointer ${
-                      isSelected(rowIdx)
-                        ? "ring-2 ring-inset ring-primary bg-primary/10 dark:bg-primary/20"
-                        : "hover:bg-muted/50"
-                    }`}
-                    onClick={() => setSelectedRowIndex(rowIdx)}
+                  <div
+                    key={`gap-${idx}`}
+                    role="row"
+                    className="flex w-full items-center justify-start gap-2 border-y-2 border-dashed border-muted-foreground/20 bg-zinc-800/70 dark:bg-zinc-950/80 py-2 pl-3 text-xs text-white dark:text-zinc-100"
                   >
-                    <TableCell className="text-center text-[10px] text-muted-foreground/60 font-mono py-1.5">
-                      {rowIdx + 1}
-                    </TableCell>
-                    {rowData.slice(startCol, endCol + 1).map((cell, ci) => (
-                      <TableCell
-                        key={ci}
-                        className={`py-1.5 text-xs whitespace-nowrap max-w-[200px] truncate ${
-                          isHeader
-                            ? "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-semibold"
-                            : isOutside
-                              ? "text-muted-foreground/40"
-                              : ""
-                        }`}
-                        title={String(cell)}
+                    <MoreHorizontal className="h-3 w-3 shrink-0" />
+                    {skippedCount} rows hidden
+                    {onLoadMore && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="ml-2 h-7 text-xs text-black dark:text-white"
+                        onClick={onLoadMore}
+                        disabled={loadingMore}
                       >
-                        {cell || (isHeader ? <span className="text-blue-400/40 italic">empty</span> : "")}
-                      </TableCell>
-                    ))}
-                  </TableRow>
+                        {loadingMore ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          "Load more rows"
+                        )}
+                      </Button>
+                    )}
+                    <MoreHorizontal className="h-3 w-3 shrink-0" />
+                  </div>
                 );
-              })}
-            </TableBody>
-          </Table>
+              }
+              if (entry === "trailingGap") {
+                return (
+                  <div
+                    key="trailing-gap"
+                    role="row"
+                    className="flex w-full items-center justify-start gap-2 border-y-2 border-dashed border-muted-foreground/20 bg-zinc-800/70 dark:bg-zinc-950/80 py-2 pl-3 text-xs text-white dark:text-zinc-100"
+                  >
+                    <MoreHorizontal className="h-3 w-3 shrink-0" />
+                    {trailingGapCount} more rows not shown
+                    {onLoadMore && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="ml-2 h-7 text-xs text-black dark:text-white"
+                        onClick={onLoadMore}
+                        disabled={loadingMore}
+                      >
+                        {loadingMore ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <>Load more rows ({trailingGapCount} remaining)</>
+                        )}
+                      </Button>
+                    )}
+                    <MoreHorizontal className="h-3 w-3 shrink-0" />
+                  </div>
+                );
+              }
+              const rowIdx = entry.originalIndex;
+              const rowData = entry.data;
+              const isHeader = rowIdx === headerRow;
+              const isOutside =
+                !isHeader && (rowIdx < dataStart || rowIdx > dataEnd);
+              return (
+                <div
+                  key={rowIdx}
+                  role="row"
+                  data-original-index={rowIdx}
+                  className={`grid w-full border-b border-border/50 ${getRowClass(rowIdx)} cursor-pointer ${
+                    isSelected(rowIdx)
+                      ? "ring-2 ring-inset ring-primary bg-primary/10 dark:bg-primary/20"
+                      : "hover:bg-muted/50"
+                  }`}
+                  style={{ gridTemplateColumns: `48px repeat(${colCount}, minmax(80px, 1fr))` }}
+                  onClick={() => setSelectedRowIndex(rowIdx)}
+                >
+                  <div
+                    role="cell"
+                    className="text-center text-[10px] text-muted-foreground/60 font-mono py-1.5 px-1"
+                  >
+                    {rowIdx + 1}
+                  </div>
+                  {rowData.slice(startCol, endCol + 1).map((cell, ci) => (
+                    <div
+                      key={ci}
+                      role="cell"
+                      className={`py-1.5 px-2 text-xs whitespace-nowrap max-w-[200px] truncate ${
+                        isHeader
+                          ? "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-semibold"
+                          : isOutside
+                            ? "text-muted-foreground/40"
+                            : ""
+                      }`}
+                      title={String(cell)}
+                    >
+                      {cell ||
+                        (isHeader ? (
+                          <span className="text-blue-400/40 italic">empty</span>
+                        ) : (
+                          ""
+                        ))}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">

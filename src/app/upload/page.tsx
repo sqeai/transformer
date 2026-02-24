@@ -31,9 +31,9 @@ import {
 
 type Step = "idle" | "loading_preview" | "analyzing" | "preview" | "parsing";
 
-const PREVIEW_TOP_N = 10;
-const PREVIEW_BOTTOM_N = 10;
-const PREVIEW_MAX_COLS = 500;
+const PREVIEW_TOP_N = 30;
+const PREVIEW_BOTTOM_N = 0;
+const PREVIEW_MAX_COLS = 50;
 
 interface PreviewData {
   rows: IndexedRow[];
@@ -59,6 +59,8 @@ export default function UploadPage() {
   const [analysis, setAnalysis] = useState<RawDataAnalysis | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [boundary, setBoundary] = useState<DataBoundary | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadedCountRef = useRef(PREVIEW_TOP_N);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const restoredRef = useRef(false);
 
@@ -90,6 +92,7 @@ export default function UploadPage() {
       setAnalysis(null);
       setPreview(null);
       setBoundary(null);
+      loadedCountRef.current = PREVIEW_TOP_N;
       const savedSchemaId = schemaId;
       resetWorkflow();
       if (savedSchemaId) setCurrentSchema(savedSchemaId);
@@ -262,45 +265,52 @@ export default function UploadPage() {
     [preview],
   );
 
-  const handleBoundaryChange = useCallback(
-    (newBoundary: DataBoundary) => {
-      setBoundary(newBoundary);
+  const handleBoundaryChange = useCallback((newBoundary: DataBoundary) => {
+    setBoundary(newBoundary);
+    // No refetch on boundary change — data is only loaded via "Load More Rows" or initial load
+  }, []);
 
-      if (!preview) return;
+  const loadMoreRows = useCallback(async () => {
+    if (!preview || loadingMore) return;
 
-      const bnd = {
-        headerRowIndex: newBoundary.headerRowIndex,
-        dataStartRowIndex: newBoundary.dataStartRowIndex,
-        dataEndRowIndex: newBoundary.dataEndRowIndex,
-      };
+    setLoadingMore(true);
+    const nextCount = loadedCountRef.current + PREVIEW_TOP_N;
 
-      const refresh = async () => {
-        try {
-          if (preview.isExcel && preview.excelBuffer) {
-            const { rows: newRows, totalRows, totalColumns } = await extractExcelGridTopBottom(
-              preview.excelBuffer,
-              PREVIEW_TOP_N,
-              PREVIEW_BOTTOM_N,
-              PREVIEW_MAX_COLS,
-              preview.activeSheetIndex ?? 0,
-              bnd,
-            );
-            setPreview((prev) => prev ? { ...prev, rows: newRows, totalRows, totalColumns } : prev);
-          } else if (preview.csvText) {
-            const { rows: newRows, totalRows, totalColumns } = extractCsvPreviewTopBottom(
-              preview.csvText, PREVIEW_TOP_N, PREVIEW_BOTTOM_N, bnd,
-            );
-            setPreview((prev) => prev ? { ...prev, rows: newRows, totalRows, totalColumns } : prev);
-          }
-        } catch {
-          // Keep existing preview on error
-        }
-      };
-
-      refresh();
-    },
-    [preview],
-  );
+    try {
+      if (preview.isExcel && preview.excelBuffer) {
+        const bnd = boundary ? {
+          headerRowIndex: boundary.headerRowIndex,
+          dataStartRowIndex: boundary.dataStartRowIndex,
+          dataEndRowIndex: boundary.dataEndRowIndex,
+        } : undefined;
+        const { rows: newRows, totalRows, totalColumns } = await extractExcelGridTopBottom(
+          preview.excelBuffer,
+          nextCount,
+          PREVIEW_BOTTOM_N,
+          PREVIEW_MAX_COLS,
+          preview.activeSheetIndex ?? 0,
+          bnd,
+        );
+        loadedCountRef.current = nextCount;
+        setPreview((prev) => prev ? { ...prev, rows: newRows, totalRows, totalColumns } : prev);
+      } else if (preview.csvText) {
+        const bnd = boundary ? {
+          headerRowIndex: boundary.headerRowIndex,
+          dataStartRowIndex: boundary.dataStartRowIndex,
+          dataEndRowIndex: boundary.dataEndRowIndex,
+        } : undefined;
+        const { rows: newRows, totalRows, totalColumns } = extractCsvPreviewTopBottom(
+          preview.csvText, nextCount, PREVIEW_BOTTOM_N, bnd,
+        );
+        loadedCountRef.current = nextCount;
+        setPreview((prev) => prev ? { ...prev, rows: newRows, totalRows, totalColumns } : prev);
+      }
+    } catch {
+      // Keep existing preview on error
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [preview, boundary, loadingMore]);
 
   const resetToIdle = () => {
     setStep("idle");
@@ -309,6 +319,7 @@ export default function UploadPage() {
     setAnalysis(null);
     setError(null);
     setUploadState(null);
+    loadedCountRef.current = PREVIEW_TOP_N;
   };
 
   const onDrop = useCallback(
@@ -450,6 +461,8 @@ export default function UploadPage() {
               totalColumns={preview.totalColumns}
               initialBoundary={boundary}
               onBoundaryChange={handleBoundaryChange}
+              onLoadMore={loadMoreRows}
+              loadingMore={loadingMore}
             />
           </>
         )}
