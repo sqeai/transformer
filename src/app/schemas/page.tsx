@@ -19,8 +19,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useSchemaStore, flattenFields } from "@/lib/schema-store";
-import { FileUp, Plus, Trash2, Loader2, ChevronRight, Play } from "lucide-react";
+import { Plus, Trash2, Loader2, ChevronRight, Play, FileSpreadsheet, Pencil } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,8 +48,32 @@ export default function SchemasPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [addSchemaOpen, setAddSchemaOpen] = useState(false);
+  const [addingManual, setAddingManual] = useState(false);
 
-  const handleUploadClick = () => fileInputRef.current?.click();
+  const handleUploadClick = () => {
+    setAddSchemaOpen(false);
+    fileInputRef.current?.click();
+  };
+
+  const handleAddFieldsManually = async () => {
+    setAddingManual(true);
+    try {
+      const schema: FinalSchema = {
+        id: crypto.randomUUID(),
+        name: "New Schema",
+        fields: [],
+        createdAt: new Date().toISOString(),
+      };
+      const created = await addSchema(schema);
+      setAddSchemaOpen(false);
+      router.push(`/schemas/${created.id}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to create schema");
+    } finally {
+      setAddingManual(false);
+    }
+  };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -94,13 +125,13 @@ export default function SchemasPage() {
               className="hidden"
               onChange={handleFileChange}
             />
-            <Button onClick={handleUploadClick} disabled={uploading}>
+            <Button onClick={() => setAddSchemaOpen(true)} disabled={uploading}>
               {uploading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
-                <FileUp className="mr-2 h-4 w-4" />
+                <Plus className="mr-2 h-4 w-4" />
               )}
-              Upload Excel Schema
+              Add New Schema
             </Button>
           </div>
         </div>
@@ -110,13 +141,13 @@ export default function SchemasPage() {
             <CardHeader>
               <CardTitle>No schemas yet</CardTitle>
               <CardDescription>
-                Upload an Excel file with a header row. The AI agent will parse it into a final schema that you can fully configure.
+                Add a new schema by uploading from an existing Excel file or by defining fields manually.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button onClick={handleUploadClick} disabled={uploading}>
+              <Button onClick={() => setAddSchemaOpen(true)} disabled={uploading}>
                 <Plus className="mr-2 h-4 w-4" />
-                Upload your first schema
+                Add New Schema
               </Button>
             </CardContent>
           </Card>
@@ -217,6 +248,55 @@ export default function SchemasPage() {
           </Card>
         )}
       </div>
+
+      <Dialog open={addSchemaOpen} onOpenChange={setAddSchemaOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add New Schema</DialogTitle>
+            <DialogDescription>
+              Upload from an existing Excel file or add fields manually.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex min-h-0 flex-col gap-3 py-2">
+            <Button
+              variant="outline"
+              className="h-auto min-w-0 flex-shrink-0 flex-col items-start gap-1.5 whitespace-normal py-4 text-left"
+              onClick={handleUploadClick}
+              disabled={uploading}
+            >
+              <span className="flex w-full items-center gap-2 font-medium">
+                {uploading ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                ) : (
+                  <FileSpreadsheet className="h-4 w-4 shrink-0" />
+                )}
+                <span className="min-w-0 break-words">Upload from existing Excel</span>
+              </span>
+              <span className="w-full text-left text-muted-foreground text-sm font-normal break-words">
+                Parse a header row from an Excel file into a schema you can configure.
+              </span>
+            </Button>
+            <Button
+              variant="outline"
+              className="h-auto min-w-0 flex-shrink-0 flex-col items-start gap-1.5 whitespace-normal py-4 text-left"
+              onClick={handleAddFieldsManually}
+              disabled={addingManual}
+            >
+              <span className="flex w-full items-center gap-2 font-medium">
+                {addingManual ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                ) : (
+                  <Pencil className="h-4 w-4 shrink-0" />
+                )}
+                <span className="min-w-0 break-words">Add fields manually</span>
+              </span>
+              <span className="w-full text-left text-muted-foreground text-sm font-normal break-words">
+                Create an empty schema and define each field yourself.
+              </span>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <AlertDialogContent>
