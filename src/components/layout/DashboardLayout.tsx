@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, useState, useEffect, useRef } from "react";
+import { type ReactNode, useState, useEffect } from "react";
 import {
   LogOut,
   Sparkles,
@@ -40,20 +40,23 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
-  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
     if (stored !== null) {
       setCollapsed(stored === "true");
     }
-    hasLoadedRef.current = true;
   }, []);
 
-  useEffect(() => {
-    if (!hasLoadedRef.current) return;
-    localStorage.setItem(SIDEBAR_STORAGE_KEY, String(collapsed));
-  }, [collapsed]);
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      const next = !c;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next));
+      }
+      return next;
+    });
+  };
 
   return (
     <ProtectedRoute>
@@ -125,7 +128,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                   "w-full text-sidebar-foreground",
                   collapsed ? "justify-center px-0" : "justify-start",
                 )}
-                onClick={() => setCollapsed((c) => !c)}
+                onClick={toggleCollapsed}
               >
                 {collapsed ? (
                   <PanelLeftOpen className="h-4 w-4" />
