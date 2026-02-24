@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DndContext,
   closestCenter,
@@ -44,6 +44,9 @@ import {
   ChevronUp,
   Eye,
   EyeOff,
+  Pencil,
+  Save,
+  X,
 } from "lucide-react";
 import type { SchemaField, FinalSchema } from "@/lib/types";
 
@@ -313,14 +316,13 @@ export default function FinalSchemaTable({
 }: FinalSchemaTableProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [showPreview, setShowPreview] = useState(true);
+  const [isEditing, setIsEditing] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   const schemaFlat = useMemo(() => flattenWithPath(schema.fields), [schema.fields]);
   const [draftFlat, setDraftFlat] = useState<FlatField[] | null>(null);
-  const flat = draftFlat ?? schemaFlat;
-
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
-  const pendingCommitRef = useRef<FlatField[] | null>(null);
-  const DEBOUNCE_MS = 500;
+  const flat = isEditing && draftFlat ? draftFlat : schemaFlat;
+  const tableReadOnly = readOnly || !isEditing;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -336,58 +338,46 @@ export default function FinalSchemaTable({
     [schema.id, onUpdateSchema, readOnly],
   );
 
-  const flushCommit = useCallback(() => {
-    if (pendingCommitRef.current) {
-      const toCommit = pendingCommitRef.current;
-      pendingCommitRef.current = null;
-      commitFields(toCommit);
-    }
-  }, [commitFields]);
-
-  const debouncedCommit = useCallback(
-    (next: FlatField[]) => {
-      pendingCommitRef.current = next;
-      clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        debounceRef.current = undefined;
-        flushCommit();
-      }, DEBOUNCE_MS);
-    },
-    [flushCommit],
-  );
-
-  const cancelDebounceAndCommit = useCallback(
-    (next: FlatField[]) => {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = undefined;
-      pendingCommitRef.current = null;
-      setDraftFlat(next);
-      commitFields(next);
-    },
-    [commitFields],
-  );
-
-  useEffect(() => () => clearTimeout(debounceRef.current), []);
-
   useEffect(() => {
     setDraftFlat(null);
-    pendingCommitRef.current = null;
-    clearTimeout(debounceRef.current);
-    debounceRef.current = undefined;
+    setIsEditing(false);
   }, [schema.id]);
+
+  const handleStartEdit = useCallback(() => {
+    setDraftFlat(
+      schemaFlat.map(({ field, path }) => ({
+        field: { ...field },
+        path,
+      })),
+    );
+    setIsEditing(true);
+  }, [schemaFlat]);
+
+  const handleCancelEdit = useCallback(() => {
+    setDraftFlat(null);
+    setIsEditing(false);
+  }, []);
+
+  const handleSave = useCallback(() => {
+    if (readOnly || !draftFlat) return;
+    commitFields(draftFlat);
+    setDraftFlat(null);
+    setIsEditing(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }, [readOnly, draftFlat, commitFields]);
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
-      if (readOnly) return;
+      if (tableReadOnly) return;
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const oldIdx = flat.findIndex((f) => f.field.id === active.id);
       const newIdx = flat.findIndex((f) => f.field.id === over.id);
       if (oldIdx === -1 || newIdx === -1) return;
-      const reordered = arrayMove([...flat], oldIdx, newIdx);
-      cancelDebounceAndCommit(reordered);
+      setDraftFlat(arrayMove([...flat], oldIdx, newIdx));
     },
-    [flat, cancelDebounceAndCommit, readOnly],
+    [flat, tableReadOnly],
   );
 
   const handleRename = useCallback(
@@ -401,9 +391,8 @@ export default function FinalSchemaTable({
         };
       });
       setDraftFlat(next);
-      debouncedCommit(next);
     },
-    [flat, debouncedCommit],
+    [flat],
   );
 
   const handleDescriptionChange = useCallback(
@@ -412,9 +401,8 @@ export default function FinalSchemaTable({
         i === index ? { ...item, field: { ...item.field, description: desc } } : item,
       );
       setDraftFlat(next);
-      debouncedCommit(next);
     },
-    [flat, debouncedCommit],
+    [flat],
   );
 
   const handleDefaultValueChange = useCallback(
@@ -423,17 +411,15 @@ export default function FinalSchemaTable({
         i === index ? { ...item, field: { ...item.field, defaultValue: val } } : item,
       );
       setDraftFlat(next);
-      debouncedCommit(next);
     },
-    [flat, debouncedCommit],
+    [flat],
   );
 
   const handleRemove = useCallback(
     (index: number) => {
-      const next = flat.filter((_, i) => i !== index);
-      cancelDebounceAndCommit(next);
+      setDraftFlat(flat.filter((_, i) => i !== index));
     },
-    [flat, cancelDebounceAndCommit],
+    [flat],
   );
 
   const handleAddField = useCallback(() => {
@@ -444,8 +430,8 @@ export default function FinalSchemaTable({
       level: 0,
       order: flat.length,
     };
-    cancelDebounceAndCommit([...flat, { field: newField, path: newField.name }]);
-  }, [flat, cancelDebounceAndCommit]);
+    setDraftFlat([...flat, { field: newField, path: newField.name }]);
+  }, [flat]);
 
   const itemIds = useMemo(() => flat.map((f) => f.field.id), [flat]);
 
@@ -462,11 +448,33 @@ export default function FinalSchemaTable({
                 {schema.name}
               </CardTitle>
               <CardDescription className="text-xs">
-                {flat.length} field{flat.length !== 1 ? "s" : ""} — drag to reorder, click to edit
+                {flat.length} field{flat.length !== 1 ? "s" : ""}
+                {isEditing ? " — drag to reorder, then Save" : " — click Edit to change fields"}
               </CardDescription>
             </div>
           </div>
           <div className="flex items-center gap-1">
+            {!readOnly && (
+              <>
+                {!isEditing ? (
+                  <Button variant="outline" size="sm" onClick={handleStartEdit}>
+                    <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                    Edit
+                  </Button>
+                ) : (
+                  <>
+                    <Button variant="ghost" size="sm" onClick={handleCancelEdit}>
+                      <X className="mr-1.5 h-3.5 w-3.5" />
+                      Cancel
+                    </Button>
+                    <Button size="sm" onClick={handleSave} disabled={!draftFlat}>
+                      <Save className="mr-1.5 h-3.5 w-3.5" />
+                      {saved ? "Saved!" : "Save"}
+                    </Button>
+                  </>
+                )}
+              </>
+            )}
             {hasPreviewData && (
               <Button
                 variant="ghost"
@@ -521,7 +529,7 @@ export default function FinalSchemaTable({
                         onDescriptionChange={handleDescriptionChange}
                         onDefaultValueChange={handleDefaultValueChange}
                         onRemove={handleRemove}
-                        readOnly={readOnly}
+                        readOnly={tableReadOnly}
                       />
                     ))}
                   </TableBody>
@@ -530,7 +538,7 @@ export default function FinalSchemaTable({
             </DndContext>
           </div>
 
-          {!readOnly && (
+          {!readOnly && isEditing && (
             <Button
               variant="outline"
               size="sm"
