@@ -491,7 +491,7 @@ export default function MappingPage() {
         <div className="flex-1 min-h-0">
           <ResizablePanelGroup orientation="horizontal" className="h-full rounded-lg border">
             <ResizablePanel defaultSize={55} minSize={30}>
-              <div className="h-full relative overflow-hidden bg-muted/20">
+              <div className="h-full relative overflow-hidden bg-muted/80">
                 <ReactFlow
                   nodes={nodes}
                   edges={edges}

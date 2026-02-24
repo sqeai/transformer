@@ -407,7 +407,7 @@ export default function UploadPage() {
         )}
 
         {step === "preview" && analysis && preview && (
-          <Card className="border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/20">
+          <Card className="border-blue-200 dark:border-blue-900 bg-blue-50/95 dark:bg-blue-950/85">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <Info className="h-4 w-4 text-blue-500" />
