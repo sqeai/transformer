@@ -42,9 +42,11 @@ interface WorkflowState {
   uploadState: {
     schemaId: string;
     step: string;
-    preview: unknown;
-    boundary: unknown;
-    analysis: unknown;
+    preview?: unknown;
+    boundary?: unknown;
+    analysis?: unknown;
+    uploadMode?: "structured" | "unstructured";
+    unstructured?: unknown;
   } | null;
 }
 

@@ -413,6 +413,25 @@ export default function MappingPage() {
     }
   }, [rawColumns, targetPaths, setColumnMappings, setEdges, setPivotConfig, setVerticalPivotConfig, targetPathToNodeId]);
 
+  // Detect unstructured mode: if rawColumns match targetPaths exactly, prefill identity mappings
+  useEffect(() => {
+    if (
+      rawColumns.length > 0 &&
+      targetPaths.length > 0 &&
+      workflow.columnMappings.length === 0 &&
+      rawColumns.length === targetPaths.length &&
+      rawColumns.every((col, i) => col === targetPaths[i])
+    ) {
+      // Unstructured mode: columns already match schema paths, create identity mappings
+      const identityMappings: ColumnMapping[] = targetPaths.map((path) => ({
+        rawColumn: path,
+        targetPath: path,
+      }));
+      setColumnMappings(identityMappings);
+      autoMapDone.current = true;
+    }
+  }, [rawColumns, targetPaths, workflow.columnMappings.length, setColumnMappings]);
+
   useEffect(() => {
     if (
       !autoMapDone.current &&

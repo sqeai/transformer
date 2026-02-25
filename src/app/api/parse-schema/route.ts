@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseExcelColumns } from "@/lib/parse-excel";
-import { detectSchemaWithLLM } from "@/lib/llm-schema";
+import { detectHeaderRowValuesWithLLM } from "@/lib/llm-schema";
 
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
+    const sheetIndexRaw = formData.get("sheetIndex") as string | null;
+    const sheetIndex = sheetIndexRaw != null ? Number(sheetIndexRaw) || 0 : 0;
     if (!file) {
       return NextResponse.json(
         { error: "No file provided" },
@@ -15,13 +17,29 @@ export async function POST(request: NextRequest) {
     const buffer = await file.arrayBuffer();
 
     try {
-      const fields = await detectSchemaWithLLM(buffer);
-      return NextResponse.json({ fields });
+      // Use the LLM to detect header boundaries and build the best header list
+      // (including multi-row headers merged into a single label per column).
+      const headerValues = await detectHeaderRowValuesWithLLM(buffer, sheetIndex);
+      const fields = headerValues.map((raw, order) => {
+        const trimmed = (raw ?? "").toString().trim();
+        const base = trimmed || `Field_${order + 1}`;
+        return {
+          id: crypto.randomUUID(),
+          name: base,
+          path: base,
+          level: 0,
+          order,
+          children: [],
+        };
+      });
+      if (fields.length > 0) {
+        return NextResponse.json({ fields });
+      }
     } catch (llmError) {
-      console.warn("LLM schema detection failed, falling back to header-only parsing:", llmError);
+      console.warn("LLM header detection failed, falling back to header-only parsing:", llmError);
     }
 
-    const columns = await parseExcelColumns(buffer);
+    const columns = await parseExcelColumns(buffer, sheetIndex);
     const fields = columns.map((name, order) => ({
       id: crypto.randomUUID(),
       name: name.trim() || `Field_${order + 1}`,

@@ -10,7 +10,12 @@ export interface WorkbookPreview {
 
 const MAX_SAMPLE_ROWS = 8;
 const MAX_RAW_PREVIEW_ROWS = 30;
-const MAX_COLUMNS = 60;
+/**
+ * Upper bound on columns considered when auto-detecting table bounds
+ * and building previews for LLMs. Kept reasonably high so wide sheets
+ * are fully visible to the schema agents, but still bounded for safety.
+ */
+const MAX_COLUMNS = 200;
 
 function cellToString(value: ExcelJS.CellValue): string {
   let raw: string;
@@ -56,6 +61,11 @@ function collapseMultiline(text: string): string {
 }
 
 export interface ExtractOptions {
+  /**
+   * 0-based index of the worksheet to analyse (default 0).
+   * When omitted, the first sheet is used.
+   */
+  sheetIndex?: number;
   /** When true, returns all rows from row 1 (including potential metadata/title rows) instead of assuming row 1 is the header. */
   useAllRows?: boolean;
 }
@@ -208,7 +218,8 @@ export async function extractWorkbookPreview(
 ): Promise<WorkbookPreview> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
-  const sheet = workbook.worksheets[0];
+  const sheetIndex = options?.sheetIndex ?? 0;
+  const sheet = workbook.worksheets[sheetIndex] ?? workbook.worksheets[0];
   if (!sheet) {
     return { sheetName: "", headers: [], sampleRows: [], totalRows: 0, totalColumns: 0 };
   }
@@ -298,6 +309,48 @@ export async function getExcelSheetNames(buffer: ArrayBuffer): Promise<string[]>
 }
 
 /**
+ * Dumps an entire Excel sheet as a text string for LLM consumption.
+ * Returns row-by-row representation with cell values separated by " | ".
+ * Caps at maxRows and maxCols to avoid token overflow.
+ * @param buffer Excel file buffer
+ * @param sheetIndex 0-based index of the sheet to dump
+ * @param maxRows Maximum rows to include (default 500)
+ * @param maxCols Maximum columns to include (default 50)
+ */
+export async function dumpSheetAsText(
+  buffer: ArrayBuffer,
+  sheetIndex: number,
+  maxRows = 500,
+  maxCols = 50,
+): Promise<string> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const sheet = workbook.worksheets[sheetIndex] ?? workbook.worksheets[0];
+  if (!sheet) {
+    return "";
+  }
+
+  const rowCount = Math.min(sheet.rowCount, maxRows);
+  const colCount = Math.min(sheet.columnCount, maxCols);
+
+  const lines: string[] = [];
+  lines.push(`Sheet: "${sheet.name}" (${sheet.rowCount} total rows, ${sheet.columnCount} total columns)`);
+  lines.push("");
+
+  for (let r = 1; r <= rowCount; r++) {
+    const row = sheet.getRow(r);
+    const cells: string[] = [];
+    for (let c = 1; c <= colCount; c++) {
+      const cellValue = cellToString(row.getCell(c).value);
+      cells.push(collapseMultiline(cellValue));
+    }
+    lines.push(`Row ${r}: ${cells.join(" | ")}`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
  * Extracts a raw grid (array of string arrays) from an Excel buffer
  * for client-side preview. Returns up to `maxRows` rows and `maxCols` columns.
  * @param sheetIndex 0-based index of the sheet to extract (default 0).
@@ -365,12 +418,13 @@ export async function extractExcelGridTopBottom(
   if (!sheet) return { rows: [], totalRows: 0, totalColumns: 0 };
 
   const totalRows = sheet.rowCount;
-  const totalColumns = Math.min(sheet.columnCount, maxCols);
+  const totalColumns = sheet.columnCount;
+  const previewColumns = Math.min(totalColumns, maxCols);
 
   const readRow = (r0based: number): string[] => {
     const row = sheet.getRow(r0based + 1);
     const cells: string[] = [];
-    for (let c = 1; c <= totalColumns; c++) {
+    for (let c = 1; c <= previewColumns; c++) {
       cells.push(cellToString(row.getCell(c).value));
     }
     return cells;

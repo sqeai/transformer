@@ -5,6 +5,7 @@ import type { SchemaField, ColumnMapping, DefaultValues, PivotConfig, Aggregatio
 import {
   extractWorkbookPreview,
   formatPreviewAsText,
+  extractExcelGrid,
 } from "./parse-excel-preview";
 
 const SYSTEM_PROMPT = `You are a data-schema analyst. Given a preview of an Excel workbook (headers + sample rows), produce the best possible target schema.
@@ -32,13 +33,14 @@ Example output:
   {"name":"email","path":"email","level":0,"originalColumn":"Email Address"}
 ]`;
 
-const RAW_DATA_ANALYSIS_PROMPT = `You are a data analyst specialising in messy spreadsheet data. You will receive a raw preview of an Excel/CSV file that may contain:
+const RAW_DATA_ANALYSIS_PROMPT = `You are the "Header detection agent", a data analyst specialising in messy spreadsheet data. You will receive a raw preview of an Excel/CSV file that may contain:
 - Title rows, disclaimers, or metadata rows above the actual data
 - Empty padding rows/columns
 - Merged header rows spanning multiple lines
 - Multi-line cell values where text within a single cell contains newlines (shown as " / " in the preview, e.g. "Tên Công Ty / Company Name")
 - Headers that span TWO consecutive rows (e.g. row 3 has Vietnamese names, row 4 has English names for the same columns)
 - Noise columns (row numbers, internal IDs, empty columns)
+- Placeholder auto-generated labels for empty columns/rows (e.g. "Column 1", "Column 35"). Treat these as EMPTY/NOISE, not real headers.
 
 You will also receive totalRows and totalColumns for the entire file. Use totalRows to set a sensible dataEndRowIndex.
 
@@ -47,9 +49,10 @@ Your job is to:
    - If headers are in a SINGLE row (possibly with multi-line cell values shown as " / "), set headerRowIndex to that row.
    - If headers span TWO rows (e.g. Vietnamese on row N, English on row N+1), set headerRowIndex to the FIRST header row.
    - The header row is usually the first row where most cells contain short descriptive text (not data values or long sentences).
+   - A row made mostly of generic placeholders like "Column 1", "Column 2", ... is NOT a real header row and should be ignored.
 2. Identify which rows ABOVE the header are noise/metadata that should be trimmed.
-3. Identify which columns are meaningful vs noise (empty columns, row-number columns, padding).
-4. Return the detected data boundaries.
+3. Identify which columns are meaningful vs noise (empty columns, row-number columns, padding). Columns whose header text is only a generic placeholder like /^Column\\s+\\d+$/i should be treated as empty/noise unless adjacent header rows provide a real label for that same column. When in doubt, be INCLUSIVE and keep the column — but do NOT treat placeholder labels alone as meaningful headers.
+4. Return the detected data boundaries. Choose startColumn and endColumn so that AS MANY potentially meaningful columns as possible are included; avoid over-trimming on the right-hand side of the table.
 
 Respond ONLY with a JSON object (no markdown fences, no commentary):
 {
@@ -158,6 +161,8 @@ export interface AutoMapResponse {
   defaultValues: DefaultValues;
 }
 
+const PLACEHOLDER_COLUMN_HEADER_RE = /^Column\s+\d+$/i;
+
 function buildFieldTree(flat: LlmSchemaField[]): SchemaField[] {
   const result: SchemaField[] = [];
   const parentStack: SchemaField[] = [];
@@ -233,8 +238,9 @@ function cleanJsonResponse(text: string): string {
 
 export async function detectSchemaWithLLM(
   buffer: ArrayBuffer,
+  sheetIndex = 0,
 ): Promise<SchemaField[]> {
-  const preview = await extractWorkbookPreview(buffer);
+  const preview = await extractWorkbookPreview(buffer, { sheetIndex });
   if (preview.headers.length === 0) {
     throw new Error("Workbook has no headers to analyse");
   }
@@ -263,7 +269,8 @@ export async function detectSchemaWithLLM(
 
 /**
  * Analyses raw uploaded data to find the real header row, trim noise rows/columns,
- * and extract clean headers. Works on the full raw preview (not just row 1).
+ * and extract clean headers using the "Header detection agent". Works on the full
+ * raw preview (not just row 1).
  */
 export async function analyzeRawDataWithLLM(
   buffer: ArrayBuffer,
@@ -298,6 +305,83 @@ export async function analyzeRawDataWithLLM(
   }
 
   return parsed;
+}
+
+/**
+ * Uses the header-detection LLM to locate header row(s) and returns a
+ * best-effort header list for schema generation:
+ * - respects LLM-selected column bounds
+ * - combines multi-row headers when dataStartRowIndex indicates >1 header row
+ * - ignores placeholder labels like "Column 12" unless a real label exists
+ */
+export async function detectHeaderRowValuesWithLLM(
+  buffer: ArrayBuffer,
+  sheetIndex = 0,
+): Promise<string[]> {
+  const { grid, totalRows, totalColumns } = await extractExcelGrid(
+    buffer,
+    50,
+    200,
+    sheetIndex,
+  );
+  if (grid.length === 0) {
+    throw new Error("Workbook appears to be empty");
+  }
+
+  const lines: string[] = [];
+  lines.push(
+    `Sheet index ${sheetIndex} (${totalRows} total rows, ${totalColumns} columns)`,
+  );
+  lines.push("");
+  lines.push("All rows (including potential metadata/title rows above the header):");
+  for (let i = 0; i < grid.length; i++) {
+    lines.push(`Row ${i}: ${grid[i].join(" | ")}`);
+  }
+
+  const text = await callLlm(
+    RAW_DATA_ANALYSIS_PROMPT,
+    `Analyse this raw spreadsheet data and identify the data boundaries (header row, data start/end rows, and column range):\n\n${lines.join("\n")}`,
+  );
+
+  let parsed: RawDataAnalysis;
+  try {
+    parsed = JSON.parse(cleanJsonResponse(text));
+  } catch {
+    throw new Error(
+      `LLM returned invalid JSON for raw data analysis. Raw response:\n${text.slice(0, 500)}`,
+    );
+  }
+
+  const totalGridRows = grid.length;
+  const totalGridCols = grid.reduce((max, row) => Math.max(max, row.length), 0);
+  if (totalGridCols === 0) return [];
+  const headerStart = Math.max(0, Math.min(parsed.headerRowIndex ?? 0, totalGridRows - 1));
+
+  const inferredHeaderEndExclusive = (() => {
+    const candidate = parsed.dataStartRowIndex ?? (headerStart + 1);
+    if (!Number.isFinite(candidate)) return headerStart + 1;
+    return Math.max(headerStart + 1, Math.min(candidate, totalGridRows));
+  })();
+
+  const startCol = Math.max(0, Math.min(parsed.startColumn ?? 0, Math.max(0, totalGridCols - 1)));
+  const endCol = Math.max(startCol, Math.min(parsed.endColumn ?? (totalGridCols - 1), Math.max(0, totalGridCols - 1)));
+
+  const headers: string[] = [];
+  for (let c = startCol; c <= endCol; c++) {
+    const parts: string[] = [];
+
+    for (let r = headerStart; r < inferredHeaderEndExclusive; r++) {
+      const raw = (grid[r]?.[c] ?? "").toString().trim();
+      if (!raw) continue;
+      if (PLACEHOLDER_COLUMN_HEADER_RE.test(raw)) continue;
+      if (parts[parts.length - 1]?.toLowerCase() === raw.toLowerCase()) continue;
+      parts.push(raw);
+    }
+
+    headers.push(parts.join(" / "));
+  }
+
+  return headers;
 }
 
 const VALID_AGGREGATIONS = new Set<string>(["sum", "concat", "count", "min", "max", "first"]);
@@ -386,4 +470,86 @@ export async function autoMapColumnsWithLLM(
   };
 
   return { mappings, pivot, verticalPivot, defaultValues };
+}
+
+const EXTRACT_UNSTRUCTURED_PROMPT = `You are an AI Data Cleanser agent. You will receive a raw dump of an entire Excel sheet (all rows and columns) and a list of target schema field paths. Your job is to extract exactly ONE record from this sheet that matches the target schema.
+
+The sheet may contain:
+- Title rows, disclaimers, or metadata rows
+- Multiple tables or sections
+- Merged cells
+- Empty padding rows/columns
+- Unstructured data (not in a clean table format)
+
+Your task:
+1. Analyze the entire sheet content to understand what data is present
+2. Extract values that correspond to each target schema field path
+3. Return a single record (object) where keys are the target schema paths and values are the extracted data
+4. Also provide a mapping showing where each value came from (e.g. "Cell B3", "Row 5, column 'Company Name'", "Found in title section")
+
+Rules:
+- Extract exactly ONE record per sheet (not multiple rows)
+- If a field cannot be found, use null or an empty string
+- For numeric fields, extract as numbers
+- For text fields, extract as strings
+- Try to be smart about finding data even if it's not in a standard table format
+- Cite the source location for each field in the mapping
+
+Respond ONLY with a JSON object (no markdown fences, no commentary):
+{
+  "record": {
+    "fieldPath1": value1,
+    "fieldPath2": value2,
+    ...
+  },
+  "mapping": [
+    {
+      "targetPath": "fieldPath1",
+      "source": "description of where this value came from (e.g. 'Cell B3', 'Row 5, column Company Name')"
+    },
+    ...
+  ]
+}`;
+
+export interface UnstructuredExtractionResult {
+  record: Record<string, unknown>;
+  mapping: Array<{ targetPath: string; source: string }>;
+}
+
+/**
+ * Extracts a single record from an unstructured Excel sheet dump.
+ * Takes the entire sheet as text and target schema paths, returns one record
+ * with values mapped to those paths, plus a mapping showing where each value came from.
+ */
+export async function extractUnstructuredRecordWithLLM(
+  sheetText: string,
+  targetPaths: string[],
+): Promise<UnstructuredExtractionResult> {
+  if (!sheetText || !targetPaths || targetPaths.length === 0) {
+    throw new Error("sheetText and targetPaths are required");
+  }
+
+  const prompt = `Extract a single record from this unstructured Excel sheet that matches the target schema fields.\n\nSheet content:\n${sheetText}\n\nTarget schema paths:\n${targetPaths.map((p, i) => `${i + 1}. "${p}"`).join("\n")}\n\nExtract one record with values for each target path, and provide a mapping showing where each value came from in the sheet.`;
+
+  const text = await callLlm(EXTRACT_UNSTRUCTURED_PROMPT, prompt);
+
+  let parsed: { record?: Record<string, unknown>; mapping?: Array<{ targetPath: string; source: string }> };
+  try {
+    parsed = JSON.parse(cleanJsonResponse(text));
+  } catch {
+    throw new Error(
+      `LLM returned invalid JSON for unstructured extraction. Raw response:\n${text.slice(0, 500)}`,
+    );
+  }
+
+  if (!parsed.record || typeof parsed.record !== "object") {
+    throw new Error("LLM did not return a valid record object");
+  }
+
+  const mapping = Array.isArray(parsed.mapping) ? parsed.mapping : [];
+
+  return {
+    record: parsed.record,
+    mapping,
+  };
 }
