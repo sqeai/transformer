@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { useSchemaStore } from "@/lib/schema-store";
 import { flattenFields } from "@/lib/schema-store";
 import { parseExcelToRows } from "@/lib/parse-excel";
@@ -51,6 +52,8 @@ const PREVIEW_BOTTOM_N = 0;
 // Allow wide files to be fully inspected in the grid while still
 // keeping a sane upper bound for performance.
 const PREVIEW_MAX_COLS = 200;
+const UNSTRUCTURED_SHEET_PREVIEW_INITIAL_ROWS = 50;
+const UNSTRUCTURED_SHEET_PREVIEW_LOAD_MORE_ROWS = 50;
 const POLL_INTERVAL_MS = 3000;
 
 interface PreviewData {
@@ -106,6 +109,33 @@ interface SheetSelectionPreview {
   preview: SourceTablePreview;
 }
 
+function AiLoadingNotice({
+  title = "AI is processing your results",
+  subtitle,
+  compact = false,
+}: {
+  title?: string;
+  subtitle?: string;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`rounded-md border border-primary/20 bg-primary/5 ${compact ? "p-3" : "p-4"}`}>
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 flex items-center gap-2 text-primary">
+          <Sparkles className="h-4 w-4" />
+          <Loader2 className="h-4 w-4 animate-spin" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-primary">{title}</p>
+          {subtitle ? (
+            <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function stringifyRecordValue(value: unknown): string {
   if (value == null) return "";
   if (typeof value === "string") return value;
@@ -119,7 +149,18 @@ function stringifyRecordValue(value: unknown): string {
 
 export default function UploadPage() {
   const router = useRouter();
-  const { getSchema, setCurrentSchema, setRawData, resetWorkflow, workflow, setUploadState } = useSchemaStore();
+  const {
+    getSchema,
+    setCurrentSchema,
+    setRawData,
+    setColumnMappings,
+    setPivotConfig,
+    setVerticalPivotConfig,
+    setDefaultValues,
+    resetWorkflow,
+    workflow,
+    setUploadState,
+  } = useSchemaStore();
   const schemaId = workflow.currentSchemaId;
   const [uploadMode, setUploadMode] = useState<UploadMode>("structured");
   const [dragging, setDragging] = useState(false);
@@ -150,6 +191,8 @@ export default function UploadPage() {
   const [activeSheetPreviewId, setActiveSheetPreviewId] = useState<string | null>(null);
   const [sheetSelectionPreview, setSheetSelectionPreview] = useState<SheetSelectionPreview | null>(null);
   const [sheetSelectionPreviewLoading, setSheetSelectionPreviewLoading] = useState(false);
+  const [sheetSelectionPreviewRowCount, setSheetSelectionPreviewRowCount] = useState(UNSTRUCTURED_SHEET_PREVIEW_INITIAL_ROWS);
+  const [sheetSelectionPreviewLoadingMore, setSheetSelectionPreviewLoadingMore] = useState(false);
   const unstructuredFileInputRef = useRef<HTMLInputElement>(null);
 
   const schema = schemaId ? getSchema(schemaId) : null;
@@ -190,24 +233,28 @@ export default function UploadPage() {
   useEffect(() => {
     if (uploadMode !== "unstructured" || unstructuredStep !== "sheet_select") return;
 
-    const selectedSheetId = (activeSheetPreviewId && selectedSheetIds.has(activeSheetPreviewId))
-      ? activeSheetPreviewId
-      : Array.from(selectedSheetIds)[0];
-    if (!selectedSheetId) {
+    const previewSheetId = activeSheetPreviewId ?? Array.from(selectedSheetIds)[0];
+    if (!previewSheetId) {
       setSheetSelectionPreview(null);
       setSheetSelectionPreviewLoading(false);
       return;
     }
 
-    const item = sheetItems.find((s) => s.fileId === selectedSheetId);
+    const item = sheetItems.find((s) => s.fileId === previewSheetId);
     if (!item) {
       setSheetSelectionPreview(null);
       setSheetSelectionPreviewLoading(false);
       return;
     }
 
-    // Avoid reloading when the preview already matches the first selected sheet.
-    if (sheetSelectionPreview?.fileId === item.fileId) return;
+    const requestedRows = sheetSelectionPreviewRowCount;
+    if (
+      sheetSelectionPreview?.fileId === item.fileId &&
+      (sheetSelectionPreview.preview.rows?.length ?? 0) >=
+        Math.min(requestedRows, sheetSelectionPreview.preview.totalRows)
+    ) {
+      return;
+    }
 
     let cancelled = false;
     setSheetSelectionPreviewLoading(true);
@@ -216,7 +263,7 @@ export default function UploadPage() {
       try {
         const sourcePreview = await extractExcelGridTopBottom(
           item.buffer,
-          20,
+          sheetSelectionPreviewRowCount,
           0,
           40,
           item.sheetIndex,
@@ -243,7 +290,17 @@ export default function UploadPage() {
     return () => {
       cancelled = true;
     };
-  }, [uploadMode, unstructuredStep, selectedSheetIds, sheetItems, sheetSelectionPreview?.fileId]);
+  }, [
+    uploadMode,
+    unstructuredStep,
+    selectedSheetIds,
+    sheetItems,
+    activeSheetPreviewId,
+    sheetSelectionPreview?.fileId,
+    sheetSelectionPreview?.preview.rows.length,
+    sheetSelectionPreview?.preview.totalRows,
+    sheetSelectionPreviewRowCount,
+  ]);
 
   // Structured mode: load preview
   const loadPreview = useCallback(
@@ -481,6 +538,8 @@ export default function UploadPage() {
     setActiveSheetPreviewId(null);
     setSheetSelectionPreview(null);
     setSheetSelectionPreviewLoading(false);
+    setSheetSelectionPreviewRowCount(UNSTRUCTURED_SHEET_PREVIEW_INITIAL_ROWS);
+    setSheetSelectionPreviewLoadingMore(false);
     setError(null);
   }, [pollingInterval]);
 
@@ -535,6 +594,8 @@ export default function UploadPage() {
     setActiveSheetPreviewId(null);
     setSheetSelectionPreview(null);
     setSheetSelectionPreviewLoading(false);
+    setSheetSelectionPreviewRowCount(UNSTRUCTURED_SHEET_PREVIEW_INITIAL_ROWS);
+    setSheetSelectionPreviewLoadingMore(false);
 
     try {
       const items: SheetItem[] = [];
@@ -565,14 +626,32 @@ export default function UploadPage() {
       const next = new Set(prev);
       if (next.has(sheetId)) {
         next.delete(sheetId);
-        setActiveSheetPreviewId((current) => (current === sheetId ? null : current));
       } else {
         next.add(sheetId);
-        setActiveSheetPreviewId(sheetId);
+        setSheetSelectionPreviewRowCount(UNSTRUCTURED_SHEET_PREVIEW_INITIAL_ROWS);
       }
       return next;
     });
   }, []);
+
+  const setActiveSheetPreview = useCallback((sheetId: string) => {
+    setActiveSheetPreviewId(sheetId);
+    setSheetSelectionPreviewRowCount(UNSTRUCTURED_SHEET_PREVIEW_INITIAL_ROWS);
+  }, []);
+
+  const loadMoreSheetSelectionPreviewRows = useCallback(() => {
+    if (!sheetSelectionPreview) return;
+    if (sheetSelectionPreviewLoading || sheetSelectionPreviewLoadingMore) return;
+    if (sheetSelectionPreview.preview.rows.length >= sheetSelectionPreview.preview.totalRows) return;
+    setSheetSelectionPreviewLoadingMore(true);
+    setSheetSelectionPreviewRowCount((prev) => prev + UNSTRUCTURED_SHEET_PREVIEW_LOAD_MORE_ROWS);
+  }, [sheetSelectionPreview, sheetSelectionPreviewLoading, sheetSelectionPreviewLoadingMore]);
+
+  useEffect(() => {
+    if (!sheetSelectionPreviewLoading) {
+      setSheetSelectionPreviewLoadingMore(false);
+    }
+  }, [sheetSelectionPreviewLoading, sheetSelectionPreview?.fileId, sheetSelectionPreview?.preview.rows.length]);
 
   // Unstructured: preview first sheet for confirmation
   const handlePreviewFirstSheet = useCallback(async () => {
@@ -770,6 +849,14 @@ export default function UploadPage() {
   }, [selectedSheetIds, sheetItems, targetPaths, pollingInterval]);
 
   const currentReviewItem = reviewItems[reviewIndex] ?? null;
+  const currentReviewSourceByTargetPath = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!currentReviewItem) return map;
+    for (const m of currentReviewItem.mapping) {
+      if (!map.has(m.targetPath)) map.set(m.targetPath, m.source);
+    }
+    return map;
+  }, [currentReviewItem]);
   const currentReviewFieldOrder = useMemo(() => {
     if (!currentReviewItem) return [];
     const seen = new Set<string>();
@@ -822,12 +909,33 @@ export default function UploadPage() {
       }
       return row;
     });
+
+    const identityMappings = targetPaths.map((path) => ({
+      rawColumn: path,
+      targetPath: path,
+    }));
+
     setRawData(targetPaths, rows);
+    setColumnMappings(identityMappings);
+    setPivotConfig({ enabled: false, groupByColumns: [] });
+    setVerticalPivotConfig({ enabled: false, outputTargetPaths: [], columns: [] });
+    setDefaultValues({});
     if (schemaId) {
       setUploadState({ schemaId, step: "done", uploadMode: "unstructured" });
     }
-    router.push("/mapping");
-  }, [reviewItems, targetPaths, setRawData, schemaId, setUploadState, router]);
+    router.push("/export");
+  }, [
+    reviewItems,
+    targetPaths,
+    setRawData,
+    setColumnMappings,
+    setPivotConfig,
+    setVerticalPivotConfig,
+    setDefaultValues,
+    schemaId,
+    setUploadState,
+    router,
+  ]);
 
   const allReviewItemsConfirmed = reviewItems.length > 0 && reviewItems.every((i) => i.confirmed);
 
@@ -998,9 +1106,9 @@ export default function UploadPage() {
                       Select which sheets from the uploaded files you want to extract data from. Each sheet will become one row in the final output.
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="grid min-h-[calc(100vh-14rem)] w-full grid-cols-1 gap-4 overflow-hidden px-4 pb-4 lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-start">
+                  <CardContent className="grid min-h-[calc(100vh-14rem)] w-full grid-cols-1 gap-4 overflow-hidden px-4 pb-4 lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-stretch">
                     <div className="flex h-[calc(100vh-18rem)] min-h-0 min-w-0 flex-col overflow-hidden rounded-md border">
-                      <div className="border-b px-4 py-3">
+                      <div className="flex min-h-16 items-center border-b px-4 py-3">
                         <div className="text-sm font-medium">
                           Sheets ({selectedSheetIds.size} selected)
                         </div>
@@ -1010,27 +1118,45 @@ export default function UploadPage() {
                           <div className="space-y-2 pr-2">
                             {sheetItems.map((item) => {
                               const isSelected = selectedSheetIds.has(item.fileId);
-                              const isPreviewed = sheetSelectionPreview?.fileId === item.fileId;
+                              const isPreviewed = (sheetSelectionPreview?.fileId ?? activeSheetPreviewId) === item.fileId;
                               return (
-                                <label
+                                <div
                                   key={item.fileId}
-                                  className={`flex items-center gap-3 rounded-md border p-3 cursor-pointer transition-colors ${
-                                    isSelected
-                                      ? "border-primary/40 bg-primary/5"
-                                      : "hover:bg-muted/50"
+                                  className={`flex items-center gap-2 rounded-md border p-2 transition-colors ${
+                                    isSelected ? "border-primary/40 bg-primary/5" : "hover:bg-muted/40"
                                   } ${isPreviewed ? "ring-1 ring-primary/30" : ""}`}
                                 >
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={() => toggleSheetSelection(item.fileId)}
-                                    className="w-4 h-4"
-                                  />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="truncate font-medium">{item.sheetName}</div>
-                                    <div className="truncate text-sm text-muted-foreground">{item.fileName}</div>
-                                  </div>
-                                </label>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleSheetSelection(item.fileId)}
+                                    aria-pressed={isSelected}
+                                    aria-label={isSelected ? `Deselect ${item.sheetName}` : `Select ${item.sheetName}`}
+                                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                                      isSelected
+                                        ? "border-primary bg-primary text-primary-foreground"
+                                        : "border-border bg-background hover:bg-muted"
+                                    }`}
+                                  >
+                                    {isSelected ? (
+                                      <CheckCircle2 className="h-4 w-4" />
+                                    ) : (
+                                      <span className="h-3.5 w-3.5 rounded-sm border border-muted-foreground/50" />
+                                    )}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveSheetPreview(item.fileId)}
+                                    className="flex min-w-0 flex-1 items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-muted/60"
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="truncate font-medium">{item.sheetName}</div>
+                                      <div className="truncate text-sm text-muted-foreground">{item.fileName}</div>
+                                    </div>
+                                    <span className="ml-3 shrink-0 text-xs text-muted-foreground">
+                                      {isPreviewed ? "Previewing" : "Preview"}
+                                    </span>
+                                  </button>
+                                </div>
                               );
                             })}
                           </div>
@@ -1039,23 +1165,17 @@ export default function UploadPage() {
                       <div className="border-t p-3">
                         <div className="flex gap-2">
                           <Button
-                            onClick={handlePreviewFirstSheet}
-                            disabled={selectedSheetIds.size === 0}
-                          >
-                            Preview First Sheet
-                          </Button>
-                          <Button
                             onClick={handleConfirmAndExtract}
                             disabled={selectedSheetIds.size === 0}
                             variant="default"
                           >
-                            Extract All Selected ({selectedSheetIds.size})
+                            Proceed to Transformation ({selectedSheetIds.size})
                           </Button>
                         </div>
                       </div>
                     </div>
-                    <div className="flex h-[calc(100vh-18rem)] min-h-0 min-w-0 flex-col overflow-hidden rounded-md border lg:sticky lg:top-4">
-                      <div className="flex items-center justify-between border-b px-4 py-3">
+                    <div className="flex h-[calc(100vh-18rem)] min-h-0 min-w-0 flex-col overflow-hidden rounded-md border lg:sticky lg:top-0">
+                      <div className="flex min-h-16 items-center justify-between border-b px-4 py-3">
                         <div>
                           <div className="text-sm font-medium">Sheet Preview</div>
                           {sheetSelectionPreview && (
@@ -1073,9 +1193,12 @@ export default function UploadPage() {
 
                       <div className="min-h-0 flex-1 p-3 overflow-hidden">
                         {sheetSelectionPreviewLoading ? (
-                          <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Loading sheet preview...
+                          <div className="flex h-full items-center justify-center p-4">
+                            <AiLoadingNotice
+                              compact
+                              title="AI is processing your results"
+                              subtitle="Loading the selected sheet preview..."
+                            />
                           </div>
                         ) : !sheetSelectionPreview ? (
                           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -1085,7 +1208,7 @@ export default function UploadPage() {
                           <ScrollArea className="h-full w-full rounded-md border">
                             <Table>
                               <TableBody>
-                                {sheetSelectionPreview.preview.rows.slice(0, 20).map((row) => (
+                                {sheetSelectionPreview.preview.rows.map((row) => (
                                   <TableRow key={row.originalIndex}>
                                     <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                                       Row {row.originalIndex + 1}
@@ -1103,7 +1226,47 @@ export default function UploadPage() {
                           </ScrollArea>
                         )}
                       </div>
+                      <div className="flex min-h-16 items-center justify-between gap-2 border-t px-3 py-2">
+                        <p className="text-xs text-muted-foreground">
+                          {sheetSelectionPreview
+                            ? `Showing ${sheetSelectionPreview.preview.rows.length} of ${sheetSelectionPreview.preview.totalRows} rows`
+                            : "No preview loaded"}
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={loadMoreSheetSelectionPreviewRows}
+                          disabled={
+                            !sheetSelectionPreview ||
+                            sheetSelectionPreviewLoading ||
+                            sheetSelectionPreviewLoadingMore ||
+                            sheetSelectionPreview.preview.rows.length >= sheetSelectionPreview.preview.totalRows
+                          }
+                        >
+                          {(sheetSelectionPreviewLoading || sheetSelectionPreviewLoadingMore) && (
+                            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                          )}
+                          Load more rows
+                        </Button>
+                      </div>
                     </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {unstructuredStep === "confirming" && previewMapping.length === 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Confirm Field Mapping</CardTitle>
+                    <CardDescription>
+                      We are generating a preview extraction from the first selected sheet.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <AiLoadingNotice
+                      title="AI is processing your results"
+                      subtitle="Extracting fields and preparing the mapping preview..."
+                    />
                   </CardContent>
                 </Card>
               )}
@@ -1172,7 +1335,7 @@ export default function UploadPage() {
                         Back
                       </Button>
                       <Button onClick={handleConfirmAndExtract}>
-                        Confirm & Extract All Sheets
+                        Proceed to Transformation
                       </Button>
                     </div>
                   </CardContent>
@@ -1188,6 +1351,12 @@ export default function UploadPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
+                    <div className="mb-4">
+                      <AiLoadingNotice
+                        title="AI is processing your results"
+                        subtitle="Running extraction for each selected sheet. You will review each result before continuing."
+                      />
+                    </div>
                     <div className="space-y-2">
                       {jobIds.map((jobId) => {
                         const status = jobStatuses.get(jobId);
@@ -1216,93 +1385,103 @@ export default function UploadPage() {
               )}
 
               {unstructuredStep === "reviewing" && currentReviewItem && (
-                <Card>
+                <Card className="min-h-[calc(100vh-8rem)]">
                   <CardHeader>
                     <CardTitle>Review Extracted Record ({reviewIndex + 1}/{reviewItems.length})</CardTitle>
                     <CardDescription>
                       {currentReviewItem.fileName} • {currentReviewItem.sheetName}. Review the original source preview and edit extracted values before continuing.
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="text-sm font-medium">Original source table preview</div>
-                        <div className="text-xs text-muted-foreground">
-                          {currentReviewItem.sourcePreview.totalRows} rows, {currentReviewItem.sourcePreview.totalColumns} columns
-                        </div>
-                      </div>
-                      <ScrollArea className="w-full rounded-md border">
-                        <Table>
-                          <TableBody>
-                            {currentReviewItem.sourcePreview.rows.slice(0, 20).map((row) => (
-                              <TableRow key={row.originalIndex}>
-                                <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                                  Row {row.originalIndex + 1}
-                                </TableCell>
-                                {row.data.slice(0, 20).map((cell, ci) => (
-                                  <TableCell key={ci} className="max-w-48 truncate whitespace-nowrap text-xs">
-                                    {cell || <span className="text-muted-foreground">-</span>}
-                                  </TableCell>
-                                ))}
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                        <ScrollBar orientation="horizontal" />
-                      </ScrollArea>
-                    </div>
+                  <CardContent className="flex h-[calc(100vh-16rem)] min-h-[640px] flex-col gap-4">
+                    <div className="min-h-0 flex-1 rounded-md border">
+                      <ResizablePanelGroup orientation="horizontal" className="h-full">
+                        <ResizablePanel defaultSize={55} minSize={35}>
+                          <div className="flex h-full min-h-0 flex-col">
+                            <div className="flex min-h-14 items-center justify-between border-b px-4 py-3">
+                              <div className="text-sm font-medium">Original source data preview</div>
+                              <div className="text-xs text-muted-foreground">
+                                {currentReviewItem.sourcePreview.totalRows} rows, {currentReviewItem.sourcePreview.totalColumns} columns
+                              </div>
+                            </div>
+                            <div className="min-h-0 flex-1 p-3">
+                              <ScrollArea className="h-full w-full rounded-md border">
+                                <Table>
+                                  <TableBody>
+                                    {currentReviewItem.sourcePreview.rows.slice(0, 20).map((row) => (
+                                      <TableRow key={row.originalIndex}>
+                                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                                          Row {row.originalIndex + 1}
+                                        </TableCell>
+                                        {row.data.slice(0, 20).map((cell, ci) => (
+                                          <TableCell key={ci} className="max-w-48 truncate whitespace-nowrap text-xs">
+                                            {cell || <span className="text-muted-foreground">-</span>}
+                                          </TableCell>
+                                        ))}
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                                <ScrollBar orientation="horizontal" />
+                              </ScrollArea>
+                            </div>
+                          </div>
+                        </ResizablePanel>
 
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">Extracted values (editable)</div>
-                      <div className="rounded-md border">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead className="w-[280px]">Target Field</TableHead>
-                              <TableHead>Value</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {currentReviewFieldOrder.map((targetPath) => (
-                              <TableRow key={targetPath}>
-                                <TableCell className="font-medium">{targetPath}</TableCell>
-                                <TableCell>
-                                  <Input
-                                    value={currentReviewItem.recordDraft[targetPath] ?? ""}
-                                    onChange={(e) => updateReviewValue(reviewIndex, targetPath, e.target.value)}
-                                    placeholder="Enter value"
-                                  />
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
+                        <ResizableHandle withHandle />
 
-                    {currentReviewItem.mapping.length > 0 && (
-                      <div className="space-y-2">
-                        <div className="text-sm font-medium">LLM extraction mapping reference</div>
-                        <div className="rounded-md border">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>Target Field</TableHead>
-                                <TableHead>Source</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {currentReviewItem.mapping.map((m) => (
-                                <TableRow key={`${currentReviewItem.jobId}-${m.targetPath}`}>
-                                  <TableCell className="font-medium">{m.targetPath}</TableCell>
-                                  <TableCell className="text-sm text-muted-foreground">{m.source}</TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      </div>
-                    )}
+                        <ResizablePanel defaultSize={45} minSize={30}>
+                          <div className="flex h-full min-h-0 flex-col">
+                            <div className="border-b px-4 py-3">
+                              <div className="text-sm font-medium">Final transformed fields (editable)</div>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Review and edit the final output values for this sheet before proceeding.
+                              </p>
+                            </div>
+                            <div className="min-h-0 flex-1 p-3">
+                              <ScrollArea className="h-full w-full rounded-md border">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead className="w-[240px]">Final Column</TableHead>
+                                      <TableHead>Value</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {currentReviewFieldOrder.map((targetPath) => {
+                                      const sourceRef = currentReviewSourceByTargetPath.get(targetPath);
+                                      return (
+                                        <TableRow key={targetPath}>
+                                          <TableCell className="font-medium align-top">{targetPath}</TableCell>
+                                          <TableCell>
+                                            <div className="space-y-1.5">
+                                              {sourceRef ? (
+                                                <div className="text-xs text-muted-foreground">
+                                                  Source: {sourceRef}
+                                                </div>
+                                              ) : (
+                                                <div className="text-xs text-muted-foreground/60">
+                                                  Source: Manual / inferred final field
+                                                </div>
+                                              )}
+                                              <Input
+                                                value={currentReviewItem.recordDraft[targetPath] ?? ""}
+                                                onChange={(e) => updateReviewValue(reviewIndex, targetPath, e.target.value)}
+                                                placeholder="Enter value"
+                                              />
+                                            </div>
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    })}
+                                  </TableBody>
+                                </Table>
+                                <ScrollBar orientation="horizontal" />
+                              </ScrollArea>
+                            </div>
+                          </div>
+                        </ResizablePanel>
+                      </ResizablePanelGroup>
+                    </div>
 
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex gap-2">
@@ -1346,7 +1525,7 @@ export default function UploadPage() {
                             }}
                             disabled={reviewItems.length === 0}
                           >
-                            Confirm & Continue to Mapping
+                            Finish & Export
                           </Button>
                         )}
                       </div>
@@ -1419,22 +1598,16 @@ export default function UploadPage() {
               ) : null}
               {(uploadMode === "structured" &&
                 (structuredStep === "loading_preview" || structuredStep === "analyzing")) && (
-                <div className="flex items-center gap-3">
-                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                  <span className="text-sm text-muted-foreground">
-                    {structuredStep === "analyzing"
-                      ? "AI is analyzing structure…"
-                      : "Loading preview…"}
-                  </span>
-                </div>
+                <AiLoadingNotice
+                  title="AI is processing your results"
+                  subtitle={structuredStep === "analyzing" ? "AI is analyzing structure..." : "Loading file preview..."}
+                />
               )}
               {uploadMode === "structured" && structuredStep === "parsing" && (
-                <div className="flex items-center gap-3">
-                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                  <span className="text-sm text-muted-foreground">
-                    Parsing data with selected boundaries…
-                  </span>
-                </div>
+                <AiLoadingNotice
+                  title="AI is processing your results"
+                  subtitle="Parsing data with the selected boundaries..."
+                />
               )}
               {error && (
                 <p className="text-sm text-destructive">{error}</p>
