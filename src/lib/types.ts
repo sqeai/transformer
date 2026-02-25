@@ -106,7 +106,7 @@ export interface EdgeDefinition {
 }
 
 export interface ExportFormat {
-  id: "excel" | "csv" | "bigquery";
+  id: "excel" | "csv" | "bigquery" | "google_sheets" | "fis";
   label: string;
   description: string;
 }

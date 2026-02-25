@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/card";
 import { useSchemaStore, flattenFields } from "@/lib/schema-store";
 import type { ExportFormat } from "@/lib/types";
-import { Download, FileSpreadsheet, Database, FileText, Layers, ArrowLeft, CalendarDays, Loader2, Plus } from "lucide-react";
+import { Download, Database, FileText, Layers, ArrowLeft, CalendarDays, Loader2, Plus } from "lucide-react";
 import ExcelJS from "exceljs";
 import { applyMappings, getByPath, formatDisplayValue } from "@/lib/pivot-transform";
 
@@ -33,7 +33,72 @@ const EXPORT_FORMATS: ExportFormat[] = [
     label: "Google BigQuery",
     description: "Export to BigQuery (configuration placeholder)",
   },
+  {
+    id: "google_sheets",
+    label: "Google Sheets",
+    description: "Export to Google Sheets (configuration placeholder)",
+  },
+  {
+    id: "fis",
+    label: "Upload to FIS",
+    description: "Upload transformed rows to FIS (configuration placeholder)",
+  },
 ];
+
+function LogoBadge({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={`flex h-9 w-9 items-center justify-center rounded-md border shadow-sm ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+function ExcelLogo() {
+  return (
+    <LogoBadge className="border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300">
+      <span className="text-xs font-black tracking-tight">XLS</span>
+    </LogoBadge>
+  );
+}
+
+function BigQueryLogo() {
+  return (
+    <LogoBadge className="border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-300">
+      <div className="flex flex-col items-center leading-none">
+        <span className="text-[8px] font-semibold tracking-wider">BQ</span>
+        <Database className="h-3.5 w-3.5" />
+      </div>
+    </LogoBadge>
+  );
+}
+
+function GoogleSheetsLogo() {
+  return (
+    <LogoBadge className="border-green-200 bg-green-50 dark:border-green-900/60 dark:bg-green-950/30">
+      <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+        <path d="M6 2h8l4 4v16H6z" fill="#22c55e" />
+        <path d="M14 2v4h4" fill="#86efac" />
+        <path d="M8 10h8M8 13h8M8 16h8M11 8v10" stroke="#ffffff" strokeWidth="1.2" strokeLinecap="round" />
+      </svg>
+    </LogoBadge>
+  );
+}
+
+function FisLogo() {
+  return (
+    <LogoBadge className="border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-300">
+      <span className="text-[11px] font-black tracking-widest">FIS</span>
+    </LogoBadge>
+  );
+}
+
+function CsvLogo() {
+  return (
+    <LogoBadge className="border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-300">
+      <span className="text-[10px] font-bold tracking-wide">CSV</span>
+    </LogoBadge>
+  );
+}
 
 export default function ExportPage() {
   const router = useRouter();
@@ -187,6 +252,14 @@ export default function ExportPage() {
         alert(
           "Google BigQuery export is a placeholder. Configure your BigQuery project and dataset in settings to enable.",
         );
+      } else if (formatId === "google_sheets") {
+        alert(
+          "Google Sheets export is a placeholder. Connect a Google account and target spreadsheet to enable.",
+        );
+      } else if (formatId === "fis") {
+        alert(
+          "FIS upload is a placeholder. Configure FIS credentials and endpoint mapping to enable.",
+        );
       }
     } finally {
       setExporting(null);
@@ -209,8 +282,11 @@ export default function ExportPage() {
   }
 
   const formatIcon = (id: string) => {
-    if (id === "excel") return <FileSpreadsheet className="h-5 w-5" />;
-    if (id === "bigquery") return <Database className="h-5 w-5" />;
+    if (id === "excel") return <ExcelLogo />;
+    if (id === "csv") return <CsvLogo />;
+    if (id === "bigquery") return <BigQueryLogo />;
+    if (id === "google_sheets") return <GoogleSheetsLogo />;
+    if (id === "fis") return <FisLogo />;
     return <FileText className="h-5 w-5" />;
   };
 
@@ -292,11 +368,11 @@ export default function ExportPage() {
                   disabled={exporting !== null}
                 >
                   {exporting === f.id ? (
-                    "Exporting…"
+                    f.id === "fis" ? "Uploading…" : "Exporting…"
                   ) : (
                     <>
                       <Download className="mr-2 h-4 w-4" />
-                      Export
+                      {f.id === "fis" ? "Upload" : "Export"}
                     </>
                   )}
                 </Button>
