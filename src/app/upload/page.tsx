@@ -39,6 +39,7 @@ import {
   RotateCcw,
   CheckCircle2,
   XCircle,
+  X,
 } from "lucide-react";
 
 type UploadMode = "structured" | "unstructured";
@@ -98,6 +99,13 @@ interface UnstructuredReviewItem {
   confirmed: boolean;
 }
 
+interface SheetSelectionPreview {
+  fileId: string;
+  fileName: string;
+  sheetName: string;
+  preview: SourceTablePreview;
+}
+
 function stringifyRecordValue(value: unknown): string {
   if (value == null) return "";
   if (typeof value === "string") return value;
@@ -139,6 +147,9 @@ export default function UploadPage() {
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [reviewItems, setReviewItems] = useState<UnstructuredReviewItem[]>([]);
   const [reviewIndex, setReviewIndex] = useState(0);
+  const [activeSheetPreviewId, setActiveSheetPreviewId] = useState<string | null>(null);
+  const [sheetSelectionPreview, setSheetSelectionPreview] = useState<SheetSelectionPreview | null>(null);
+  const [sheetSelectionPreviewLoading, setSheetSelectionPreviewLoading] = useState(false);
   const unstructuredFileInputRef = useRef<HTMLInputElement>(null);
 
   const schema = schemaId ? getSchema(schemaId) : null;
@@ -175,6 +186,64 @@ export default function UploadPage() {
       }
     };
   }, [pollingInterval]);
+
+  useEffect(() => {
+    if (uploadMode !== "unstructured" || unstructuredStep !== "sheet_select") return;
+
+    const selectedSheetId = (activeSheetPreviewId && selectedSheetIds.has(activeSheetPreviewId))
+      ? activeSheetPreviewId
+      : Array.from(selectedSheetIds)[0];
+    if (!selectedSheetId) {
+      setSheetSelectionPreview(null);
+      setSheetSelectionPreviewLoading(false);
+      return;
+    }
+
+    const item = sheetItems.find((s) => s.fileId === selectedSheetId);
+    if (!item) {
+      setSheetSelectionPreview(null);
+      setSheetSelectionPreviewLoading(false);
+      return;
+    }
+
+    // Avoid reloading when the preview already matches the first selected sheet.
+    if (sheetSelectionPreview?.fileId === item.fileId) return;
+
+    let cancelled = false;
+    setSheetSelectionPreviewLoading(true);
+
+    (async () => {
+      try {
+        const sourcePreview = await extractExcelGridTopBottom(
+          item.buffer,
+          20,
+          0,
+          40,
+          item.sheetIndex,
+        );
+        if (cancelled) return;
+        setSheetSelectionPreview({
+          fileId: item.fileId,
+          fileName: item.fileName,
+          sheetName: item.sheetName,
+          preview: {
+            rows: sourcePreview.rows,
+            totalRows: sourcePreview.totalRows,
+            totalColumns: sourcePreview.totalColumns,
+          },
+        });
+      } catch {
+        if (cancelled) return;
+        setSheetSelectionPreview(null);
+      } finally {
+        if (!cancelled) setSheetSelectionPreviewLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [uploadMode, unstructuredStep, selectedSheetIds, sheetItems, sheetSelectionPreview?.fileId]);
 
   // Structured mode: load preview
   const loadPreview = useCallback(
@@ -394,6 +463,27 @@ export default function UploadPage() {
     loadedCountRef.current = PREVIEW_TOP_N;
   };
 
+  const resetUnstructuredToIdle = useCallback(() => {
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+      setPollingInterval(null);
+    }
+    setUnstructuredStep("idle");
+    setSheetItems([]);
+    setSelectedSheetIds(new Set());
+    setPreviewMapping([]);
+    setPreviewRecord(null);
+    setPreviewSourceTable(null);
+    setJobIds([]);
+    setJobStatuses(new Map());
+    setReviewItems([]);
+    setReviewIndex(0);
+    setActiveSheetPreviewId(null);
+    setSheetSelectionPreview(null);
+    setSheetSelectionPreviewLoading(false);
+    setError(null);
+  }, [pollingInterval]);
+
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
@@ -442,6 +532,9 @@ export default function UploadPage() {
     setPreviewSourceTable(null);
     setReviewItems([]);
     setReviewIndex(0);
+    setActiveSheetPreviewId(null);
+    setSheetSelectionPreview(null);
+    setSheetSelectionPreviewLoading(false);
 
     try {
       const items: SheetItem[] = [];
@@ -472,8 +565,10 @@ export default function UploadPage() {
       const next = new Set(prev);
       if (next.has(sheetId)) {
         next.delete(sheetId);
+        setActiveSheetPreviewId((current) => (current === sheetId ? null : current));
       } else {
         next.add(sheetId);
+        setActiveSheetPreviewId(sheetId);
       }
       return next;
     });
@@ -769,18 +864,31 @@ export default function UploadPage() {
               </p>
             </div>
           </div>
-          {uploadMode === "structured" && structuredStep === "preview" && preview && boundary && (
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={resetToIdle}>
-                <RotateCcw className="mr-2 h-4 w-4" />
-                Upload different file
+          <div className="flex items-center gap-2">
+            {uploadMode === "structured" && structuredStep === "preview" && preview && boundary && (
+              <>
+                <Button variant="outline" onClick={resetToIdle}>
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Upload different file
+                </Button>
+                <Button onClick={confirmAndParse}>
+                  Confirm & Continue to Mapping
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </>
+            )}
+            {uploadMode === "unstructured" && sheetItems.length > 0 && (
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={resetUnstructuredToIdle}
+                title="Clear loaded sheets and return to upload view"
+                aria-label="Clear loaded sheets and return to upload view"
+              >
+                <X className="h-4 w-4" />
               </Button>
-              <Button onClick={confirmAndParse}>
-                Confirm & Continue to Mapping
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Mode selector */}
@@ -883,47 +991,118 @@ export default function UploadPage() {
           {uploadMode === "unstructured" && (
             <>
               {unstructuredStep === "sheet_select" && sheetItems.length > 0 && (
-                <Card>
+                <Card className="min-h-screen w-full">
                   <CardHeader>
                     <CardTitle>Select Sheets to Process</CardTitle>
                     <CardDescription>
                       Select which sheets from the uploaded files you want to extract data from. Each sheet will become one row in the final output.
                     </CardDescription>
                   </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2 max-h-96 overflow-y-auto">
-                      {sheetItems.map((item) => (
-                        <label
-                          key={item.fileId}
-                          className="flex items-center gap-3 p-3 border rounded-md cursor-pointer hover:bg-muted/50"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedSheetIds.has(item.fileId)}
-                            onChange={() => toggleSheetSelection(item.fileId)}
-                            className="w-4 h-4"
-                          />
-                          <div className="flex-1">
-                            <div className="font-medium">{item.sheetName}</div>
-                            <div className="text-sm text-muted-foreground">{item.fileName}</div>
+                  <CardContent className="grid min-h-[calc(100vh-14rem)] w-full grid-cols-1 gap-4 overflow-hidden px-4 pb-4 lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-start">
+                    <div className="flex h-[calc(100vh-18rem)] min-h-0 min-w-0 flex-col overflow-hidden rounded-md border">
+                      <div className="border-b px-4 py-3">
+                        <div className="text-sm font-medium">
+                          Sheets ({selectedSheetIds.size} selected)
+                        </div>
+                      </div>
+                      <div className="min-h-0 flex-1 p-2">
+                        <ScrollArea className="h-full w-full">
+                          <div className="space-y-2 pr-2">
+                            {sheetItems.map((item) => {
+                              const isSelected = selectedSheetIds.has(item.fileId);
+                              const isPreviewed = sheetSelectionPreview?.fileId === item.fileId;
+                              return (
+                                <label
+                                  key={item.fileId}
+                                  className={`flex items-center gap-3 rounded-md border p-3 cursor-pointer transition-colors ${
+                                    isSelected
+                                      ? "border-primary/40 bg-primary/5"
+                                      : "hover:bg-muted/50"
+                                  } ${isPreviewed ? "ring-1 ring-primary/30" : ""}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleSheetSelection(item.fileId)}
+                                    className="w-4 h-4"
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="truncate font-medium">{item.sheetName}</div>
+                                    <div className="truncate text-sm text-muted-foreground">{item.fileName}</div>
+                                  </div>
+                                </label>
+                              );
+                            })}
                           </div>
-                        </label>
-                      ))}
+                        </ScrollArea>
+                      </div>
+                      <div className="border-t p-3">
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={handlePreviewFirstSheet}
+                            disabled={selectedSheetIds.size === 0}
+                          >
+                            Preview First Sheet
+                          </Button>
+                          <Button
+                            onClick={handleConfirmAndExtract}
+                            disabled={selectedSheetIds.size === 0}
+                            variant="default"
+                          >
+                            Extract All Selected ({selectedSheetIds.size})
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="mt-4 flex gap-2">
-                      <Button
-                        onClick={handlePreviewFirstSheet}
-                        disabled={selectedSheetIds.size === 0}
-                      >
-                        Preview First Sheet
-                      </Button>
-                      <Button
-                        onClick={handleConfirmAndExtract}
-                        disabled={selectedSheetIds.size === 0}
-                        variant="default"
-                      >
-                        Extract All Selected ({selectedSheetIds.size})
-                      </Button>
+                    <div className="flex h-[calc(100vh-18rem)] min-h-0 min-w-0 flex-col overflow-hidden rounded-md border lg:sticky lg:top-4">
+                      <div className="flex items-center justify-between border-b px-4 py-3">
+                        <div>
+                          <div className="text-sm font-medium">Sheet Preview</div>
+                          {sheetSelectionPreview && (
+                            <div className="text-xs text-muted-foreground">
+                              {sheetSelectionPreview.fileName} • {sheetSelectionPreview.sheetName}
+                            </div>
+                          )}
+                        </div>
+                        {sheetSelectionPreview && (
+                          <div className="text-xs text-muted-foreground">
+                            {sheetSelectionPreview.preview.totalRows} rows, {sheetSelectionPreview.preview.totalColumns} cols
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="min-h-0 flex-1 p-3 overflow-hidden">
+                        {sheetSelectionPreviewLoading ? (
+                          <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Loading sheet preview...
+                          </div>
+                        ) : !sheetSelectionPreview ? (
+                          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                            Select a sheet to preview it here.
+                          </div>
+                        ) : (
+                          <ScrollArea className="h-full w-full rounded-md border">
+                            <Table>
+                              <TableBody>
+                                {sheetSelectionPreview.preview.rows.slice(0, 20).map((row) => (
+                                  <TableRow key={row.originalIndex}>
+                                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                                      Row {row.originalIndex + 1}
+                                    </TableCell>
+                                    {row.data.slice(0, 20).map((cell, ci) => (
+                                      <TableCell key={ci} className="max-w-48 truncate whitespace-nowrap text-xs">
+                                        {cell || <span className="text-muted-foreground">-</span>}
+                                      </TableCell>
+                                    ))}
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                            <ScrollBar orientation="horizontal" />
+                          </ScrollArea>
+                        )}
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -1184,6 +1363,7 @@ export default function UploadPage() {
           )}
 
           {/* File upload card */}
+          {!(uploadMode === "unstructured" && sheetItems.length > 0) && (
           <Card
             className={`border-2 border-dashed transition-colors ${
               dragging ? "border-primary bg-primary/5" : "border-muted-foreground/25"
@@ -1261,6 +1441,7 @@ export default function UploadPage() {
               )}
             </CardContent>
           </Card>
+          )}
 
           {uploadMode === "structured" && structuredStep === "idle" && targetPaths.length > 0 && (
             <Card>
