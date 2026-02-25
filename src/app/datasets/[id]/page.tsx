@@ -9,12 +9,14 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import type { DatasetRecord } from "@/lib/types";
+import { useSchemaStore } from "@/lib/schema-store";
 import { ArrowLeft, Download, Loader2, Plus, Trash2 } from "lucide-react";
 import ExcelJS from "exceljs";
 
 export default function DatasetPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const { resetWorkflow, setCurrentSchema } = useSchemaStore();
   const [dataset, setDataset] = useState<DatasetRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingName, setSavingName] = useState(false);
@@ -123,6 +125,14 @@ export default function DatasetPage() {
     }
   };
 
+  const handleAddToDataset = () => {
+    if (!dataset) return;
+    // Clear any persisted upload/file state before starting a new append flow.
+    resetWorkflow();
+    setCurrentSchema(dataset.schemaId);
+    router.push(`/upload?schemaId=${dataset.schemaId}&datasetId=${dataset.id}`);
+  };
+
   if (loading) {
     return (
       <DashboardLayout>
@@ -156,7 +166,7 @@ export default function DatasetPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button size="lg" onClick={() => router.push(`/upload?schemaId=${dataset.schemaId}&datasetId=${dataset.id}`)}>
+            <Button size="lg" onClick={handleAddToDataset}>
               <Plus className="mr-2 h-4 w-4" />
               Add to this dataset
             </Button>

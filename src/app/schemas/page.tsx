@@ -59,7 +59,7 @@ export default function SchemasPage() {
   const [schemaUploadFile, setSchemaUploadFile] = useState<File | null>(null);
   const [schemaUploadBuffer, setSchemaUploadBuffer] = useState<ArrayBuffer | null>(null);
   const [expandedSchemaIds, setExpandedSchemaIds] = useState<Set<string>>(new Set());
-  const [datasetLists, setDatasetLists] = useState<Record<string, { items: DatasetSummary[]; total?: number; loading?: boolean }>>({});
+  const [datasetLists, setDatasetLists] = useState<Record<string, { items: DatasetSummary[]; total?: number; loading?: boolean; hydrated?: boolean }>>({});
   const [deleteDatasetId, setDeleteDatasetId] = useState<string | null>(null);
 
   const schemasSorted = useMemo(
@@ -93,6 +93,55 @@ export default function SchemasPage() {
     });
   };
 
+  const hydrateSchemaDatasets = useCallback(async (schemaId: string) => {
+    const current = datasetLists[schemaId];
+    if (current?.loading) return;
+    if (current?.hydrated) return;
+
+    setDatasetLists((prev) => ({
+      ...prev,
+      [schemaId]: {
+        items: prev[schemaId]?.items ?? [],
+        total: prev[schemaId]?.total,
+        loading: true,
+        hydrated: prev[schemaId]?.hydrated,
+      },
+    }));
+
+    try {
+      const res = await fetch(`/api/datasets?schemaId=${schemaId}&limit=5&offset=0`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Failed to hydrate datasets");
+      const incoming = Array.isArray(data.datasets) ? (data.datasets as DatasetSummary[]) : [];
+      setDatasetLists((prev) => ({
+        ...prev,
+        [schemaId]: {
+          items: incoming,
+          total: typeof data.total === "number" ? data.total : prev[schemaId]?.total,
+          loading: false,
+          hydrated: true,
+        },
+      }));
+    } catch {
+      setDatasetLists((prev) => ({
+        ...prev,
+        [schemaId]: {
+          ...(prev[schemaId] ?? { items: [] }),
+          loading: false,
+          hydrated: false,
+        },
+      }));
+    }
+  }, [datasetLists]);
+
+  useEffect(() => {
+    if (expandedSchemaIds.size === 0) return;
+    const expanded = schemasSorted.filter((s) => expandedSchemaIds.has(s.id));
+    expanded.forEach((s) => {
+      void hydrateSchemaDatasets(s.id);
+    });
+  }, [expandedSchemaIds, schemasSorted, hydrateSchemaDatasets]);
+
   const loadMoreDatasets = useCallback(async (schemaId: string) => {
     const current = datasetLists[schemaId];
     setDatasetLists((prev) => ({
@@ -111,6 +160,7 @@ export default function SchemasPage() {
           items: [...(prev[schemaId]?.items ?? []), ...incoming],
           total: typeof data.total === "number" ? data.total : prev[schemaId]?.total,
           loading: false,
+          hydrated: true,
         },
       }));
     } catch {

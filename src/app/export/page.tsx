@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/card";
 import { useSchemaStore, flattenFields } from "@/lib/schema-store";
 import type { ExportFormat } from "@/lib/types";
-import { Download, FileSpreadsheet, Database, FileText, Layers, ArrowLeft, CalendarDays } from "lucide-react";
+import { Download, FileSpreadsheet, Database, FileText, Layers, ArrowLeft, CalendarDays, Loader2, Plus } from "lucide-react";
 import ExcelJS from "exceljs";
 import { applyMappings, getByPath, formatDisplayValue } from "@/lib/pivot-transform";
 
@@ -37,10 +37,13 @@ const EXPORT_FORMATS: ExportFormat[] = [
 
 export default function ExportPage() {
   const router = useRouter();
-  const { workflow, getSchema } = useSchemaStore();
+  const { workflow, getSchema, setUploadState } = useSchemaStore();
   const { rawRows, columnMappings, currentSchemaId, pivotConfig, verticalPivotConfig, defaultValues, uploadState } = workflow;
   const schema = currentSchemaId ? getSchema(currentSchemaId) : null;
   const [exporting, setExporting] = useState<string | null>(null);
+  const [datasetSaving, setDatasetSaving] = useState(false);
+  const [datasetSaveError, setDatasetSaveError] = useState<string | null>(null);
+  const [savedDatasetId, setSavedDatasetId] = useState<string | null>(null);
 
   const allTargetPaths = useMemo(
     () => schema ? flattenFields(schema.fields).filter((f) => !f.children?.length).map((f) => f.path) : [],
@@ -62,9 +65,12 @@ export default function ExportPage() {
     return Array.from(cols).sort();
   }, [allTargetPaths, columnMappings, defaultValues]);
 
-  const handleExport = async (formatId: string) => {
-    if (!schema || mappedRows.length === 0) return;
-    setExporting(formatId);
+  const selectedDatasetId = typeof uploadState?.datasetTargetId === "string" ? uploadState.datasetTargetId : null;
+  const canSaveDataset = !!schema && mappedRows.length > 0;
+  const persistDataset = async () => {
+    if (!schema || mappedRows.length === 0) return null;
+    setDatasetSaving(true);
+    setDatasetSaveError(null);
 
     try {
       const mappingSnapshot = {
@@ -73,28 +79,70 @@ export default function ExportPage() {
         verticalPivotConfig,
         defaultValues,
       };
-      const datasetTargetId = typeof uploadState?.datasetTargetId === "string" ? uploadState.datasetTargetId : null;
-      if (datasetTargetId) {
-        await fetch(`/api/datasets/${datasetTargetId}`, {
+
+      if (selectedDatasetId) {
+        const res = await fetch(`/api/datasets/${selectedDatasetId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ appendRows: mappedRows, mappingSnapshot }),
         });
-      } else {
-        const dt = new Date();
-        const datasetName = `${schema.name} Dataset ${dt.toLocaleDateString()} ${dt.toLocaleTimeString()}`;
-        await fetch("/api/datasets", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            schemaId: schema.id,
-            name: datasetName,
-            rows: mappedRows,
-            mappingSnapshot,
-          }),
-        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error ?? "Failed to add rows to dataset");
+        setSavedDatasetId(selectedDatasetId);
+        return selectedDatasetId;
       }
 
+      const dt = new Date();
+      const datasetName = `${schema.name} Dataset ${dt.toLocaleDateString()} ${dt.toLocaleTimeString()}`;
+      const res = await fetch("/api/datasets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schemaId: schema.id,
+          name: datasetName,
+          rows: mappedRows,
+          mappingSnapshot,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Failed to create dataset");
+
+      const createdId =
+        typeof data?.dataset?.id === "string" ? data.dataset.id : null;
+      if (!createdId) throw new Error("Dataset created but no id was returned");
+
+      setSavedDatasetId(createdId);
+      setUploadState({
+        ...(uploadState ?? { schemaId: schema.id, step: "idle" }),
+        schemaId: schema.id,
+        datasetTargetId: createdId,
+      });
+      return createdId;
+    } catch (e) {
+      setDatasetSaveError(e instanceof Error ? e.message : "Failed to save dataset");
+      return null;
+    } finally {
+      setDatasetSaving(false);
+    }
+  };
+
+  const handleDatasetCta = async () => {
+    if (savedDatasetId) {
+      router.push(`/datasets/${savedDatasetId}`);
+      return;
+    }
+    if (selectedDatasetId) {
+      await persistDataset();
+      return;
+    }
+    await persistDataset();
+  };
+
+  const handleExport = async (formatId: string) => {
+    if (!schema || mappedRows.length === 0) return;
+    setExporting(formatId);
+
+    try {
       if (formatId === "excel") {
         const workbook = new ExcelJS.Workbook();
         const sheet = workbook.addWorksheet("Data");
@@ -182,6 +230,55 @@ export default function ExportPage() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <Card className="md:col-span-2 lg:col-span-3 border-primary/20 bg-gradient-to-br from-primary/5 via-background to-background">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Database className="h-5 w-5 text-primary" />
+                Dataset
+              </CardTitle>
+              <CardDescription>
+                {selectedDatasetId
+                  ? "Append the transformed rows to your selected dataset, then jump to the dataset view."
+                  : "No dataset is selected yet. Save this export as a new dataset in the database."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button
+                size="lg"
+                className="h-14 w-full text-base"
+                onClick={handleDatasetCta}
+                disabled={!canSaveDataset || datasetSaving}
+              >
+                {datasetSaving ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving Dataset...
+                  </>
+                ) : savedDatasetId ? (
+                  "View Dataset"
+                ) : selectedDatasetId ? (
+                  <>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add dataset
+                  </>
+                ) : (
+                  <>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create new Dataset
+                  </>
+                )}
+              </Button>
+              {datasetSaveError && (
+                <p className="text-sm text-destructive">{datasetSaveError}</p>
+              )}
+              {savedDatasetId && (
+                <p className="text-xs text-muted-foreground">
+                  Dataset saved. Use “View Dataset” to review or manage it.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
           {EXPORT_FORMATS.map((f) => (
             <Card key={f.id} className="flex flex-col">
               <CardHeader className="flex flex-row items-center gap-2">
