@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const auth = await getAuth();
   if (auth.response) return auth.response;
-  const { supabase, userId } = auth;
+  const { supabase } = auth;
 
   let body: {
     schemaId?: string;
@@ -69,20 +69,16 @@ export async function POST(request: NextRequest) {
 
   const { data: schemaRow, error: schemaError } = await supabase!
     .from("schemas")
-    .select("id, user_id")
+    .select("id")
     .eq("id", schemaId)
     .single();
   if (schemaError || !schemaRow) {
     return NextResponse.json({ error: schemaError?.message ?? "Schema not found" }, { status: 404 });
   }
-  if (schemaRow.user_id !== userId) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
 
   const { data, error } = await supabase!
     .from("datasets")
     .insert({
-      user_id: userId!,
       schema_id: schemaId,
       name,
       rows,

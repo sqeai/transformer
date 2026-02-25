@@ -40,7 +40,7 @@ export async function PATCH(
 ) {
   const auth = await getAuth();
   if (auth.response) return auth.response;
-  const { supabase, userId } = auth;
+  const { supabase } = auth;
   const { id } = await params;
 
   let body: {
@@ -56,14 +56,11 @@ export async function PATCH(
 
   const { data: existing, error: loadError } = await supabase!
     .from("datasets")
-    .select("id, user_id, schema_id, name, rows, row_count")
+    .select("id, schema_id, name, rows, row_count")
     .eq("id", id)
     .single();
   if (loadError || !existing) {
     return NextResponse.json({ error: loadError?.message ?? "Not found" }, { status: 404 });
-  }
-  if (existing.user_id !== userId) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const updates: Record<string, unknown> = {};
@@ -103,19 +100,16 @@ export async function DELETE(
 ) {
   const auth = await getAuth();
   if (auth.response) return auth.response;
-  const { supabase, userId } = auth;
+  const { supabase } = auth;
   const { id } = await params;
 
   const { data: existing, error: loadError } = await supabase!
     .from("datasets")
-    .select("id, user_id, schema_id")
+    .select("id, schema_id")
     .eq("id", id)
     .single();
   if (loadError || !existing) {
     return NextResponse.json({ error: loadError?.message ?? "Not found" }, { status: 404 });
-  }
-  if (existing.user_id !== userId) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { error } = await supabase!.from("datasets").delete().eq("id", id);
