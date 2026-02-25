@@ -387,3 +387,85 @@ export async function autoMapColumnsWithLLM(
 
   return { mappings, pivot, verticalPivot, defaultValues };
 }
+
+const EXTRACT_UNSTRUCTURED_PROMPT = `You are an AI Data Cleanser agent. You will receive a raw dump of an entire Excel sheet (all rows and columns) and a list of target schema field paths. Your job is to extract exactly ONE record from this sheet that matches the target schema.
+
+The sheet may contain:
+- Title rows, disclaimers, or metadata rows
+- Multiple tables or sections
+- Merged cells
+- Empty padding rows/columns
+- Unstructured data (not in a clean table format)
+
+Your task:
+1. Analyze the entire sheet content to understand what data is present
+2. Extract values that correspond to each target schema field path
+3. Return a single record (object) where keys are the target schema paths and values are the extracted data
+4. Also provide a mapping showing where each value came from (e.g. "Cell B3", "Row 5, column 'Company Name'", "Found in title section")
+
+Rules:
+- Extract exactly ONE record per sheet (not multiple rows)
+- If a field cannot be found, use null or an empty string
+- For numeric fields, extract as numbers
+- For text fields, extract as strings
+- Try to be smart about finding data even if it's not in a standard table format
+- Cite the source location for each field in the mapping
+
+Respond ONLY with a JSON object (no markdown fences, no commentary):
+{
+  "record": {
+    "fieldPath1": value1,
+    "fieldPath2": value2,
+    ...
+  },
+  "mapping": [
+    {
+      "targetPath": "fieldPath1",
+      "source": "description of where this value came from (e.g. 'Cell B3', 'Row 5, column Company Name')"
+    },
+    ...
+  ]
+}`;
+
+export interface UnstructuredExtractionResult {
+  record: Record<string, unknown>;
+  mapping: Array<{ targetPath: string; source: string }>;
+}
+
+/**
+ * Extracts a single record from an unstructured Excel sheet dump.
+ * Takes the entire sheet as text and target schema paths, returns one record
+ * with values mapped to those paths, plus a mapping showing where each value came from.
+ */
+export async function extractUnstructuredRecordWithLLM(
+  sheetText: string,
+  targetPaths: string[],
+): Promise<UnstructuredExtractionResult> {
+  if (!sheetText || !targetPaths || targetPaths.length === 0) {
+    throw new Error("sheetText and targetPaths are required");
+  }
+
+  const prompt = `Extract a single record from this unstructured Excel sheet that matches the target schema fields.\n\nSheet content:\n${sheetText}\n\nTarget schema paths:\n${targetPaths.map((p, i) => `${i + 1}. "${p}"`).join("\n")}\n\nExtract one record with values for each target path, and provide a mapping showing where each value came from in the sheet.`;
+
+  const text = await callLlm(EXTRACT_UNSTRUCTURED_PROMPT, prompt);
+
+  let parsed: { record?: Record<string, unknown>; mapping?: Array<{ targetPath: string; source: string }> };
+  try {
+    parsed = JSON.parse(cleanJsonResponse(text));
+  } catch {
+    throw new Error(
+      `LLM returned invalid JSON for unstructured extraction. Raw response:\n${text.slice(0, 500)}`,
+    );
+  }
+
+  if (!parsed.record || typeof parsed.record !== "object") {
+    throw new Error("LLM did not return a valid record object");
+  }
+
+  const mapping = Array.isArray(parsed.mapping) ? parsed.mapping : [];
+
+  return {
+    record: parsed.record,
+    mapping,
+  };
+}
