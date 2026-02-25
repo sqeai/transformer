@@ -46,6 +46,7 @@ interface WorkflowState {
     boundary?: unknown;
     analysis?: unknown;
     uploadMode?: "structured" | "unstructured";
+    unstructured?: unknown;
   } | null;
 }
 

@@ -109,6 +109,20 @@ interface SheetSelectionPreview {
   preview: SourceTablePreview;
 }
 
+interface PersistedUnstructuredUploadState {
+  unstructuredStep: UnstructuredStep;
+  sheetItems: SheetItem[];
+  selectedSheetIds: string[];
+  previewMapping: Array<{ targetPath: string; source: string }>;
+  previewRecord: Record<string, unknown> | null;
+  previewSourceTable: SourceTablePreview | null;
+  reviewItems: UnstructuredReviewItem[];
+  reviewIndex: number;
+  activeSheetPreviewId: string | null;
+  sheetSelectionPreview: SheetSelectionPreview | null;
+  sheetSelectionPreviewRowCount: number;
+}
+
 function AiLoadingNotice({
   title = "AI is processing your results",
   subtitle,
@@ -205,12 +219,37 @@ export default function UploadPage() {
   useEffect(() => {
     if (!schemaId || !schema || restoredRef.current) return;
     const saved = workflow.uploadState;
-    if (saved?.schemaId === schemaId && saved.step === "preview" && saved.preview && saved.boundary) {
+    if (saved?.schemaId !== schemaId) return;
+
+    if (saved.uploadMode === "structured" && saved.step === "preview" && saved.preview && saved.boundary) {
       restoredRef.current = true;
+      setUploadMode("structured");
       setStructuredStep("preview");
       setPreview(saved.preview as PreviewData);
       setBoundary(saved.boundary as DataBoundary);
       setAnalysis((saved.analysis as RawDataAnalysis) ?? null);
+      return;
+    }
+
+    if (saved.uploadMode === "unstructured" && saved.unstructured) {
+      const u = saved.unstructured as PersistedUnstructuredUploadState;
+      restoredRef.current = true;
+      setUploadMode("unstructured");
+      setUnstructuredStep(u.unstructuredStep ?? "sheet_select");
+      setSheetItems(Array.isArray(u.sheetItems) ? u.sheetItems : []);
+      setSelectedSheetIds(new Set(Array.isArray(u.selectedSheetIds) ? u.selectedSheetIds : []));
+      setPreviewMapping(Array.isArray(u.previewMapping) ? u.previewMapping : []);
+      setPreviewRecord((u.previewRecord as Record<string, unknown> | null) ?? null);
+      setPreviewSourceTable((u.previewSourceTable as SourceTablePreview | null) ?? null);
+      setReviewItems(Array.isArray(u.reviewItems) ? u.reviewItems : []);
+      setReviewIndex(typeof u.reviewIndex === "number" ? u.reviewIndex : 0);
+      setActiveSheetPreviewId(u.activeSheetPreviewId ?? null);
+      setSheetSelectionPreview((u.sheetSelectionPreview as SheetSelectionPreview | null) ?? null);
+      setSheetSelectionPreviewRowCount(
+        typeof u.sheetSelectionPreviewRowCount === "number"
+          ? u.sheetSelectionPreviewRowCount
+          : UNSTRUCTURED_SHEET_PREVIEW_INITIAL_ROWS,
+      );
     }
   }, [schemaId, schema, workflow.uploadState]);
 
@@ -220,6 +259,48 @@ export default function UploadPage() {
       setUploadState({ schemaId, step: "preview", preview, boundary, analysis, uploadMode: "structured" });
     }
   }, [structuredStep, preview, boundary, analysis, schemaId, setUploadState]);
+
+  useEffect(() => {
+    if (!schemaId || uploadMode !== "unstructured") return;
+    if (unstructuredStep === "idle" || sheetItems.length === 0) return;
+
+    // Persist unstructured progress so navigating to mapping/export and back restores the review flow.
+    const unstructuredState: PersistedUnstructuredUploadState = {
+      unstructuredStep,
+      sheetItems,
+      selectedSheetIds: Array.from(selectedSheetIds),
+      previewMapping,
+      previewRecord,
+      previewSourceTable,
+      reviewItems,
+      reviewIndex,
+      activeSheetPreviewId,
+      sheetSelectionPreview,
+      sheetSelectionPreviewRowCount,
+    };
+
+    setUploadState({
+      schemaId,
+      step: unstructuredStep,
+      uploadMode: "unstructured",
+      unstructured: unstructuredState,
+    });
+  }, [
+    schemaId,
+    uploadMode,
+    unstructuredStep,
+    sheetItems,
+    selectedSheetIds,
+    previewMapping,
+    previewRecord,
+    previewSourceTable,
+    reviewItems,
+    reviewIndex,
+    activeSheetPreviewId,
+    sheetSelectionPreview,
+    sheetSelectionPreviewRowCount,
+    setUploadState,
+  ]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -921,9 +1002,27 @@ export default function UploadPage() {
     setVerticalPivotConfig({ enabled: false, outputTargetPaths: [], columns: [] });
     setDefaultValues({});
     if (schemaId) {
-      setUploadState({ schemaId, step: "done", uploadMode: "unstructured" });
+      const unstructuredState: PersistedUnstructuredUploadState = {
+        unstructuredStep: "reviewing",
+        sheetItems,
+        selectedSheetIds: Array.from(selectedSheetIds),
+        previewMapping,
+        previewRecord,
+        previewSourceTable,
+        reviewItems,
+        reviewIndex,
+        activeSheetPreviewId,
+        sheetSelectionPreview,
+        sheetSelectionPreviewRowCount,
+      };
+      setUploadState({
+        schemaId,
+        step: "reviewing",
+        uploadMode: "unstructured",
+        unstructured: unstructuredState,
+      });
     }
-    router.push("/export");
+    router.push("/mapping");
   }, [
     reviewItems,
     targetPaths,
@@ -934,10 +1033,28 @@ export default function UploadPage() {
     setDefaultValues,
     schemaId,
     setUploadState,
+    sheetItems,
+    selectedSheetIds,
+    previewMapping,
+    previewRecord,
+    previewSourceTable,
+    reviewIndex,
+    activeSheetPreviewId,
+    sheetSelectionPreview,
+    sheetSelectionPreviewRowCount,
     router,
   ]);
 
   const allReviewItemsConfirmed = reviewItems.length > 0 && reviewItems.every((i) => i.confirmed);
+
+  const handleBackToSheetSelection = useCallback(() => {
+    setUploadMode("unstructured");
+    setError(null);
+    setUnstructuredStep("sheet_select");
+    if (!activeSheetPreviewId && sheetItems.length > 0) {
+      setActiveSheetPreviewId(sheetItems[0].fileId);
+    }
+  }, [activeSheetPreviewId, sheetItems]);
 
   if (!schemaId || !schema) {
     return (
@@ -1331,7 +1448,7 @@ export default function UploadPage() {
                       </TableBody>
                     </Table>
                     <div className="mt-4 flex gap-2">
-                      <Button variant="outline" onClick={() => setUnstructuredStep("sheet_select")}>
+                      <Button variant="outline" onClick={handleBackToSheetSelection}>
                         Back
                       </Button>
                       <Button onClick={handleConfirmAndExtract}>
@@ -1501,7 +1618,7 @@ export default function UploadPage() {
                         </Button>
                       </div>
                       <div className="flex gap-2">
-                        <Button variant="outline" onClick={() => setUnstructuredStep("sheet_select")}>
+                        <Button variant="outline" onClick={handleBackToSheetSelection}>
                           Back to Sheet Selection
                         </Button>
                         {reviewIndex < reviewItems.length - 1 && (
@@ -1525,7 +1642,7 @@ export default function UploadPage() {
                             }}
                             disabled={reviewItems.length === 0}
                           >
-                            Finish & Export
+                            Confirm Mapping
                           </Button>
                         )}
                       </div>
