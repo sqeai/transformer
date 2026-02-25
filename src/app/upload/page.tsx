@@ -11,11 +11,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useSchemaStore } from "@/lib/schema-store";
 import { flattenFields } from "@/lib/schema-store";
 import { parseExcelToRows } from "@/lib/parse-excel";
 import { parseCsvToRows, extractCsvPreviewTopBottom } from "@/lib/parse-csv";
-import { extractExcelGridTopBottom, getExcelSheetNames } from "@/lib/parse-excel-preview";
+import { extractExcelGridTopBottom, getExcelSheetNames, dumpSheetAsText } from "@/lib/parse-excel-preview";
 import type { RawDataAnalysis } from "@/lib/llm-schema";
 import DataPreviewTable, { type DataBoundary, type IndexedRow } from "@/components/DataPreviewTable";
 import {
@@ -27,13 +35,18 @@ import {
   ArrowLeft,
   ArrowRight,
   RotateCcw,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 
-type Step = "idle" | "loading_preview" | "analyzing" | "preview" | "parsing";
+type UploadMode = "structured" | "unstructured";
+type StructuredStep = "idle" | "loading_preview" | "analyzing" | "preview" | "parsing";
+type UnstructuredStep = "idle" | "sheet_select" | "confirming" | "extracting" | "done";
 
 const PREVIEW_TOP_N = 30;
 const PREVIEW_BOTTOM_N = 0;
 const PREVIEW_MAX_COLS = 50;
+const POLL_INTERVAL_MS = 3000;
 
 interface PreviewData {
   rows: IndexedRow[];
@@ -49,13 +62,31 @@ interface PreviewData {
   activeSheetIndex?: number;
 }
 
+interface SheetItem {
+  fileId: string;
+  fileName: string;
+  buffer: ArrayBuffer;
+  sheetIndex: number;
+  sheetName: string;
+}
+
+interface JobStatus {
+  id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  result?: { record: Record<string, unknown>; mapping: Array<{ targetPath: string; source: string }> };
+  error?: string;
+}
+
 export default function UploadPage() {
   const router = useRouter();
   const { getSchema, setCurrentSchema, setRawData, resetWorkflow, workflow, setUploadState } = useSchemaStore();
   const schemaId = workflow.currentSchemaId;
+  const [uploadMode, setUploadMode] = useState<UploadMode>("structured");
   const [dragging, setDragging] = useState(false);
-  const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
+
+  // Structured mode state
+  const [structuredStep, setStructuredStep] = useState<StructuredStep>("idle");
   const [analysis, setAnalysis] = useState<RawDataAnalysis | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [boundary, setBoundary] = useState<DataBoundary | null>(null);
@@ -64,7 +95,22 @@ export default function UploadPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const restoredRef = useRef(false);
 
+  // Unstructured mode state
+  const [unstructuredStep, setUnstructuredStep] = useState<UnstructuredStep>("idle");
+  const [sheetItems, setSheetItems] = useState<SheetItem[]>([]);
+  const [selectedSheetIds, setSelectedSheetIds] = useState<Set<string>>(new Set());
+  const [previewMapping, setPreviewMapping] = useState<Array<{ targetPath: string; source: string }>>([]);
+  const [previewRecord, setPreviewRecord] = useState<Record<string, unknown> | null>(null);
+  const [jobIds, setJobIds] = useState<string[]>([]);
+  const [jobStatuses, setJobStatuses] = useState<Map<string, JobStatus>>(new Map());
+  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
+  const unstructuredFileInputRef = useRef<HTMLInputElement>(null);
+
   const schema = schemaId ? getSchema(schemaId) : null;
+  const targetPaths = useMemo(() => {
+    if (!schema) return [];
+    return flattenFields(schema.fields).map((f) => f.path);
+  }, [schema]);
 
   // Restore persisted upload state when returning to this page with the same schema
   useEffect(() => {
@@ -72,7 +118,7 @@ export default function UploadPage() {
     const saved = workflow.uploadState;
     if (saved?.schemaId === schemaId && saved.step === "preview" && saved.preview && saved.boundary) {
       restoredRef.current = true;
-      setStep("preview");
+      setStructuredStep("preview");
       setPreview(saved.preview as PreviewData);
       setBoundary(saved.boundary as DataBoundary);
       setAnalysis((saved.analysis as RawDataAnalysis) ?? null);
@@ -81,11 +127,21 @@ export default function UploadPage() {
 
   // Persist upload state while in preview so navigating back restores the data
   useEffect(() => {
-    if (step === "preview" && preview && boundary && schemaId) {
-      setUploadState({ schemaId, step: "preview", preview, boundary, analysis });
+    if (structuredStep === "preview" && preview && boundary && schemaId) {
+      setUploadState({ schemaId, step: "preview", preview, boundary, analysis, uploadMode: "structured" });
     }
-  }, [step, preview, boundary, analysis, schemaId, setUploadState]);
+  }, [structuredStep, preview, boundary, analysis, schemaId, setUploadState]);
 
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [pollingInterval]);
+
+  // Structured mode: load preview
   const loadPreview = useCallback(
     async (file: File) => {
       setError(null);
@@ -107,7 +163,7 @@ export default function UploadPage() {
       }
 
       try {
-        setStep("loading_preview");
+        setStructuredStep("loading_preview");
 
         if (isExcel) {
           const buffer = await file.arrayBuffer();
@@ -117,7 +173,7 @@ export default function UploadPage() {
           );
 
           let llmBoundary: RawDataAnalysis | undefined;
-          setStep("analyzing");
+          setStructuredStep("analyzing");
           try {
             const formData = new FormData();
             formData.append("file", file);
@@ -179,10 +235,10 @@ export default function UploadPage() {
           });
         }
 
-        setStep("preview");
+        setStructuredStep("preview");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load file preview");
-        setStep("idle");
+        setStructuredStep("idle");
       }
     },
     [resetWorkflow, schemaId, setCurrentSchema],
@@ -192,7 +248,7 @@ export default function UploadPage() {
     if (!preview || !boundary) return;
 
     try {
-      setStep("parsing");
+      setStructuredStep("parsing");
 
       const columnsToKeep: number[] = [];
       for (let i = boundary.startColumn; i <= boundary.endColumn; i++) {
@@ -218,15 +274,14 @@ export default function UploadPage() {
         setRawData(columns, rows);
       }
 
-      // Persist upload state so navigating back restores the preview
       if (schemaId) {
-        setUploadState({ schemaId, step: "preview", preview, boundary, analysis });
+        setUploadState({ schemaId, step: "preview", preview, boundary, analysis, uploadMode: "structured" });
       }
 
       router.push("/mapping");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to parse file");
-      setStep("preview");
+      setStructuredStep("preview");
     }
   }, [preview, boundary, schemaId, analysis, setRawData, router, setUploadState]);
 
@@ -267,7 +322,6 @@ export default function UploadPage() {
 
   const handleBoundaryChange = useCallback((newBoundary: DataBoundary) => {
     setBoundary(newBoundary);
-    // No refetch on boundary change — data is only loaded via "Load More Rows" or initial load
   }, []);
 
   const loadMoreRows = useCallback(async () => {
@@ -313,7 +367,7 @@ export default function UploadPage() {
   }, [preview, boundary, loadingMore]);
 
   const resetToIdle = () => {
-    setStep("idle");
+    setStructuredStep("idle");
     setPreview(null);
     setBoundary(null);
     setAnalysis(null);
@@ -326,17 +380,227 @@ export default function UploadPage() {
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragging(false);
-      const file = e.dataTransfer.files[0];
-      if (file) loadPreview(file);
+      if (uploadMode === "structured") {
+        const file = e.dataTransfer.files[0];
+        if (file) loadPreview(file);
+      } else {
+        const files = Array.from(e.dataTransfer.files).filter((f) => {
+          const ext = f.name.toLowerCase();
+          return ext.endsWith(".xlsx") || ext.endsWith(".xls");
+        });
+        if (files.length > 0) {
+          handleUnstructuredFiles(files);
+        }
+      }
     },
-    [loadPreview],
+    [uploadMode, loadPreview],
   );
 
   const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) loadPreview(file);
+    if (file) {
+      if (uploadMode === "structured") {
+        loadPreview(file);
+      } else {
+        const files = Array.from(e.target.files).filter((f) => {
+          const ext = f.name.toLowerCase();
+          return ext.endsWith(".xlsx") || ext.endsWith(".xls");
+        });
+        if (files.length > 0) {
+          handleUnstructuredFiles(files);
+        }
+      }
+    }
     e.target.value = "";
   };
+
+  // Unstructured mode: handle multiple files
+  const handleUnstructuredFiles = useCallback(async (files: File[]) => {
+    setError(null);
+    setSheetItems([]);
+    setSelectedSheetIds(new Set());
+
+    try {
+      const items: SheetItem[] = [];
+      for (const file of files) {
+        const buffer = await file.arrayBuffer();
+        const sheetNames = await getExcelSheetNames(buffer);
+        for (let i = 0; i < sheetNames.length; i++) {
+          items.push({
+            fileId: `${file.name}-${i}`,
+            fileName: file.name,
+            buffer,
+            sheetIndex: i,
+            sheetName: sheetNames[i],
+          });
+        }
+      }
+
+      setSheetItems(items);
+      setUnstructuredStep("sheet_select");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load files");
+      setUnstructuredStep("idle");
+    }
+  }, []);
+
+  const toggleSheetSelection = useCallback((sheetId: string) => {
+    setSelectedSheetIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sheetId)) {
+        next.delete(sheetId);
+      } else {
+        next.add(sheetId);
+      }
+      return next;
+    });
+  }, []);
+
+  // Unstructured: preview first sheet for confirmation
+  const handlePreviewFirstSheet = useCallback(async () => {
+    if (selectedSheetIds.size === 0) {
+      setError("Please select at least one sheet");
+      return;
+    }
+
+    const firstSheetId = Array.from(selectedSheetIds)[0];
+    const sheetItem = sheetItems.find((s) => s.fileId === firstSheetId);
+    if (!sheetItem) return;
+
+    try {
+      setUnstructuredStep("confirming");
+      setError(null);
+
+      const sheetText = await dumpSheetAsText(sheetItem.buffer, sheetItem.sheetIndex);
+      const res = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "extract_unstructured",
+          payload: { sheetText, targetPaths },
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to create preview job");
+      }
+
+      const { jobId } = await res.json();
+
+      // Poll for preview job completion
+      const pollPreview = async () => {
+        const statusRes = await fetch(`/api/jobs?ids=${jobId}`);
+        if (!statusRes.ok) return;
+        const { jobs } = await statusRes.json();
+        const job = jobs[0];
+        if (job && job.status === "completed" && job.result) {
+          setPreviewRecord(job.result.record);
+          setPreviewMapping(job.result.mapping || []);
+          setUnstructuredStep("confirming");
+        } else if (job && job.status === "failed") {
+          setError(job.error || "Preview extraction failed");
+          setUnstructuredStep("sheet_select");
+        } else {
+          setTimeout(pollPreview, 2000);
+        }
+      };
+
+      // Trigger processor
+      fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
+      setTimeout(pollPreview, 1000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to preview sheet");
+      setUnstructuredStep("sheet_select");
+    }
+  }, [selectedSheetIds, sheetItems, targetPaths]);
+
+  // Unstructured: confirm and start batch extraction
+  const handleConfirmAndExtract = useCallback(async () => {
+    if (selectedSheetIds.size === 0) return;
+
+    try {
+      setUnstructuredStep("extracting");
+      setError(null);
+
+      const selectedItems = sheetItems.filter((s) => selectedSheetIds.has(s.fileId));
+      const jobIds: string[] = [];
+
+      // Enqueue jobs for all selected sheets
+      for (const item of selectedItems) {
+        const sheetText = await dumpSheetAsText(item.buffer, item.sheetIndex);
+        const res = await fetch("/api/jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "extract_unstructured",
+            payload: { sheetText, targetPaths },
+          }),
+        });
+
+        if (res.ok) {
+          const { jobId } = await res.json();
+          jobIds.push(jobId);
+        }
+      }
+
+      setJobIds(jobIds);
+
+      // Trigger processor
+      fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
+
+      // Start polling
+      const poll = async () => {
+        if (jobIds.length === 0) return;
+        const res = await fetch(`/api/jobs?ids=${jobIds.join(",")}`);
+        if (!res.ok) return;
+        const { jobs } = await res.json();
+        const statusMap = new Map<string, JobStatus>();
+        for (const job of jobs) {
+          statusMap.set(job.id, {
+            id: job.id,
+            status: job.status,
+            result: job.result,
+            error: job.error,
+          });
+        }
+        setJobStatuses(statusMap);
+
+        const allDone = jobs.every((j: JobStatus) => j.status === "completed" || j.status === "failed");
+        if (allDone) {
+          if (pollingInterval) {
+            clearInterval(pollingInterval);
+            setPollingInterval(null);
+          }
+
+          // Build rows from completed jobs
+          const rows: Record<string, unknown>[] = [];
+          for (const job of jobs) {
+            if (job.status === "completed" && job.result?.record) {
+              rows.push(job.result.record);
+            }
+          }
+
+          if (rows.length > 0) {
+            setRawData(targetPaths, rows);
+            if (schemaId) {
+              setUploadState({ schemaId, step: "done", uploadMode: "unstructured" });
+            }
+            router.push("/mapping");
+          } else {
+            setError("All jobs failed. Please try again.");
+            setUnstructuredStep("sheet_select");
+          }
+        }
+      };
+
+      const interval = setInterval(poll, POLL_INTERVAL_MS);
+      setPollingInterval(interval);
+      poll(); // Initial poll
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start extraction");
+      setUnstructuredStep("sheet_select");
+    }
+  }, [selectedSheetIds, sheetItems, targetPaths, schemaId, setRawData, setUploadState, router, pollingInterval]);
 
   if (!schemaId || !schema) {
     return (
@@ -356,8 +620,6 @@ export default function UploadPage() {
     );
   }
 
-  const targetPaths = flattenFields(schema.fields).map((f) => f.path);
-
   return (
     <DashboardLayout>
       <div className="flex flex-col animate-fade-in min-w-0">
@@ -373,7 +635,7 @@ export default function UploadPage() {
               </p>
             </div>
           </div>
-          {step === "preview" && preview && boundary && (
+          {uploadMode === "structured" && structuredStep === "preview" && preview && boundary && (
             <div className="flex items-center gap-2">
               <Button variant="outline" onClick={resetToIdle}>
                 <RotateCcw className="mr-2 h-4 w-4" />
@@ -387,163 +649,363 @@ export default function UploadPage() {
           )}
         </div>
 
-        <div className="flex flex-1 min-h-0 min-w-0 flex-col gap-4 overflow-y-auto pb-4">
-        {step === "idle" && (
-          <Card className="border border-primary/20 bg-primary/5">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm font-medium text-primary">
-                <Sparkles className="h-4 w-4" />
-                AI-powered data cleaning
-              </CardTitle>
+        {/* Mode selector */}
+        {structuredStep === "idle" && unstructuredStep === "idle" && (
+          <Card className="mb-4">
+            <CardHeader>
+              <CardTitle>Upload Mode</CardTitle>
+              <CardDescription>Choose how you want to upload your data</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">
-                The AI agent will automatically analyse your raw file to detect the real header row,
-                trim metadata/title rows, remove noise columns, and extract clean data — even if the
-                headers aren&apos;t on the first row. You can adjust the boundaries manually after.
+              <div className="flex gap-4">
+                <Button
+                  variant={uploadMode === "structured" ? "default" : "outline"}
+                  onClick={() => setUploadMode("structured")}
+                  className="flex-1"
+                >
+                  Structured Data Upload
+                </Button>
+                <Button
+                  variant={uploadMode === "unstructured" ? "default" : "outline"}
+                  onClick={() => setUploadMode("unstructured")}
+                  className="flex-1"
+                >
+                  Unstructured Data Upload
+                </Button>
+              </div>
+              <p className="text-sm text-muted-foreground mt-4">
+                {uploadMode === "structured"
+                  ? "Upload a single CSV or Excel file. The AI will detect headers and boundaries, then you can map columns to your schema."
+                  : "Upload multiple Excel files. Select sheets from each file. The AI will extract one record per sheet and map fields automatically."}
               </p>
             </CardContent>
           </Card>
         )}
 
-        {step === "preview" && analysis && preview && (
-          <Card className="border-blue-200 dark:border-blue-900 bg-blue-50/95 dark:bg-blue-950/85">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Info className="h-4 w-4 text-blue-500" />
-                AI Analysis Result
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1 text-sm text-muted-foreground">
-              <p>
-                Header detected at row {analysis.headerRowIndex + 1}, data rows{" "}
-                {analysis.dataStartRowIndex + 1}–{analysis.dataEndRowIndex + 1}
-              </p>
-              <p>
-                Columns {analysis.startColumn + 1}–{analysis.endColumn + 1} ({analysis.endColumn - analysis.startColumn + 1} of{" "}
-                {preview!.totalColumns} columns)
-              </p>
-              {analysis.notes && <p className="italic">{analysis.notes}</p>}
-            </CardContent>
-          </Card>
-        )}
+        <div className="flex flex-1 min-h-0 min-w-0 flex-col gap-4 overflow-y-auto pb-4">
+          {/* Structured mode UI */}
+          {uploadMode === "structured" && (
+            <>
+              {structuredStep === "idle" && (
+                <Card className="border border-primary/20 bg-primary/5">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium text-primary">
+                      <Sparkles className="h-4 w-4" />
+                      AI-powered data cleaning
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      The AI agent will automatically analyse your raw file to detect the real header row,
+                      trim metadata/title rows, remove noise columns, and extract clean data — even if the
+                      headers aren&apos;t on the first row. You can adjust the boundaries manually after.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
 
-        {step === "preview" && preview && boundary && (
-          <>
-            {preview.isExcel && preview.sheetNames && preview.sheetNames.length > 1 && (
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-muted-foreground">Sheets</p>
-                <div className="flex flex-wrap gap-1 border-b border-border pb-0">
-                  {preview.sheetNames.map((name, index) => (
-                    <button
-                      key={index}
-                      type="button"
-                      onClick={() => switchToSheet(index)}
-                      className={`rounded-t-md px-3 py-2 text-sm font-medium transition-colors ${
-                        (preview.activeSheetIndex ?? 0) === index
-                          ? "border border-b-0 border-border bg-background text-foreground -mb-px"
-                          : "border border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                      }`}
-                    >
-                      {name || `Sheet ${index + 1}`}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[10px] text-muted-foreground">
-                  Only the active sheet will be processed. Click a sheet to switch.
-                </p>
-              </div>
-            )}
+              {structuredStep === "preview" && analysis && preview && (
+                <Card className="border-blue-200 dark:border-blue-900 bg-blue-50/95 dark:bg-blue-950/85">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm">
+                      <Info className="h-4 w-4 text-blue-500" />
+                      AI Analysis Result
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-1 text-sm text-muted-foreground">
+                    <p>
+                      Header detected at row {analysis.headerRowIndex + 1}, data rows{" "}
+                      {analysis.dataStartRowIndex + 1}–{analysis.dataEndRowIndex + 1}
+                    </p>
+                    <p>
+                      Columns {analysis.startColumn + 1}–{analysis.endColumn + 1} ({analysis.endColumn - analysis.startColumn + 1} of{" "}
+                      {preview!.totalColumns} columns)
+                    </p>
+                    {analysis.notes && <p className="italic">{analysis.notes}</p>}
+                  </CardContent>
+                </Card>
+              )}
 
-            <DataPreviewTable
-              rows={preview.rows}
-              totalRows={preview.totalRows}
-              totalColumns={preview.totalColumns}
-              initialBoundary={boundary}
-              onBoundaryChange={handleBoundaryChange}
-              onLoadMore={loadMoreRows}
-              loadingMore={loadingMore}
-            />
-          </>
-        )}
+              {structuredStep === "preview" && preview && boundary && (
+                <>
+                  {preview.isExcel && preview.sheetNames && preview.sheetNames.length > 1 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-muted-foreground">Sheets</p>
+                      <div className="flex flex-wrap gap-1 border-b border-border pb-0">
+                        {preview.sheetNames.map((name, index) => (
+                          <button
+                            key={index}
+                            type="button"
+                            onClick={() => switchToSheet(index)}
+                            className={`rounded-t-md px-3 py-2 text-sm font-medium transition-colors ${
+                              (preview.activeSheetIndex ?? 0) === index
+                                ? "border border-b-0 border-border bg-background text-foreground -mb-px"
+                                : "border border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                            }`}
+                          >
+                            {name || `Sheet ${index + 1}`}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        Only the active sheet will be processed. Click a sheet to switch.
+                      </p>
+                    </div>
+                  )}
 
-        <Card
-          className={`border-2 border-dashed transition-colors ${
-            dragging ? "border-primary bg-primary/5" : "border-muted-foreground/25"
-          } ${step !== "idle" && step !== "preview" ? "" : ""}`}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragging(true);
-          }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={onDrop}
-        >
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileSpreadsheet className="h-5 w-5" />
-              {preview ? preview.fileName : "Drag and drop"}
-            </CardTitle>
-            <CardDescription>
-              {preview
-                ? "File loaded. Adjust boundaries below and click Continue when ready."
-                : "Drop an Excel (.xlsx, .xls) or CSV file here, or click to browse."}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col items-center gap-4">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              className="hidden"
-              onChange={onFileInput}
-            />
-            {step === "idle" && (
-              <Button
-                size="lg"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Upload className="mr-2 h-4 w-4" />
-                Choose file
-              </Button>
-            )}
-            {(step === "loading_preview" || step === "analyzing") && (
-              <div className="flex items-center gap-3">
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                <span className="text-sm text-muted-foreground">
-                  {step === "analyzing"
-                    ? "AI is analyzing structure…"
-                    : "Loading preview…"}
-                </span>
-              </div>
-            )}
-            {step === "parsing" && (
-              <div className="flex items-center gap-3">
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                <span className="text-sm text-muted-foreground">
-                  Parsing data with selected boundaries…
-                </span>
-              </div>
-            )}
-            {error && (
-              <p className="text-sm text-destructive">{error}</p>
-            )}
-          </CardContent>
-        </Card>
+                  <DataPreviewTable
+                    rows={preview.rows}
+                    totalRows={preview.totalRows}
+                    totalColumns={preview.totalColumns}
+                    initialBoundary={boundary}
+                    onBoundaryChange={handleBoundaryChange}
+                    onLoadMore={loadMoreRows}
+                    loadingMore={loadingMore}
+                  />
+                </>
+              )}
+            </>
+          )}
 
-        {step === "idle" && targetPaths.length > 0 && (
-          <Card>
+          {/* Unstructured mode UI */}
+          {uploadMode === "unstructured" && (
+            <>
+              {unstructuredStep === "sheet_select" && sheetItems.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Select Sheets to Process</CardTitle>
+                    <CardDescription>
+                      Select which sheets from the uploaded files you want to extract data from. Each sheet will become one row in the final output.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2 max-h-96 overflow-y-auto">
+                      {sheetItems.map((item) => (
+                        <label
+                          key={item.fileId}
+                          className="flex items-center gap-3 p-3 border rounded-md cursor-pointer hover:bg-muted/50"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedSheetIds.has(item.fileId)}
+                            onChange={() => toggleSheetSelection(item.fileId)}
+                            className="w-4 h-4"
+                          />
+                          <div className="flex-1">
+                            <div className="font-medium">{item.sheetName}</div>
+                            <div className="text-sm text-muted-foreground">{item.fileName}</div>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="mt-4 flex gap-2">
+                      <Button
+                        onClick={handlePreviewFirstSheet}
+                        disabled={selectedSheetIds.size === 0}
+                      >
+                        Preview First Sheet
+                      </Button>
+                      <Button
+                        onClick={handleConfirmAndExtract}
+                        disabled={selectedSheetIds.size === 0}
+                        variant="default"
+                      >
+                        Extract All Selected ({selectedSheetIds.size})
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {unstructuredStep === "confirming" && previewMapping.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Confirm Field Mapping</CardTitle>
+                    <CardDescription>
+                      Review how the AI mapped fields from the sheet to your schema. This mapping will be applied to all selected sheets.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Target Field</TableHead>
+                          <TableHead>Source / Extracted Value</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {previewMapping.map((m) => (
+                          <TableRow key={m.targetPath}>
+                            <TableCell className="font-medium">{m.targetPath}</TableCell>
+                            <TableCell>
+                              <div className="text-sm text-muted-foreground">{m.source}</div>
+                              {previewRecord && previewRecord[m.targetPath] != null && (
+                                <div className="text-sm mt-1">
+                                  Value: {String(previewRecord[m.targetPath])}
+                                </div>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                    <div className="mt-4 flex gap-2">
+                      <Button variant="outline" onClick={() => setUnstructuredStep("sheet_select")}>
+                        Back
+                      </Button>
+                      <Button onClick={handleConfirmAndExtract}>
+                        Confirm & Extract All Sheets
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {unstructuredStep === "extracting" && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Extracting Data</CardTitle>
+                    <CardDescription>
+                      Processing {jobIds.length} sheet(s). This may take a few moments...
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {jobIds.map((jobId) => {
+                        const status = jobStatuses.get(jobId);
+                        return (
+                          <div key={jobId} className="flex items-center gap-2 p-2 border rounded">
+                            {status?.status === "completed" && (
+                              <CheckCircle2 className="h-4 w-4 text-green-500" />
+                            )}
+                            {status?.status === "failed" && (
+                              <XCircle className="h-4 w-4 text-red-500" />
+                            )}
+                            {(status?.status === "pending" || status?.status === "running" || !status) && (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            )}
+                            <span className="text-sm">
+                              {status?.status === "completed" && "Completed"}
+                              {status?.status === "failed" && `Failed: ${status.error}`}
+                              {(status?.status === "pending" || status?.status === "running" || !status) && "Processing..."}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          )}
+
+          {/* File upload card */}
+          <Card
+            className={`border-2 border-dashed transition-colors ${
+              dragging ? "border-primary bg-primary/5" : "border-muted-foreground/25"
+            }`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+          >
             <CardHeader>
-              <CardTitle>Target fields ({targetPaths.length})</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <FileSpreadsheet className="h-5 w-5" />
+                {uploadMode === "structured" && preview
+                  ? preview.fileName
+                  : uploadMode === "unstructured" && sheetItems.length > 0
+                  ? `${sheetItems.length} sheet(s) loaded`
+                  : "Drag and drop"}
+              </CardTitle>
               <CardDescription>
-                After upload you will map your columns to these:{" "}
-                {targetPaths.slice(0, 8).join(", ")}
-                {targetPaths.length > 8 ? "…" : ""}
+                {uploadMode === "structured"
+                  ? preview
+                    ? "File loaded. Adjust boundaries below and click Continue when ready."
+                    : "Drop an Excel (.xlsx, .xls) or CSV file here, or click to browse."
+                  : "Drop one or more Excel (.xlsx, .xls) files here, or click to browse."}
               </CardDescription>
             </CardHeader>
+            <CardContent className="flex flex-col items-center gap-4">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={uploadMode === "structured" ? ".xlsx,.xls,.csv" : ".xlsx,.xls"}
+                multiple={uploadMode === "unstructured"}
+                className="hidden"
+                onChange={onFileInput}
+              />
+              {(uploadMode === "structured" && structuredStep === "idle") ||
+              (uploadMode === "unstructured" && unstructuredStep === "idle") ? (
+                <Button
+                  size="lg"
+                  onClick={() => {
+                    if (uploadMode === "structured") {
+                      fileInputRef.current?.click();
+                    } else {
+                      unstructuredFileInputRef.current?.click();
+                    }
+                  }}
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  Choose file{uploadMode === "unstructured" ? "s" : ""}
+                </Button>
+              ) : null}
+              {(uploadMode === "structured" &&
+                (structuredStep === "loading_preview" || structuredStep === "analyzing")) && (
+                <div className="flex items-center gap-3">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                  <span className="text-sm text-muted-foreground">
+                    {structuredStep === "analyzing"
+                      ? "AI is analyzing structure…"
+                      : "Loading preview…"}
+                  </span>
+                </div>
+              )}
+              {uploadMode === "structured" && structuredStep === "parsing" && (
+                <div className="flex items-center gap-3">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                  <span className="text-sm text-muted-foreground">
+                    Parsing data with selected boundaries…
+                  </span>
+                </div>
+              )}
+              {error && (
+                <p className="text-sm text-destructive">{error}</p>
+              )}
+            </CardContent>
           </Card>
-        )}
+
+          {uploadMode === "structured" && structuredStep === "idle" && targetPaths.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Target fields ({targetPaths.length})</CardTitle>
+                <CardDescription>
+                  After upload you will map your columns to these:{" "}
+                  {targetPaths.slice(0, 8).join(", ")}
+                  {targetPaths.length > 8 ? "…" : ""}
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          )}
         </div>
       </div>
+      <input
+        ref={unstructuredFileInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.target.files || []);
+          if (files.length > 0) {
+            handleUnstructuredFiles(files);
+          }
+          e.target.value = "";
+        }}
+      />
     </DashboardLayout>
   );
 }
