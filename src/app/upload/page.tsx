@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import {
@@ -54,7 +54,7 @@ const PREVIEW_BOTTOM_N = 0;
 const PREVIEW_MAX_COLS = 200;
 const UNSTRUCTURED_SHEET_PREVIEW_INITIAL_ROWS = 50;
 const UNSTRUCTURED_SHEET_PREVIEW_LOAD_MORE_ROWS = 50;
-const POLL_INTERVAL_MS = 3000;
+const POLL_INTERVAL_MS = 1200;
 
 interface PreviewData {
   rows: IndexedRow[];
@@ -116,6 +116,8 @@ interface PersistedUnstructuredUploadState {
   previewMapping: Array<{ targetPath: string; source: string }>;
   previewRecord: Record<string, unknown> | null;
   previewSourceTable: SourceTablePreview | null;
+  jobIds: string[];
+  jobAssignments: Array<{ jobId: string; fileId: string }>;
   reviewItems: UnstructuredReviewItem[];
   reviewIndex: number;
   activeSheetPreviewId: string | null;
@@ -163,6 +165,7 @@ function stringifyRecordValue(value: unknown): string {
 
 export default function UploadPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const {
     getSchema,
     setCurrentSchema,
@@ -176,6 +179,7 @@ export default function UploadPage() {
     setUploadState,
   } = useSchemaStore();
   const schemaId = workflow.currentSchemaId;
+  const datasetTargetId = typeof workflow.uploadState?.datasetTargetId === "string" ? workflow.uploadState.datasetTargetId : null;
   const [uploadMode, setUploadMode] = useState<UploadMode>("structured");
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -198,8 +202,10 @@ export default function UploadPage() {
   const [previewRecord, setPreviewRecord] = useState<Record<string, unknown> | null>(null);
   const [previewSourceTable, setPreviewSourceTable] = useState<SourceTablePreview | null>(null);
   const [jobIds, setJobIds] = useState<string[]>([]);
+  const [jobAssignments, setJobAssignments] = useState<Array<{ jobId: string; fileId: string }>>([]);
   const [jobStatuses, setJobStatuses] = useState<Map<string, JobStatus>>(new Map());
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
+  const [jobResumeNotice, setJobResumeNotice] = useState<string | null>(null);
   const [reviewItems, setReviewItems] = useState<UnstructuredReviewItem[]>([]);
   const [reviewIndex, setReviewIndex] = useState(0);
   const [activeSheetPreviewId, setActiveSheetPreviewId] = useState<string | null>(null);
@@ -214,6 +220,25 @@ export default function UploadPage() {
     if (!schema) return [];
     return flattenFields(schema.fields).map((f) => f.path);
   }, [schema]);
+
+  useEffect(() => {
+    const querySchemaId = searchParams.get("schemaId");
+    const queryDatasetId = searchParams.get("datasetId");
+    if (querySchemaId && workflow.currentSchemaId !== querySchemaId) {
+      setCurrentSchema(querySchemaId);
+    }
+    if (!queryDatasetId) return;
+    if (workflow.uploadState?.datasetTargetId === queryDatasetId) return;
+    const effectiveSchemaId = querySchemaId ?? workflow.currentSchemaId;
+    if (!effectiveSchemaId) return;
+    setUploadState({
+      ...(workflow.uploadState ?? { schemaId: effectiveSchemaId, step: "idle" }),
+      schemaId: effectiveSchemaId,
+      uploadMode: "unstructured",
+      datasetTargetId: queryDatasetId,
+      step: workflow.uploadState?.step ?? "idle",
+    });
+  }, [searchParams, workflow.currentSchemaId, workflow.uploadState?.datasetTargetId, workflow.uploadState, setCurrentSchema, setUploadState]);
 
   // Restore persisted upload state when returning to this page with the same schema
   useEffect(() => {
@@ -241,6 +266,8 @@ export default function UploadPage() {
       setPreviewMapping(Array.isArray(u.previewMapping) ? u.previewMapping : []);
       setPreviewRecord((u.previewRecord as Record<string, unknown> | null) ?? null);
       setPreviewSourceTable((u.previewSourceTable as SourceTablePreview | null) ?? null);
+      setJobIds(Array.isArray(u.jobIds) ? u.jobIds : []);
+      setJobAssignments(Array.isArray(u.jobAssignments) ? u.jobAssignments : []);
       setReviewItems(Array.isArray(u.reviewItems) ? u.reviewItems : []);
       setReviewIndex(typeof u.reviewIndex === "number" ? u.reviewIndex : 0);
       setActiveSheetPreviewId(u.activeSheetPreviewId ?? null);
@@ -250,15 +277,18 @@ export default function UploadPage() {
           ? u.sheetSelectionPreviewRowCount
           : UNSTRUCTURED_SHEET_PREVIEW_INITIAL_ROWS,
       );
+      if ((u.unstructuredStep ?? "idle") === "extracting" && Array.isArray(u.jobIds) && u.jobIds.length > 0) {
+        setJobResumeNotice("Resuming extraction after refresh and restarting pending jobs...");
+      }
     }
   }, [schemaId, schema, workflow.uploadState]);
 
   // Persist upload state while in preview so navigating back restores the data
   useEffect(() => {
     if (structuredStep === "preview" && preview && boundary && schemaId) {
-      setUploadState({ schemaId, step: "preview", preview, boundary, analysis, uploadMode: "structured" });
+      setUploadState({ schemaId, step: "preview", preview, boundary, analysis, uploadMode: "structured", ...(datasetTargetId ? { datasetTargetId } : {}) });
     }
-  }, [structuredStep, preview, boundary, analysis, schemaId, setUploadState]);
+  }, [structuredStep, preview, boundary, analysis, schemaId, datasetTargetId, setUploadState]);
 
   useEffect(() => {
     if (!schemaId || uploadMode !== "unstructured") return;
@@ -272,6 +302,8 @@ export default function UploadPage() {
       previewMapping,
       previewRecord,
       previewSourceTable,
+      jobIds,
+      jobAssignments,
       reviewItems,
       reviewIndex,
       activeSheetPreviewId,
@@ -283,6 +315,7 @@ export default function UploadPage() {
       schemaId,
       step: unstructuredStep,
       uploadMode: "unstructured",
+      ...(datasetTargetId ? { datasetTargetId } : {}),
       unstructured: unstructuredState,
     });
   }, [
@@ -294,11 +327,14 @@ export default function UploadPage() {
     previewMapping,
     previewRecord,
     previewSourceTable,
+    jobIds,
+    jobAssignments,
     reviewItems,
     reviewIndex,
     activeSheetPreviewId,
     sheetSelectionPreview,
     sheetSelectionPreviewRowCount,
+    datasetTargetId,
     setUploadState,
   ]);
 
@@ -500,7 +536,7 @@ export default function UploadPage() {
       }
 
       if (schemaId) {
-        setUploadState({ schemaId, step: "preview", preview, boundary, analysis, uploadMode: "structured" });
+        setUploadState({ schemaId, step: "preview", preview, boundary, analysis, uploadMode: "structured", ...(datasetTargetId ? { datasetTargetId } : {}) });
       }
 
       router.push("/mapping");
@@ -508,7 +544,7 @@ export default function UploadPage() {
       setError(e instanceof Error ? e.message : "Failed to parse file");
       setStructuredStep("preview");
     }
-  }, [preview, boundary, schemaId, analysis, setRawData, router, setUploadState]);
+  }, [preview, boundary, schemaId, analysis, datasetTargetId, setRawData, router, setUploadState]);
 
   const switchToSheet = useCallback(
     async (sheetIndex: number) => {
@@ -613,6 +649,7 @@ export default function UploadPage() {
     setPreviewRecord(null);
     setPreviewSourceTable(null);
     setJobIds([]);
+    setJobAssignments([]);
     setJobStatuses(new Map());
     setReviewItems([]);
     setReviewIndex(0);
@@ -622,6 +659,7 @@ export default function UploadPage() {
     setSheetSelectionPreviewRowCount(UNSTRUCTURED_SHEET_PREVIEW_INITIAL_ROWS);
     setSheetSelectionPreviewLoadingMore(false);
     setError(null);
+    setJobResumeNotice(null);
   }, [pollingInterval]);
 
   const onDrop = useCallback(
@@ -670,6 +708,9 @@ export default function UploadPage() {
     setPreviewMapping([]);
     setPreviewRecord(null);
     setPreviewSourceTable(null);
+    setJobIds([]);
+    setJobAssignments([]);
+    setJobStatuses(new Map());
     setReviewItems([]);
     setReviewIndex(0);
     setActiveSheetPreviewId(null);
@@ -807,6 +848,111 @@ export default function UploadPage() {
     }
   }, [selectedSheetIds, sheetItems, targetPaths]);
 
+  const buildReviewItemsFromJobs = useCallback(async (jobs: JobStatus[]) => {
+    const reviewList: UnstructuredReviewItem[] = [];
+    const assignmentMap = new Map(jobAssignments.map((a) => [a.jobId, a.fileId]));
+
+    for (const jobId of jobIds) {
+      const job = jobs.find((j) => j.id === jobId);
+      const fileId = assignmentMap.get(jobId);
+      const item = sheetItems.find((s) => s.fileId === fileId);
+      if (!item || job?.status !== "completed" || !job.result?.record) continue;
+
+      const sourcePreview = await extractExcelGridTopBottom(
+        item.buffer,
+        20,
+        0,
+        40,
+        item.sheetIndex,
+      );
+
+      const recordDraft: Record<string, string> = {};
+      for (const path of targetPaths) {
+        recordDraft[path] = stringifyRecordValue(job.result.record[path]);
+      }
+      for (const [k, v] of Object.entries(job.result.record)) {
+        if (!(k in recordDraft)) recordDraft[k] = stringifyRecordValue(v);
+      }
+
+      reviewList.push({
+        jobId,
+        fileId: item.fileId,
+        fileName: item.fileName,
+        sheetName: item.sheetName,
+        sourcePreview: {
+          rows: sourcePreview.rows,
+          totalRows: sourcePreview.totalRows,
+          totalColumns: sourcePreview.totalColumns,
+        },
+        mapping: job.result.mapping || [],
+        recordDraft,
+        confirmed: false,
+      });
+    }
+    return reviewList;
+  }, [jobAssignments, jobIds, sheetItems, targetPaths]);
+
+  useEffect(() => {
+    if (unstructuredStep !== "extracting" || jobIds.length === 0) return;
+
+    let cancelled = false;
+    let interval: NodeJS.Timeout | null = null;
+
+    const poll = async () => {
+      try {
+        // Keep pumping the queue so pending jobs beyond the first concurrency batch get picked up.
+        await fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
+
+        const res = await fetch(`/api/jobs?ids=${jobIds.join(",")}`);
+        if (!res.ok || cancelled) return;
+        const { jobs } = await res.json();
+        const normalizedJobs: JobStatus[] = Array.isArray(jobs)
+          ? jobs.map((job: JobStatus) => ({
+              id: job.id,
+              status: job.status,
+              result: job.result,
+              error: job.error,
+            }))
+          : [];
+
+        const statusMap = new Map<string, JobStatus>();
+        for (const job of normalizedJobs) statusMap.set(job.id, job);
+        if (cancelled) return;
+        setJobStatuses(statusMap);
+        setJobResumeNotice((prev) => (prev ? null : prev));
+
+        const allDone = normalizedJobs.length > 0 && normalizedJobs.every((j) => j.status === "completed" || j.status === "failed");
+        if (!allDone) return;
+
+        if (interval) clearInterval(interval);
+        setPollingInterval(null);
+
+        const reviewList = await buildReviewItemsFromJobs(normalizedJobs);
+        if (cancelled) return;
+
+        if (reviewList.length > 0) {
+          setReviewItems(reviewList);
+          setReviewIndex(0);
+          setUnstructuredStep("reviewing");
+        } else {
+          setError("All jobs failed. Please try again.");
+          setUnstructuredStep("sheet_select");
+        }
+      } catch {
+        // keep polling
+      }
+    };
+
+    interval = setInterval(poll, POLL_INTERVAL_MS);
+    setPollingInterval(interval);
+    poll();
+
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+    };
+  }, [unstructuredStep, jobIds, buildReviewItemsFromJobs]);
+
   // Unstructured: confirm and start batch extraction
   const handleConfirmAndExtract = useCallback(async () => {
     if (selectedSheetIds.size === 0) return;
@@ -819,7 +965,7 @@ export default function UploadPage() {
 
       const selectedItems = sheetItems.filter((s) => selectedSheetIds.has(s.fileId));
       const jobIds: string[] = [];
-      const jobsById = new Map<string, SheetItem>();
+      const assignments: Array<{ jobId: string; fileId: string }> = [];
 
       // Enqueue jobs for all selected sheets
       for (const item of selectedItems) {
@@ -836,98 +982,19 @@ export default function UploadPage() {
         if (res.ok) {
           const { jobId } = await res.json();
           jobIds.push(jobId);
-          jobsById.set(jobId, item);
+          assignments.push({ jobId, fileId: item.fileId });
         }
       }
 
       setJobIds(jobIds);
-
-      // Trigger processor
-      fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
-
-      // Start polling
-      const poll = async () => {
-        if (jobIds.length === 0) return;
-        const res = await fetch(`/api/jobs?ids=${jobIds.join(",")}`);
-        if (!res.ok) return;
-        const { jobs } = await res.json();
-        const statusMap = new Map<string, JobStatus>();
-        for (const job of jobs) {
-          statusMap.set(job.id, {
-            id: job.id,
-            status: job.status,
-            result: job.result,
-            error: job.error,
-          });
-        }
-        setJobStatuses(statusMap);
-
-        const allDone = jobs.every((j: JobStatus) => j.status === "completed" || j.status === "failed");
-        if (allDone) {
-          if (pollingInterval) {
-            clearInterval(pollingInterval);
-            setPollingInterval(null);
-          }
-
-          const reviewList: UnstructuredReviewItem[] = [];
-          for (const jobId of jobIds) {
-            const job = jobs.find((j: JobStatus) => j.id === jobId);
-            const item = jobsById.get(jobId);
-            if (!item || job?.status !== "completed" || !job.result?.record) continue;
-
-            const sourcePreview = await extractExcelGridTopBottom(
-              item.buffer,
-              20,
-              0,
-              40,
-              item.sheetIndex,
-            );
-
-            const recordDraft: Record<string, string> = {};
-            for (const path of targetPaths) {
-              recordDraft[path] = stringifyRecordValue(job.result.record[path]);
-            }
-            for (const [k, v] of Object.entries(job.result.record)) {
-              if (!(k in recordDraft)) {
-                recordDraft[k] = stringifyRecordValue(v);
-              }
-            }
-
-            reviewList.push({
-              jobId,
-              fileId: item.fileId,
-              fileName: item.fileName,
-              sheetName: item.sheetName,
-              sourcePreview: {
-                rows: sourcePreview.rows,
-                totalRows: sourcePreview.totalRows,
-                totalColumns: sourcePreview.totalColumns,
-              },
-              mapping: job.result.mapping || [],
-              recordDraft,
-              confirmed: false,
-            });
-          }
-
-          if (reviewList.length > 0) {
-            setReviewItems(reviewList);
-            setReviewIndex(0);
-            setUnstructuredStep("reviewing");
-          } else {
-            setError("All jobs failed. Please try again.");
-            setUnstructuredStep("sheet_select");
-          }
-        }
-      };
-
-      const interval = setInterval(poll, POLL_INTERVAL_MS);
-      setPollingInterval(interval);
-      poll(); // Initial poll
+      setJobAssignments(assignments);
+      setJobStatuses(new Map());
+      setJobResumeNotice(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start extraction");
       setUnstructuredStep("sheet_select");
     }
-  }, [selectedSheetIds, sheetItems, targetPaths, pollingInterval]);
+  }, [selectedSheetIds, sheetItems, targetPaths]);
 
   const currentReviewItem = reviewItems[reviewIndex] ?? null;
   const currentReviewSourceByTargetPath = useMemo(() => {
@@ -1009,6 +1076,8 @@ export default function UploadPage() {
         previewMapping,
         previewRecord,
         previewSourceTable,
+        jobIds,
+        jobAssignments,
         reviewItems,
         reviewIndex,
         activeSheetPreviewId,
@@ -1038,6 +1107,8 @@ export default function UploadPage() {
     previewMapping,
     previewRecord,
     previewSourceTable,
+    jobIds,
+    jobAssignments,
     reviewIndex,
     activeSheetPreviewId,
     sheetSelectionPreview,
@@ -1045,16 +1116,42 @@ export default function UploadPage() {
     router,
   ]);
 
+  const confirmCurrentAndProceed = useCallback(() => {
+    const nextUnconfirmedIndex = reviewItems.findIndex((item, idx) => idx !== reviewIndex && !item.confirmed);
+
+    setReviewItems((prev) => prev.map((item, i) => (
+      i === reviewIndex ? { ...item, confirmed: true } : item
+    )));
+
+    if (nextUnconfirmedIndex >= 0) {
+      setReviewIndex(nextUnconfirmedIndex);
+      return;
+    }
+
+    finalizeReviewedUnstructuredRecords();
+  }, [reviewItems, reviewIndex, finalizeReviewedUnstructuredRecords]);
+
   const allReviewItemsConfirmed = reviewItems.length > 0 && reviewItems.every((i) => i.confirmed);
 
   const handleBackToSheetSelection = useCallback(() => {
     setUploadMode("unstructured");
     setError(null);
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+      setPollingInterval(null);
+    }
+    // Force a fresh transformation run when the user proceeds again.
+    setJobIds([]);
+    setJobAssignments([]);
+    setJobStatuses(new Map());
+    setJobResumeNotice(null);
+    setReviewItems([]);
+    setReviewIndex(0);
     setUnstructuredStep("sheet_select");
     if (!activeSheetPreviewId && sheetItems.length > 0) {
       setActiveSheetPreviewId(sheetItems[0].fileId);
     }
-  }, [activeSheetPreviewId, sheetItems]);
+  }, [activeSheetPreviewId, sheetItems, pollingInterval]);
 
   if (!schemaId || !schema) {
     return (
@@ -1184,8 +1281,8 @@ export default function UploadPage() {
                             onClick={() => switchToSheet(index)}
                             className={`rounded-t-md px-3 py-2 text-sm font-medium transition-colors ${
                               (preview.activeSheetIndex ?? 0) === index
-                                ? "border border-b-0 border-border bg-background text-foreground -mb-px"
-                                : "border border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                                ? "border border-b-0 border-primary/30 bg-background text-foreground -mb-px ring-2 ring-primary/35 ring-offset-1 ring-offset-background shadow-lg shadow-primary/20"
+                                : "border border-transparent text-muted-foreground/75 opacity-80 hover:opacity-100 hover:text-foreground hover:bg-muted/50"
                             }`}
                           >
                             {name || `Sheet ${index + 1}`}
@@ -1510,6 +1607,37 @@ export default function UploadPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="flex h-[calc(100vh-16rem)] min-h-[640px] flex-col gap-4">
+                    <div className="shrink-0 rounded-md border p-2">
+                      <ScrollArea className="w-full whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          {reviewItems.map((item, idx) => {
+                            const isActive = idx === reviewIndex;
+                            const isConfirmed = item.confirmed;
+                            return (
+                              <button
+                                key={item.jobId}
+                                type="button"
+                                onClick={() => setReviewIndex(idx)}
+                                className={[
+                                  "inline-flex min-w-0 items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors",
+                                  isConfirmed
+                                    ? "border-green-300 bg-green-50 text-green-800 hover:bg-green-100 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300 dark:hover:bg-green-950/60"
+                                    : "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-950/50",
+                                  isActive ? "ring-2 ring-primary/40 ring-offset-1" : "",
+                                ].join(" ")}
+                                title={`${item.fileName} • ${item.sheetName}`}
+                              >
+                                <span className="font-medium">#{idx + 1}</span>
+                                <span className="max-w-[180px] truncate">
+                                  {item.sheetName}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <ScrollBar orientation="horizontal" />
+                      </ScrollArea>
+                    </div>
                     <div className="min-h-0 flex-1 rounded-md border">
                       <ResizablePanelGroup orientation="horizontal" className="h-full">
                         <ResizablePanel defaultSize={55} minSize={35}>
@@ -1621,30 +1749,12 @@ export default function UploadPage() {
                         <Button variant="outline" onClick={handleBackToSheetSelection}>
                           Back to Sheet Selection
                         </Button>
-                        {reviewIndex < reviewItems.length - 1 && (
-                          <Button onClick={confirmCurrentReview}>
-                            Confirm & Next
-                          </Button>
-                        )}
-                        {reviewIndex === reviewItems.length - 1 && (
-                          <Button
-                            onClick={() => {
-                              const lastNeedsConfirm = !currentReviewItem.confirmed;
-                              if (lastNeedsConfirm) {
-                                setReviewItems((prev) => prev.map((item, i) => (
-                                  i === reviewIndex ? { ...item, confirmed: true } : item
-                                )));
-                              }
-                              setTimeout(() => {
-                                // Finalize from the latest edited drafts after confirming the last item.
-                                finalizeReviewedUnstructuredRecords();
-                              }, 0);
-                            }}
-                            disabled={reviewItems.length === 0}
-                          >
-                            Confirm Mapping
-                          </Button>
-                        )}
+                        <Button
+                          onClick={confirmCurrentAndProceed}
+                          disabled={reviewItems.length === 0}
+                        >
+                          Confirm Mapping
+                        </Button>
                       </div>
                     </div>
 

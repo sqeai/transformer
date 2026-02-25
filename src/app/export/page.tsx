@@ -38,7 +38,7 @@ const EXPORT_FORMATS: ExportFormat[] = [
 export default function ExportPage() {
   const router = useRouter();
   const { workflow, getSchema } = useSchemaStore();
-  const { rawRows, columnMappings, currentSchemaId, pivotConfig, verticalPivotConfig, defaultValues } = workflow;
+  const { rawRows, columnMappings, currentSchemaId, pivotConfig, verticalPivotConfig, defaultValues, uploadState } = workflow;
   const schema = currentSchemaId ? getSchema(currentSchemaId) : null;
   const [exporting, setExporting] = useState<string | null>(null);
 
@@ -67,6 +67,34 @@ export default function ExportPage() {
     setExporting(formatId);
 
     try {
+      const mappingSnapshot = {
+        columnMappings,
+        pivotConfig,
+        verticalPivotConfig,
+        defaultValues,
+      };
+      const datasetTargetId = typeof uploadState?.datasetTargetId === "string" ? uploadState.datasetTargetId : null;
+      if (datasetTargetId) {
+        await fetch(`/api/datasets/${datasetTargetId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ appendRows: mappedRows, mappingSnapshot }),
+        });
+      } else {
+        const dt = new Date();
+        const datasetName = `${schema.name} Dataset ${dt.toLocaleDateString()} ${dt.toLocaleTimeString()}`;
+        await fetch("/api/datasets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            schemaId: schema.id,
+            name: datasetName,
+            rows: mappedRows,
+            mappingSnapshot,
+          }),
+        });
+      }
+
       if (formatId === "excel") {
         const workbook = new ExcelJS.Workbook();
         const sheet = workbook.addWorksheet("Data");

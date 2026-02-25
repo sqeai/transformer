@@ -11,8 +11,7 @@ export async function GET() {
 
   const { data: schemaRows, error: schemaError } = await supabase!
     .from("schemas")
-    .select("id, name, created_at, user_id")
-    .order("created_at", { ascending: false });
+    .select("id, name, created_at, updated_at, user_id");
 
   if (schemaError) {
     console.error("Schemas list error:", schemaError);
@@ -38,10 +37,14 @@ export async function GET() {
     }
   }
 
-  const schemas = (schemaRows ?? []).map((s: { id: string; name: string; created_at: string; user_id: string }) => ({
+  const schemas = (schemaRows ?? []).map((s: { id: string; name: string; created_at: string; updated_at?: string; user_id: string }) => ({
     id: s.id,
     name: s.name,
     createdAt: s.created_at ?? new Date().toISOString(),
+    updatedAt: s.updated_at ?? s.created_at ?? new Date().toISOString(),
+    lastActivityAt: s.updated_at ?? s.created_at ?? new Date().toISOString(),
+    datasetCount: 0,
+    datasets: [] as Array<{ id: string; schemaId: string; name: string; rowCount: number; createdAt: string; updatedAt: string }>,
     creator: creatorMap.get(s.user_id),
     fields: [] as ReturnType<typeof rowsToFields>,
   }));
@@ -73,6 +76,42 @@ export async function GET() {
   for (const s of schemas) {
     s.fields = rowsToFields(bySchema.get(s.id) ?? []);
   }
+
+  const { data: datasetRows } = await supabase!
+    .from("datasets")
+    .select("id, schema_id, name, row_count, created_at, updated_at")
+    .in("schema_id", ids)
+    .order("created_at", { ascending: false });
+
+  const datasetsBySchema = new Map<string, Array<{ id: string; schema_id: string; name: string; row_count: number; created_at: string; updated_at: string }>>();
+  for (const d of datasetRows ?? []) {
+    const list = datasetsBySchema.get(d.schema_id) ?? [];
+    list.push(d as { id: string; schema_id: string; name: string; row_count: number; created_at: string; updated_at: string });
+    datasetsBySchema.set(d.schema_id, list);
+  }
+
+  for (const s of schemas) {
+    const ds = datasetsBySchema.get(s.id) ?? [];
+    s.datasetCount = ds.length;
+    s.datasets = ds.slice(0, 5).map((d) => ({
+      id: d.id,
+      schemaId: d.schema_id,
+      name: d.name,
+      rowCount: d.row_count ?? 0,
+      createdAt: d.created_at,
+      updatedAt: d.updated_at,
+    }));
+    const latestDatasetCreated = ds[0]?.created_at;
+    if (latestDatasetCreated && new Date(latestDatasetCreated).getTime() > new Date(s.lastActivityAt ?? s.updatedAt ?? s.createdAt).getTime()) {
+      s.lastActivityAt = latestDatasetCreated;
+    }
+  }
+
+  schemas.sort((a, b) => {
+    const ta = new Date(a.lastActivityAt ?? a.updatedAt ?? a.createdAt).getTime();
+    const tb = new Date(b.lastActivityAt ?? b.updatedAt ?? b.createdAt).getTime();
+    return tb - ta;
+  });
 
   return NextResponse.json({ schemas });
 }

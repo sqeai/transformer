@@ -14,8 +14,26 @@ export interface FinalSchema {
   name: string;
   fields: SchemaField[];
   createdAt: string;
+  updatedAt?: string;
+  lastActivityAt?: string;
+  datasetCount?: number;
+  datasets?: DatasetSummary[];
   /** Set when loaded from API (creator = schema owner from users) */
   creator?: SchemaCreator;
+}
+
+export interface DatasetSummary {
+  id: string;
+  schemaId: string;
+  name: string;
+  rowCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DatasetRecord extends DatasetSummary {
+  mappingSnapshot: Record<string, unknown>;
+  rows: Record<string, unknown>[];
 }
 
 /** Creator info returned from API (from users) */

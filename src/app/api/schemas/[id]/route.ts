@@ -15,7 +15,7 @@ export async function GET(
 
   const { data: schema, error: schemaError } = await supabase!
     .from("schemas")
-    .select("id, name, created_at, user_id")
+    .select("id, name, created_at, updated_at, user_id")
     .eq("id", id)
     .single();
 
@@ -69,6 +69,7 @@ export async function GET(
       id: schema.id,
       name: schema.name,
       createdAt: schema.created_at ?? new Date().toISOString(),
+      updatedAt: schema.updated_at ?? schema.created_at ?? new Date().toISOString(),
       creator,
       fields,
     },
@@ -136,6 +137,11 @@ export async function PATCH(
         return NextResponse.json({ error: insertError.message }, { status: 500 });
       }
     }
+    await supabase!.from("schemas").update({ updated_at: new Date().toISOString() }).eq("id", id);
+  }
+
+  if (!Array.isArray(body?.fields) && typeof body?.name !== "string") {
+    await supabase!.from("schemas").update({ updated_at: new Date().toISOString() }).eq("id", id);
   }
 
   return NextResponse.json({ ok: true });

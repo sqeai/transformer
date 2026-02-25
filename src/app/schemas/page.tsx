@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useMemo, useEffect, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useSchemaStore, flattenFields } from "@/lib/schema-store";
-import { Plus, Trash2, Loader2, ChevronRight, Play, FileSpreadsheet, Pencil } from "lucide-react";
+import { Plus, Trash2, Loader2, ChevronRight, Play, FileSpreadsheet, Pencil, ChevronDown, Database, PlusCircle } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,7 +38,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { FinalSchema } from "@/lib/types";
+import type { FinalSchema, DatasetSummary } from "@/lib/types";
 import { useAuth } from "@/hooks/useAuth";
 import { getExcelSheetNames, extractExcelGrid } from "@/lib/parse-excel-preview";
 
@@ -58,6 +58,88 @@ export default function SchemasPage() {
   const [sheetPreviewLoading, setSheetPreviewLoading] = useState(false);
   const [schemaUploadFile, setSchemaUploadFile] = useState<File | null>(null);
   const [schemaUploadBuffer, setSchemaUploadBuffer] = useState<ArrayBuffer | null>(null);
+  const [expandedSchemaIds, setExpandedSchemaIds] = useState<Set<string>>(new Set());
+  const [datasetLists, setDatasetLists] = useState<Record<string, { items: DatasetSummary[]; total?: number; loading?: boolean }>>({});
+  const [deleteDatasetId, setDeleteDatasetId] = useState<string | null>(null);
+
+  const schemasSorted = useMemo(
+    () => [...schemas].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [schemas],
+  );
+
+  useEffect(() => {
+    if (schemasSorted.length === 0) return;
+    setExpandedSchemaIds((prev) => {
+      if (prev.size > 0) return prev;
+      return new Set(schemasSorted.slice(0, 3).map((s) => s.id));
+    });
+    setDatasetLists((prev) => {
+      const next = { ...prev };
+      for (const s of schemasSorted) {
+        if (!next[s.id]) {
+          next[s.id] = { items: s.datasets ?? [], total: s.datasetCount ?? (s.datasets?.length ?? 0) };
+        }
+      }
+      return next;
+    });
+  }, [schemasSorted]);
+
+  const toggleSchemaExpanded = (schemaId: string) => {
+    setExpandedSchemaIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(schemaId)) next.delete(schemaId);
+      else next.add(schemaId);
+      return next;
+    });
+  };
+
+  const loadMoreDatasets = useCallback(async (schemaId: string) => {
+    const current = datasetLists[schemaId];
+    setDatasetLists((prev) => ({
+      ...prev,
+      [schemaId]: { items: prev[schemaId]?.items ?? [], total: prev[schemaId]?.total, loading: true },
+    }));
+    try {
+      const offset = current?.items.length ?? 0;
+      const res = await fetch(`/api/datasets?schemaId=${schemaId}&limit=5&offset=${offset}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Failed to load datasets");
+      const incoming = Array.isArray(data.datasets) ? (data.datasets as DatasetSummary[]) : [];
+      setDatasetLists((prev) => ({
+        ...prev,
+        [schemaId]: {
+          items: [...(prev[schemaId]?.items ?? []), ...incoming],
+          total: typeof data.total === "number" ? data.total : prev[schemaId]?.total,
+          loading: false,
+        },
+      }));
+    } catch {
+      setDatasetLists((prev) => ({
+        ...prev,
+        [schemaId]: { ...(prev[schemaId] ?? { items: [] }), loading: false },
+      }));
+    }
+  }, [datasetLists]);
+
+  const handleDeleteDataset = useCallback(async (datasetId: string) => {
+    const res = await fetch(`/api/datasets/${datasetId}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error ?? "Failed to delete dataset");
+    }
+    setDatasetLists((prev) => {
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        next[key] = {
+          ...next[key],
+          items: next[key].items.filter((d) => d.id !== datasetId),
+          total: typeof next[key].total === "number" ? Math.max(0, (next[key].total ?? 1) - 1) : next[key].total,
+        };
+      }
+      return next;
+    });
+    setDeleteDatasetId(null);
+  }, []);
 
   const resetSheetPickerState = () => {
     setSheetPickerOpen(false);
@@ -236,7 +318,7 @@ export default function SchemasPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    schemas.map((s) => {
+                    schemasSorted.map((s, schemaIndex) => {
                     const fieldCount = flattenFields(s.fields).filter(
                       (f) => !f.children?.length,
                     ).length;
@@ -246,7 +328,15 @@ export default function SchemasPage() {
                       year: "numeric",
                     });
 
+                    const isExpanded = expandedSchemaIds.has(s.id);
+                    const datasetState = datasetLists[s.id] ?? { items: s.datasets ?? [], total: s.datasetCount ?? 0, loading: false };
+                    const visibleDatasets = datasetState.items ?? [];
+                    const canLoadMore = typeof datasetState.total === "number"
+                      ? visibleDatasets.length < datasetState.total
+                      : (s.datasetCount ?? 0) > visibleDatasets.length;
+
                     return (
+                      <Fragment key={s.id}>
                       <TableRow
                         key={s.id}
                         className="cursor-pointer hover:bg-muted/50"
@@ -266,7 +356,22 @@ export default function SchemasPage() {
                             Use this schema
                           </Button>
                         </TableCell>
-                        <TableCell className="font-medium">{s.name}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSchemaExpanded(s.id);
+                              }}
+                              className="rounded p-1 hover:bg-muted"
+                              aria-label={isExpanded ? "Collapse datasets" : "Expand datasets"}
+                            >
+                              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            </button>
+                            <span>{s.name}</span>
+                          </div>
+                        </TableCell>
                         <TableCell className="text-muted-foreground text-sm">
                           {s.creator?.name ?? s.creator?.email ?? "—"}
                         </TableCell>
@@ -297,6 +402,112 @@ export default function SchemasPage() {
                           <ChevronRight className="h-4 w-4 text-muted-foreground" />
                         </TableCell>
                       </TableRow>
+                      <TableRow key={`${s.id}-datasets`} className="bg-muted/20">
+                        <TableCell colSpan={7} className="py-0 pl-16 pr-4">
+                          {isExpanded ? (
+                            <div className="py-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground flex items-center gap-2">
+                                  <Database className="h-3.5 w-3.5" />
+                                  Datasets ({datasetState.total ?? visibleDatasets.length})
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    resetWorkflow();
+                                    setCurrentSchema(s.id);
+                                    router.push(`/upload?schemaId=${s.id}`);
+                                  }}
+                                >
+                                  <Plus className="mr-1 h-3.5 w-3.5" />
+                                  New dataset
+                                </Button>
+                              </div>
+
+                              {visibleDatasets.length === 0 ? (
+                                <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                                  No datasets yet. Run a transformation to create the first dataset.
+                                </div>
+                              ) : (
+                                visibleDatasets.map((d) => (
+                                  <div key={d.id} className="rounded-md border bg-background p-3 flex items-center justify-between gap-3">
+                                    <div
+                                      className="min-w-0 cursor-pointer"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        router.push(`/datasets/${d.id}`);
+                                      }}
+                                    >
+                                      <div className="font-medium truncate">{d.name}</div>
+                                      <div className="text-xs text-muted-foreground">
+                                        {d.rowCount} rows • Created {new Date(d.createdAt).toLocaleDateString()}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <Button
+                                        size="sm"
+                                        className="h-9"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          resetWorkflow();
+                                          setCurrentSchema(s.id);
+                                          router.push(`/upload?schemaId=${s.id}&datasetId=${d.id}`);
+                                        }}
+                                      >
+                                        <PlusCircle className="mr-1.5 h-4 w-4" />
+                                        Add to this dataset
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          router.push(`/datasets/${d.id}`);
+                                        }}
+                                      >
+                                        View
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="text-destructive hover:text-destructive"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setDeleteDatasetId(d.id);
+                                        }}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+
+                              {canLoadMore && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void loadMoreDatasets(s.id);
+                                  }}
+                                  disabled={datasetState.loading}
+                                >
+                                  {datasetState.loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                  Load 5 more datasets
+                                </Button>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="py-2 text-xs text-muted-foreground">
+                              {datasetState.total ?? visibleDatasets.length} dataset{(datasetState.total ?? visibleDatasets.length) !== 1 ? "s" : ""} (collapsed)
+                            </div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                      </Fragment>
                     );
                   })
                   )}
@@ -486,6 +697,33 @@ export default function SchemasPage() {
               }}
             >
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!deleteDatasetId} onOpenChange={() => setDeleteDatasetId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete dataset?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This deletes the saved transformed output dataset and cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                if (!deleteDatasetId) return;
+                try {
+                  await handleDeleteDataset(deleteDatasetId);
+                } catch (err) {
+                  alert(err instanceof Error ? err.message : "Delete failed");
+                }
+              }}
+            >
+              Delete Dataset
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

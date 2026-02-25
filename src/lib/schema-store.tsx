@@ -47,6 +47,7 @@ interface WorkflowState {
     analysis?: unknown;
     uploadMode?: "structured" | "unstructured";
     unstructured?: unknown;
+    datasetTargetId?: string;
   } | null;
 }
 
