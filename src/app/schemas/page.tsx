@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { FinalSchema } from "@/lib/types";
 import { useAuth } from "@/hooks/useAuth";
+import { getExcelSheetNames, extractExcelGrid } from "@/lib/parse-excel-preview";
 
 export default function SchemasPage() {
   const { user } = useAuth();
@@ -50,11 +51,77 @@ export default function SchemasPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [addSchemaOpen, setAddSchemaOpen] = useState(false);
   const [addingManual, setAddingManual] = useState(false);
+  const [sheetPickerOpen, setSheetPickerOpen] = useState(false);
+  const [sheetNames, setSheetNames] = useState<string[]>([]);
+  const [activeSheetIndex, setActiveSheetIndex] = useState(0);
+  const [sheetPreview, setSheetPreview] = useState<string[][]>([]);
+  const [sheetPreviewLoading, setSheetPreviewLoading] = useState(false);
+  const [schemaUploadFile, setSchemaUploadFile] = useState<File | null>(null);
+  const [schemaUploadBuffer, setSchemaUploadBuffer] = useState<ArrayBuffer | null>(null);
+
+  const resetSheetPickerState = () => {
+    setSheetPickerOpen(false);
+    setSheetNames([]);
+    setActiveSheetIndex(0);
+    setSheetPreview([]);
+    setSchemaUploadFile(null);
+    setSchemaUploadBuffer(null);
+  };
+
+  const loadSheetPreview = useCallback(
+    async (buffer: ArrayBuffer, index: number) => {
+      setSheetPreviewLoading(true);
+      try {
+        const { grid } = await extractExcelGrid(buffer, 6, undefined, index);
+        setSheetPreview(grid);
+      } catch {
+        setSheetPreview([]);
+      } finally {
+        setSheetPreviewLoading(false);
+      }
+    },
+    [],
+  );
 
   const handleUploadClick = () => {
     setAddSchemaOpen(false);
     fileInputRef.current?.click();
   };
+
+  const createSchemaFromFile = useCallback(
+    async (file: File, sheetIndex = 0) => {
+      setUploading(true);
+      try {
+        const formData = new FormData();
+        formData.set("file", file);
+        formData.set("sheetIndex", String(sheetIndex));
+        const res = await fetch("/api/parse-schema", { method: "POST", body: formData });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "Upload failed");
+        }
+        const { fields } = await res.json();
+        const schema: FinalSchema = {
+          id: crypto.randomUUID(),
+          name: file.name.replace(/\.xlsx?$/i, "") || "New Schema",
+          fields: fields.map((f: { id: string; name: string; path: string; level: number; order: number }) => ({
+            ...f,
+            children: [],
+          })),
+          createdAt: new Date().toISOString(),
+        };
+        const created = await addSchema(schema);
+        resetSheetPickerState();
+        setAddSchemaOpen(false);
+        router.push(`/schemas/${created.id}`);
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Upload failed");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [addSchema, router],
+  );
 
   const handleAddFieldsManually = async () => {
     setAddingManual(true);
@@ -78,31 +145,22 @@ export default function SchemasPage() {
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploading(true);
     try {
-      const formData = new FormData();
-      formData.set("file", file);
-      const res = await fetch("/api/parse-schema", { method: "POST", body: formData });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Upload failed");
+      const buffer = await file.arrayBuffer();
+      const names = await getExcelSheetNames(buffer);
+      if (!names || names.length <= 1) {
+        await createSchemaFromFile(file, 0);
+      } else {
+        setSchemaUploadFile(file);
+        setSchemaUploadBuffer(buffer);
+        setSheetNames(names);
+        setActiveSheetIndex(0);
+        setSheetPickerOpen(true);
+        await loadSheetPreview(buffer, 0);
       }
-      const { fields } = await res.json();
-      const schema: FinalSchema = {
-        id: crypto.randomUUID(),
-        name: file.name.replace(/\.xlsx?$/i, "") || "New Schema",
-        fields: fields.map((f: { id: string; name: string; path: string; level: number; order: number }) => ({
-          ...f,
-          children: [],
-        })),
-        createdAt: new Date().toISOString(),
-      };
-      const created = await addSchema(schema);
-      router.push(`/schemas/${created.id}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Upload failed");
     } finally {
-      setUploading(false);
       e.target.value = "";
     }
   };
@@ -250,7 +308,7 @@ export default function SchemasPage() {
       </div>
 
       <Dialog open={addSchemaOpen} onOpenChange={setAddSchemaOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-xl w-full">
           <DialogHeader>
             <DialogTitle>Add New Schema</DialogTitle>
             <DialogDescription>
@@ -294,6 +352,112 @@ export default function SchemasPage() {
                 Create an empty schema and define each field yourself.
               </span>
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={sheetPickerOpen}
+        onOpenChange={(open) => {
+          if (!open) resetSheetPickerState();
+        }}
+      >
+        <DialogContent className="w-full max-w-[90vw] max-h-[85vh] flex flex-col">
+          <DialogHeader className="shrink-0">
+            <DialogTitle>Select sheet for schema</DialogTitle>
+            <DialogDescription>
+              Choose which worksheet&apos;s header row should be used to build your final schema.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-2 flex-1 min-h-0 overflow-auto space-y-3">
+            {schemaUploadFile && (
+              <p className="text-sm text-muted-foreground">
+                File: <span className="font-medium">{schemaUploadFile.name}</span>
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2 border-b pb-2">
+              {sheetNames.map((name, index) => (
+                <button
+                  key={index}
+                  type="button"
+                  onClick={async () => {
+                    if (!schemaUploadBuffer) return;
+                    setActiveSheetIndex(index);
+                    await loadSheetPreview(schemaUploadBuffer, index);
+                  }}
+                  className={`rounded-md px-3 py-1.5 text-sm border transition-colors ${
+                    activeSheetIndex === index
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  {name || `Sheet ${index + 1}`}
+                </button>
+              ))}
+            </div>
+            <div className="min-h-[120px]">
+              {sheetPreviewLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading preview…
+                </div>
+              ) : sheetPreview.length > 0 ? (
+                <div className="rounded-md border overflow-x-auto max-w-full">
+                  <Table className="min-w-max">
+                    <TableHeader>
+                      <TableRow>
+                        {sheetPreview[0].map((cell, idx) => (
+                          <TableHead key={idx} className="whitespace-nowrap">
+                            {cell || `Column ${idx + 1}`}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {sheetPreview.slice(1, 5).map((row, rIdx) => (
+                        <TableRow key={rIdx}>
+                          {row.map((cell, cIdx) => (
+                            <TableCell key={cIdx} className="whitespace-nowrap max-w-[160px] truncate">
+                              {cell}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No preview available for this sheet.
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 pb-1">
+              <Button
+                variant="outline"
+                onClick={resetSheetPickerState}
+                disabled={uploading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (schemaUploadFile) {
+                    void createSchemaFromFile(schemaUploadFile, activeSheetIndex);
+                  }
+                }}
+                disabled={!schemaUploadFile || uploading}
+              >
+                {uploading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating schema…
+                  </>
+                ) : (
+                  "Use this sheet"
+                )}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

@@ -1,7 +1,12 @@
 import ExcelJS from "exceljs";
 
 const MAX_DETECT_ROWS = 500;
-const MAX_DETECT_COLS = 60;
+/**
+ * Upper bound on columns considered when auto-detecting table bounds.
+ * Increased so very wide sheets expose all columns to downstream
+ * consumers (e.g. LLM schema/header detection).
+ */
+const MAX_DETECT_COLS = 200;
 
 function extractCellText(v: ExcelJS.CellValue, fallback: string): string {
   let raw: string;
@@ -157,16 +162,17 @@ function detectTableBounds(sheet: ExcelJS.Worksheet): {
   };
 }
 
-export async function parseExcelColumns(buffer: ArrayBuffer): Promise<string[]> {
+export async function parseExcelColumns(buffer: ArrayBuffer, sheetIndex = 0): Promise<string[]> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
-  const sheet = workbook.worksheets[0];
+  const sheet = workbook.worksheets[sheetIndex] ?? workbook.worksheets[0];
   if (!sheet) return [];
 
   const bounds = detectTableBounds(sheet);
   const row = sheet.getRow(bounds.startRow);
   const cols: string[] = [];
-  for (let c = bounds.startCol; c <= bounds.endCol; c++) {
+  const colCount = sheet.columnCount;
+  for (let c = 1; c <= colCount; c++) {
     cols.push(extractCellText(row.getCell(c).value, `Column ${c}`));
   }
   return cols;

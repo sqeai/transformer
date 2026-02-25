@@ -19,6 +19,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { useSchemaStore } from "@/lib/schema-store";
 import { flattenFields } from "@/lib/schema-store";
 import { parseExcelToRows } from "@/lib/parse-excel";
@@ -41,11 +43,13 @@ import {
 
 type UploadMode = "structured" | "unstructured";
 type StructuredStep = "idle" | "loading_preview" | "analyzing" | "preview" | "parsing";
-type UnstructuredStep = "idle" | "sheet_select" | "confirming" | "extracting" | "done";
+type UnstructuredStep = "idle" | "sheet_select" | "confirming" | "extracting" | "reviewing" | "done";
 
 const PREVIEW_TOP_N = 30;
 const PREVIEW_BOTTOM_N = 0;
-const PREVIEW_MAX_COLS = 50;
+// Allow wide files to be fully inspected in the grid while still
+// keeping a sane upper bound for performance.
+const PREVIEW_MAX_COLS = 200;
 const POLL_INTERVAL_MS = 3000;
 
 interface PreviewData {
@@ -77,6 +81,34 @@ interface JobStatus {
   error?: string;
 }
 
+interface SourceTablePreview {
+  rows: IndexedRow[];
+  totalRows: number;
+  totalColumns: number;
+}
+
+interface UnstructuredReviewItem {
+  jobId: string;
+  fileId: string;
+  fileName: string;
+  sheetName: string;
+  sourcePreview: SourceTablePreview;
+  mapping: Array<{ targetPath: string; source: string }>;
+  recordDraft: Record<string, string>;
+  confirmed: boolean;
+}
+
+function stringifyRecordValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 export default function UploadPage() {
   const router = useRouter();
   const { getSchema, setCurrentSchema, setRawData, resetWorkflow, workflow, setUploadState } = useSchemaStore();
@@ -101,9 +133,12 @@ export default function UploadPage() {
   const [selectedSheetIds, setSelectedSheetIds] = useState<Set<string>>(new Set());
   const [previewMapping, setPreviewMapping] = useState<Array<{ targetPath: string; source: string }>>([]);
   const [previewRecord, setPreviewRecord] = useState<Record<string, unknown> | null>(null);
+  const [previewSourceTable, setPreviewSourceTable] = useState<SourceTablePreview | null>(null);
   const [jobIds, setJobIds] = useState<string[]>([]);
   const [jobStatuses, setJobStatuses] = useState<Map<string, JobStatus>>(new Map());
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
+  const [reviewItems, setReviewItems] = useState<UnstructuredReviewItem[]>([]);
+  const [reviewIndex, setReviewIndex] = useState(0);
   const unstructuredFileInputRef = useRef<HTMLInputElement>(null);
 
   const schema = schemaId ? getSchema(schemaId) : null;
@@ -172,31 +207,14 @@ export default function UploadPage() {
             buffer, PREVIEW_TOP_N, PREVIEW_BOTTOM_N, PREVIEW_MAX_COLS, 0,
           );
 
-          let llmBoundary: RawDataAnalysis | undefined;
-          setStructuredStep("analyzing");
-          try {
-            const formData = new FormData();
-            formData.append("file", file);
-            formData.append("totalRows", String(totalRows));
-            formData.append("totalColumns", String(totalColumns));
-            const res = await fetch("/api/analyze-raw", {
-              method: "POST",
-              body: formData,
-            });
-            if (res.ok) {
-              llmBoundary = await res.json();
-              setAnalysis(llmBoundary!);
-            }
-          } catch {
-            // LLM analysis failed — user can still set boundaries manually
-          }
-
           const defaultBoundary: DataBoundary = {
-            headerRowIndex: llmBoundary?.headerRowIndex ?? 0,
-            dataStartRowIndex: llmBoundary?.dataStartRowIndex ?? 1,
-            dataEndRowIndex: llmBoundary?.dataEndRowIndex ?? totalRows - 1,
-            startColumn: llmBoundary?.startColumn ?? 0,
-            endColumn: llmBoundary?.endColumn ?? totalColumns - 1,
+            headerRowIndex: 0,
+            dataStartRowIndex: 1,
+            dataEndRowIndex: totalRows - 1,
+            startColumn: 0,
+            // Always default to using all available columns so the raw upload
+            // has as many fields as possible; the user can narrow this later.
+            endColumn: totalColumns - 1,
           };
 
           setBoundary(defaultBoundary);
@@ -384,7 +402,7 @@ export default function UploadPage() {
         const file = e.dataTransfer.files[0];
         if (file) loadPreview(file);
       } else {
-        const files = Array.from(e.dataTransfer.files).filter((f) => {
+        const files = Array.from(e.dataTransfer.files ?? []).filter((f) => {
           const ext = f.name.toLowerCase();
           return ext.endsWith(".xlsx") || ext.endsWith(".xls");
         });
@@ -401,7 +419,7 @@ export default function UploadPage() {
     if (file) {
       if (uploadMode === "structured") {
         loadPreview(file);
-      } else {
+      } else if (e.target.files) {
         const files = Array.from(e.target.files).filter((f) => {
           const ext = f.name.toLowerCase();
           return ext.endsWith(".xlsx") || ext.endsWith(".xls");
@@ -419,6 +437,11 @@ export default function UploadPage() {
     setError(null);
     setSheetItems([]);
     setSelectedSheetIds(new Set());
+    setPreviewMapping([]);
+    setPreviewRecord(null);
+    setPreviewSourceTable(null);
+    setReviewItems([]);
+    setReviewIndex(0);
 
     try {
       const items: SheetItem[] = [];
@@ -470,8 +493,23 @@ export default function UploadPage() {
     try {
       setUnstructuredStep("confirming");
       setError(null);
+      setPreviewMapping([]);
+      setPreviewRecord(null);
+      setPreviewSourceTable(null);
 
       const sheetText = await dumpSheetAsText(sheetItem.buffer, sheetItem.sheetIndex);
+      const sourcePreview = await extractExcelGridTopBottom(
+        sheetItem.buffer,
+        20,
+        0,
+        40,
+        sheetItem.sheetIndex,
+      );
+      setPreviewSourceTable({
+        rows: sourcePreview.rows,
+        totalRows: sourcePreview.totalRows,
+        totalColumns: sourcePreview.totalColumns,
+      });
       const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -521,9 +559,12 @@ export default function UploadPage() {
     try {
       setUnstructuredStep("extracting");
       setError(null);
+      setReviewItems([]);
+      setReviewIndex(0);
 
       const selectedItems = sheetItems.filter((s) => selectedSheetIds.has(s.fileId));
       const jobIds: string[] = [];
+      const jobsById = new Map<string, SheetItem>();
 
       // Enqueue jobs for all selected sheets
       for (const item of selectedItems) {
@@ -540,6 +581,7 @@ export default function UploadPage() {
         if (res.ok) {
           const { jobId } = await res.json();
           jobIds.push(jobId);
+          jobsById.set(jobId, item);
         }
       }
 
@@ -572,20 +614,50 @@ export default function UploadPage() {
             setPollingInterval(null);
           }
 
-          // Build rows from completed jobs
-          const rows: Record<string, unknown>[] = [];
-          for (const job of jobs) {
-            if (job.status === "completed" && job.result?.record) {
-              rows.push(job.result.record);
+          const reviewList: UnstructuredReviewItem[] = [];
+          for (const jobId of jobIds) {
+            const job = jobs.find((j: JobStatus) => j.id === jobId);
+            const item = jobsById.get(jobId);
+            if (!item || job?.status !== "completed" || !job.result?.record) continue;
+
+            const sourcePreview = await extractExcelGridTopBottom(
+              item.buffer,
+              20,
+              0,
+              40,
+              item.sheetIndex,
+            );
+
+            const recordDraft: Record<string, string> = {};
+            for (const path of targetPaths) {
+              recordDraft[path] = stringifyRecordValue(job.result.record[path]);
             }
+            for (const [k, v] of Object.entries(job.result.record)) {
+              if (!(k in recordDraft)) {
+                recordDraft[k] = stringifyRecordValue(v);
+              }
+            }
+
+            reviewList.push({
+              jobId,
+              fileId: item.fileId,
+              fileName: item.fileName,
+              sheetName: item.sheetName,
+              sourcePreview: {
+                rows: sourcePreview.rows,
+                totalRows: sourcePreview.totalRows,
+                totalColumns: sourcePreview.totalColumns,
+              },
+              mapping: job.result.mapping || [],
+              recordDraft,
+              confirmed: false,
+            });
           }
 
-          if (rows.length > 0) {
-            setRawData(targetPaths, rows);
-            if (schemaId) {
-              setUploadState({ schemaId, step: "done", uploadMode: "unstructured" });
-            }
-            router.push("/mapping");
+          if (reviewList.length > 0) {
+            setReviewItems(reviewList);
+            setReviewIndex(0);
+            setUnstructuredStep("reviewing");
           } else {
             setError("All jobs failed. Please try again.");
             setUnstructuredStep("sheet_select");
@@ -600,7 +672,69 @@ export default function UploadPage() {
       setError(e instanceof Error ? e.message : "Failed to start extraction");
       setUnstructuredStep("sheet_select");
     }
-  }, [selectedSheetIds, sheetItems, targetPaths, schemaId, setRawData, setUploadState, router, pollingInterval]);
+  }, [selectedSheetIds, sheetItems, targetPaths, pollingInterval]);
+
+  const currentReviewItem = reviewItems[reviewIndex] ?? null;
+  const currentReviewFieldOrder = useMemo(() => {
+    if (!currentReviewItem) return [];
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const path of targetPaths) {
+      if (path in currentReviewItem.recordDraft) {
+        ordered.push(path);
+        seen.add(path);
+      }
+    }
+    for (const m of currentReviewItem.mapping) {
+      if (!seen.has(m.targetPath) && m.targetPath in currentReviewItem.recordDraft) {
+        ordered.push(m.targetPath);
+        seen.add(m.targetPath);
+      }
+    }
+    for (const key of Object.keys(currentReviewItem.recordDraft)) {
+      if (!seen.has(key)) {
+        ordered.push(key);
+        seen.add(key);
+      }
+    }
+    return ordered;
+  }, [currentReviewItem, targetPaths]);
+
+  const updateReviewValue = useCallback((index: number, targetPath: string, value: string) => {
+    setReviewItems((prev) => prev.map((item, i) => (
+      i === index
+        ? { ...item, recordDraft: { ...item.recordDraft, [targetPath]: value } }
+        : item
+    )));
+  }, []);
+
+  const confirmCurrentReview = useCallback(() => {
+    setReviewItems((prev) => prev.map((item, i) => (
+      i === reviewIndex ? { ...item, confirmed: true } : item
+    )));
+    setReviewIndex((idx) => Math.min(idx + 1, Math.max(0, reviewItems.length - 1)));
+  }, [reviewIndex, reviewItems.length]);
+
+  const finalizeReviewedUnstructuredRecords = useCallback(() => {
+    if (reviewItems.length === 0) return;
+    const rows = reviewItems.map((item) => {
+      const row: Record<string, unknown> = {};
+      for (const path of targetPaths) {
+        row[path] = item.recordDraft[path] ?? "";
+      }
+      for (const [k, v] of Object.entries(item.recordDraft)) {
+        if (!(k in row)) row[k] = v;
+      }
+      return row;
+    });
+    setRawData(targetPaths, rows);
+    if (schemaId) {
+      setUploadState({ schemaId, step: "done", uploadMode: "unstructured" });
+    }
+    router.push("/mapping");
+  }, [reviewItems, targetPaths, setRawData, schemaId, setUploadState, router]);
+
+  const allReviewItemsConfirmed = reviewItems.length > 0 && reviewItems.every((i) => i.confirmed);
 
   if (!schemaId || !schema) {
     return (
@@ -691,40 +825,18 @@ export default function UploadPage() {
                   <CardHeader className="pb-2">
                     <CardTitle className="flex items-center gap-2 text-sm font-medium text-primary">
                       <Sparkles className="h-4 w-4" />
-                      AI-powered data cleaning
+                      AI-assisted header & mapping
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <p className="text-sm text-muted-foreground">
-                      The AI agent will automatically analyse your raw file to detect the real header row,
-                      trim metadata/title rows, remove noise columns, and extract clean data — even if the
-                      headers aren&apos;t on the first row. You can adjust the boundaries manually after.
+                      The table below is a direct preview of your file. You can adjust the header row and data boundaries manually, then
+                      the AI will help you map columns to your final schema in the next step.
                     </p>
                   </CardContent>
                 </Card>
               )}
-
-              {structuredStep === "preview" && analysis && preview && (
-                <Card className="border-blue-200 dark:border-blue-900 bg-blue-50/95 dark:bg-blue-950/85">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-sm">
-                      <Info className="h-4 w-4 text-blue-500" />
-                      AI Analysis Result
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-1 text-sm text-muted-foreground">
-                    <p>
-                      Header detected at row {analysis.headerRowIndex + 1}, data rows{" "}
-                      {analysis.dataStartRowIndex + 1}–{analysis.dataEndRowIndex + 1}
-                    </p>
-                    <p>
-                      Columns {analysis.startColumn + 1}–{analysis.endColumn + 1} ({analysis.endColumn - analysis.startColumn + 1} of{" "}
-                      {preview!.totalColumns} columns)
-                    </p>
-                    {analysis.notes && <p className="italic">{analysis.notes}</p>}
-                  </CardContent>
-                </Card>
-              )}
+              
 
               {structuredStep === "preview" && preview && boundary && (
                 <>
@@ -822,10 +934,37 @@ export default function UploadPage() {
                   <CardHeader>
                     <CardTitle>Confirm Field Mapping</CardTitle>
                     <CardDescription>
-                      Review how the AI mapped fields from the sheet to your schema. This mapping will be applied to all selected sheets.
+                      Review how the AI extracted fields from the first selected sheet. You can inspect each extracted sheet one by one after batch extraction and edit values before continuing.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
+                    {previewSourceTable && (
+                      <div className="mb-4 space-y-2">
+                        <div className="text-sm font-medium">Original source table preview (first selected sheet)</div>
+                        <ScrollArea className="w-full rounded-md border">
+                          <Table>
+                            <TableBody>
+                              {previewSourceTable.rows.slice(0, 20).map((row) => (
+                                <TableRow key={row.originalIndex}>
+                                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                                    Row {row.originalIndex + 1}
+                                  </TableCell>
+                                  {row.data.slice(0, 20).map((cell, ci) => (
+                                    <TableCell key={ci} className="max-w-48 truncate whitespace-nowrap text-xs">
+                                      {cell || <span className="text-muted-foreground">-</span>}
+                                    </TableCell>
+                                  ))}
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                          <ScrollBar orientation="horizontal" />
+                        </ScrollArea>
+                        <p className="text-xs text-muted-foreground">
+                          Showing first {Math.min(20, previewSourceTable.rows.length)} preview rows of {previewSourceTable.totalRows} total rows.
+                        </p>
+                      </div>
+                    )}
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -893,6 +1032,151 @@ export default function UploadPage() {
                         );
                       })}
                     </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {unstructuredStep === "reviewing" && currentReviewItem && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Review Extracted Record ({reviewIndex + 1}/{reviewItems.length})</CardTitle>
+                    <CardDescription>
+                      {currentReviewItem.fileName} • {currentReviewItem.sheetName}. Review the original source preview and edit extracted values before continuing.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-medium">Original source table preview</div>
+                        <div className="text-xs text-muted-foreground">
+                          {currentReviewItem.sourcePreview.totalRows} rows, {currentReviewItem.sourcePreview.totalColumns} columns
+                        </div>
+                      </div>
+                      <ScrollArea className="w-full rounded-md border">
+                        <Table>
+                          <TableBody>
+                            {currentReviewItem.sourcePreview.rows.slice(0, 20).map((row) => (
+                              <TableRow key={row.originalIndex}>
+                                <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                                  Row {row.originalIndex + 1}
+                                </TableCell>
+                                {row.data.slice(0, 20).map((cell, ci) => (
+                                  <TableCell key={ci} className="max-w-48 truncate whitespace-nowrap text-xs">
+                                    {cell || <span className="text-muted-foreground">-</span>}
+                                  </TableCell>
+                                ))}
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                        <ScrollBar orientation="horizontal" />
+                      </ScrollArea>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Extracted values (editable)</div>
+                      <div className="rounded-md border">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-[280px]">Target Field</TableHead>
+                              <TableHead>Value</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {currentReviewFieldOrder.map((targetPath) => (
+                              <TableRow key={targetPath}>
+                                <TableCell className="font-medium">{targetPath}</TableCell>
+                                <TableCell>
+                                  <Input
+                                    value={currentReviewItem.recordDraft[targetPath] ?? ""}
+                                    onChange={(e) => updateReviewValue(reviewIndex, targetPath, e.target.value)}
+                                    placeholder="Enter value"
+                                  />
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+
+                    {currentReviewItem.mapping.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium">LLM extraction mapping reference</div>
+                        <div className="rounded-md border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Target Field</TableHead>
+                                <TableHead>Source</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {currentReviewItem.mapping.map((m) => (
+                                <TableRow key={`${currentReviewItem.jobId}-${m.targetPath}`}>
+                                  <TableCell className="font-medium">{m.targetPath}</TableCell>
+                                  <TableCell className="text-sm text-muted-foreground">{m.source}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          onClick={() => setReviewIndex((idx) => Math.max(0, idx - 1))}
+                          disabled={reviewIndex === 0}
+                        >
+                          Previous
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => setReviewIndex((idx) => Math.min(reviewItems.length - 1, idx + 1))}
+                          disabled={reviewIndex >= reviewItems.length - 1}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button variant="outline" onClick={() => setUnstructuredStep("sheet_select")}>
+                          Back to Sheet Selection
+                        </Button>
+                        {reviewIndex < reviewItems.length - 1 && (
+                          <Button onClick={confirmCurrentReview}>
+                            Confirm & Next
+                          </Button>
+                        )}
+                        {reviewIndex === reviewItems.length - 1 && (
+                          <Button
+                            onClick={() => {
+                              const lastNeedsConfirm = !currentReviewItem.confirmed;
+                              if (lastNeedsConfirm) {
+                                setReviewItems((prev) => prev.map((item, i) => (
+                                  i === reviewIndex ? { ...item, confirmed: true } : item
+                                )));
+                              }
+                              setTimeout(() => {
+                                // Finalize from the latest edited drafts after confirming the last item.
+                                finalizeReviewedUnstructuredRecords();
+                              }, 0);
+                            }}
+                            disabled={reviewItems.length === 0}
+                          >
+                            Confirm & Continue to Mapping
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      Confirmed {reviewItems.filter((i) => i.confirmed).length} of {reviewItems.length} extracted record(s).
+                      {allReviewItemsConfirmed ? " All records are confirmed." : ""}
+                    </p>
                   </CardContent>
                 </Card>
               )}
