@@ -27,7 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useSchemaStore, flattenFields } from "@/lib/schema-store";
-import { Plus, Trash2, Loader2, ChevronRight, Play, FileSpreadsheet, Pencil, ChevronDown, Database, PlusCircle } from "lucide-react";
+import { Plus, Trash2, Loader2, ChevronRight, FileSpreadsheet, Pencil, ChevronDown, Database, PlusCircle } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -360,7 +360,7 @@ export default function SchemasPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[140px]">Step 1 — Use schema</TableHead>
+                    <TableHead className="w-[72px]">Expand</TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead>Creator</TableHead>
                     <TableHead>Fields</TableHead>
@@ -399,34 +399,20 @@ export default function SchemasPage() {
                       <TableRow
                         key={s.id}
                         className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => router.push(`/schemas/${s.id}`)}
+                        onClick={() => toggleSchemaExpanded(s.id)}
                       >
                         <TableCell onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleSchemaExpanded(s.id);
-                              }}
-                              className="rounded p-1 hover:bg-muted"
-                              aria-label={isExpanded ? "Collapse datasets" : "Expand datasets"}
-                            >
-                              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                            </button>
-                            <Button
-                              size="sm"
-                              onClick={() => {
-                                resetWorkflow();
-                                setCurrentSchema(s.id);
-                                router.push("/upload");
-                              }}
-                              className="font-medium"
-                            >
-                              <Play className="mr-1.5 h-4 w-4" />
-                              Use this schema
-                            </Button>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSchemaExpanded(s.id);
+                            }}
+                            className="rounded p-1 hover:bg-muted"
+                            aria-label={isExpanded ? "Collapse datasets" : "Expand datasets"}
+                          >
+                            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          </button>
                         </TableCell>
                         <TableCell className="font-medium">{s.name}</TableCell>
                         <TableCell className="text-muted-foreground text-sm">
@@ -456,7 +442,16 @@ export default function SchemasPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              router.push(`/schemas/${s.id}`);
+                            }}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                       <TableRow key={`${s.id}-datasets`} className="bg-muted/20">
@@ -481,15 +476,14 @@ export default function SchemasPage() {
                                 }}
                               >
                                 <div className="absolute left-0 top-1/2 h-px w-4 -translate-y-1/2 bg-border/80" />
-                                <div className="ml-4 rounded-md border-2 border-primary/40 bg-primary/10 p-3 flex items-center justify-between gap-3 cursor-pointer hover:bg-primary/15 transition-colors">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <PlusCircle className="h-4 w-4 text-primary shrink-0" />
-                                    <div className="min-w-0">
-                                      <div className="text-sm font-semibold text-foreground">Create new dataset</div>
-                                      <div className="text-xs text-muted-foreground">Add transformed rows under this schema</div>
-                                    </div>
-                                  </div>
-                                  <Plus className="h-4 w-4 text-primary shrink-0" />
+                                <div className="ml-4 rounded-md border-2 border-primary/40 bg-primary/10 p-0 overflow-hidden">
+                                  <Button
+                                    size="sm"
+                                    className="h-12 w-full justify-start rounded-none bg-transparent px-3 text-primary hover:bg-primary/10"
+                                  >
+                                    <PlusCircle className="mr-1.5 h-4 w-4" />
+                                    Create new dataset
+                                  </Button>
                                 </div>
                               </div>
 
@@ -517,7 +511,8 @@ export default function SchemasPage() {
                                       <div className="flex items-center gap-2">
                                         <Button
                                           size="sm"
-                                          className="h-9"
+                                          variant="outline"
+                                          className="h-9 border-primary/30 bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             resetWorkflow();

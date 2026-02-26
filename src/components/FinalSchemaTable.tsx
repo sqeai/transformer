@@ -57,6 +57,8 @@ interface FinalSchemaTableProps {
   columnMappings?: { rawColumn: string; targetPath: string }[];
   /** When true, fields are read-only (e.g. for shared access). */
   readOnly?: boolean;
+  /** Emits whether there are unsaved field edits in this table. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 interface FlatField {
@@ -313,6 +315,7 @@ export default function FinalSchemaTable({
   rawRows = [],
   columnMappings = [],
   readOnly = false,
+  onDirtyChange,
 }: FinalSchemaTableProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [showPreview, setShowPreview] = useState(true);
@@ -323,6 +326,20 @@ export default function FinalSchemaTable({
   const [draftFlat, setDraftFlat] = useState<FlatField[] | null>(null);
   const flat = isEditing && draftFlat ? draftFlat : schemaFlat;
   const tableReadOnly = readOnly || !isEditing;
+  const hasDraftChanges = useMemo(() => {
+    if (!isEditing || !draftFlat) return false;
+    if (draftFlat.length !== schemaFlat.length) return true;
+    for (let i = 0; i < draftFlat.length; i++) {
+      const draft = draftFlat[i];
+      const current = schemaFlat[i];
+      if (!current) return true;
+      if (draft.path !== current.path) return true;
+      if (draft.field.name !== current.field.name) return true;
+      if ((draft.field.description ?? "") !== (current.field.description ?? "")) return true;
+      if ((draft.field.defaultValue ?? "") !== (current.field.defaultValue ?? "")) return true;
+    }
+    return false;
+  }, [isEditing, draftFlat, schemaFlat]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -342,6 +359,10 @@ export default function FinalSchemaTable({
     setDraftFlat(null);
     setIsEditing(false);
   }, [schema.id]);
+
+  useEffect(() => {
+    onDirtyChange?.(hasDraftChanges);
+  }, [hasDraftChanges, onDirtyChange]);
 
   const handleStartEdit = useCallback(() => {
     setDraftFlat(
