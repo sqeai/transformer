@@ -275,7 +275,7 @@ export default function SchemaDetailPage() {
               </Button>
             )}
             <Button onClick={handleUseSchema}>
-              Use This Schema
+              Create new dataset using this schema
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </div>
