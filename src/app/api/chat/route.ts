@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAgentGraph, AIMessage } from "@/lib/agent";
+import { getDocsOnlyAgent } from "@/lib/agent/docs-agent";
+import { createClient } from "@/lib/supabase/server";
 import { type BaseMessage } from "@langchain/core/messages";
 import { toUIMessageStream, toBaseMessages } from "@ai-sdk/langchain";
 import { createUIMessageStreamResponse, type UIMessage } from "ai";
@@ -20,6 +22,13 @@ const convertLangChainMessageToVercelMessage = (message: BaseMessage) => {
 
 export async function POST(req: NextRequest) {
   try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+    const isAuthenticated = Boolean(user && !userError);
+
     const body = await req.json();
     const returnIntermediateSteps = body.show_intermediate_steps;
     const workspaceContext: string | null = body.workspaceContext ?? null;
@@ -56,7 +65,7 @@ export async function POST(req: NextRequest) {
 
     const messages: BaseMessage[] = await toBaseMessages(rawMessages);
 
-    const agent = getAgentGraph();
+    const agent = isAuthenticated ? getAgentGraph() : getDocsOnlyAgent();
     if (!agent) {
       return NextResponse.json(
         {
@@ -69,7 +78,10 @@ export async function POST(req: NextRequest) {
 
     if (!returnIntermediateSteps) {
       const eventStream = await agent.streamEvents(
-        { messages, workspaceContext },
+        {
+          messages,
+          ...(isAuthenticated ? { workspaceContext } : {}),
+        },
         { version: "v2", recursionLimit: 50 },
       );
 
@@ -78,7 +90,10 @@ export async function POST(req: NextRequest) {
       });
     } else {
       const result = await agent.invoke(
-        { messages, workspaceContext },
+        {
+          messages,
+          ...(isAuthenticated ? { workspaceContext } : {}),
+        },
         { recursionLimit: 50 },
       );
 
