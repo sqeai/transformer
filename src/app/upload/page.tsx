@@ -68,6 +68,10 @@ interface PreviewData {
   sheetNames?: string[];
   /** Excel only: 0-based index of the sheet to process */
   activeSheetIndex?: number;
+  /** Excel only: selected sheets to process in structured mode */
+  selectedSheetIndices?: number[];
+  /** Excel only: per-sheet boundary configuration keyed by sheet index */
+  boundariesBySheetIndex?: Record<number, DataBoundary>;
 }
 
 interface SheetItem {
@@ -189,6 +193,9 @@ function UploadPageContent() {
   const [analysis, setAnalysis] = useState<RawDataAnalysis | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [boundary, setBoundary] = useState<DataBoundary | null>(null);
+  const [structuredSelectedSheetIndices, setStructuredSelectedSheetIndices] = useState<Set<number>>(new Set());
+  const [structuredActiveSheetIndex, setStructuredActiveSheetIndex] = useState<number>(0);
+  const [structuredBoundariesBySheetIndex, setStructuredBoundariesBySheetIndex] = useState<Record<number, DataBoundary>>({});
   const [loadingMore, setLoadingMore] = useState(false);
   const loadedCountRef = useRef(PREVIEW_TOP_N);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -250,8 +257,22 @@ function UploadPageContent() {
       restoredRef.current = true;
       setUploadMode("structured");
       setStructuredStep("preview");
-      setPreview(saved.preview as PreviewData);
-      setBoundary(saved.boundary as DataBoundary);
+      const savedPreview = saved.preview as PreviewData;
+      const restoredActiveSheetIndex = savedPreview.activeSheetIndex ?? 0;
+      const restoredBoundariesBySheet = savedPreview.boundariesBySheetIndex ?? {
+        [restoredActiveSheetIndex]: saved.boundary as DataBoundary,
+      };
+      setPreview(savedPreview);
+      setBoundary(restoredBoundariesBySheet[restoredActiveSheetIndex] ?? (saved.boundary as DataBoundary));
+      setStructuredActiveSheetIndex(restoredActiveSheetIndex);
+      setStructuredBoundariesBySheetIndex(restoredBoundariesBySheet);
+      setStructuredSelectedSheetIndices(
+        new Set(
+          Array.isArray(savedPreview.selectedSheetIndices) && savedPreview.selectedSheetIndices.length > 0
+            ? savedPreview.selectedSheetIndices
+            : [restoredActiveSheetIndex],
+        ),
+      );
       setAnalysis((saved.analysis as RawDataAnalysis) ?? null);
       return;
     }
@@ -286,9 +307,33 @@ function UploadPageContent() {
   // Persist upload state while in preview so navigating back restores the data
   useEffect(() => {
     if (structuredStep === "preview" && preview && boundary && schemaId) {
-      setUploadState({ schemaId, step: "preview", preview, boundary, analysis, uploadMode: "structured", ...(datasetTargetId ? { datasetTargetId } : {}) });
+      setUploadState({
+        schemaId,
+        step: "preview",
+        preview: {
+          ...preview,
+          activeSheetIndex: structuredActiveSheetIndex,
+          selectedSheetIndices: Array.from(structuredSelectedSheetIndices),
+          boundariesBySheetIndex: structuredBoundariesBySheetIndex,
+        },
+        boundary,
+        analysis,
+        uploadMode: "structured",
+        ...(datasetTargetId ? { datasetTargetId } : {}),
+      });
     }
-  }, [structuredStep, preview, boundary, analysis, schemaId, datasetTargetId, setUploadState]);
+  }, [
+    structuredStep,
+    preview,
+    boundary,
+    analysis,
+    schemaId,
+    datasetTargetId,
+    setUploadState,
+    structuredActiveSheetIndex,
+    structuredSelectedSheetIndices,
+    structuredBoundariesBySheetIndex,
+  ]);
 
   useEffect(() => {
     if (!schemaId || uploadMode !== "unstructured") return;
@@ -426,6 +471,9 @@ function UploadPageContent() {
       setAnalysis(null);
       setPreview(null);
       setBoundary(null);
+      setStructuredSelectedSheetIndices(new Set());
+      setStructuredBoundariesBySheetIndex({});
+      setStructuredActiveSheetIndex(0);
       loadedCountRef.current = PREVIEW_TOP_N;
       const savedSchemaId = schemaId;
       resetWorkflow();
@@ -459,8 +507,14 @@ function UploadPageContent() {
             // has as many fields as possible; the user can narrow this later.
             endColumn: totalColumns - 1,
           };
+          const initialBoundariesBySheetIndex: Record<number, DataBoundary> = {
+            0: defaultBoundary,
+          };
 
           setBoundary(defaultBoundary);
+          setStructuredActiveSheetIndex(0);
+          setStructuredSelectedSheetIndices(new Set([0]));
+          setStructuredBoundariesBySheetIndex(initialBoundariesBySheetIndex);
           setPreview({
             rows: previewRows,
             totalRows,
@@ -470,6 +524,8 @@ function UploadPageContent() {
             excelBuffer: buffer,
             sheetNames,
             activeSheetIndex: 0,
+            selectedSheetIndices: [0],
+            boundariesBySheetIndex: initialBoundariesBySheetIndex,
           });
         } else {
           const csvText = await file.text();
@@ -511,21 +567,81 @@ function UploadPageContent() {
     try {
       setStructuredStep("parsing");
 
-      const columnsToKeep: number[] = [];
-      for (let i = boundary.startColumn; i <= boundary.endColumn; i++) {
-        columnsToKeep.push(i);
-      }
-
       if (preview.isExcel && preview.excelBuffer) {
-        const { columns, rows } = await parseExcelToRows(preview.excelBuffer, {
-          headerRowIndex: boundary.headerRowIndex,
-          dataStartRowIndex: boundary.dataStartRowIndex,
-          dataEndRowIndex: boundary.dataEndRowIndex,
-          columnsToKeep,
-          sheetIndex: preview.activeSheetIndex ?? 0,
-        });
-        setRawData(columns, rows);
+        const selectedSheetIndices = Array.from(
+          structuredSelectedSheetIndices.size > 0
+            ? structuredSelectedSheetIndices
+            : new Set([structuredActiveSheetIndex]),
+        );
+        const parsedSheets: Array<{
+          sheetIndex: number;
+          sheetName: string;
+          columns: string[];
+          rows: Record<string, unknown>[];
+        }> = [];
+
+        for (const sheetIndex of selectedSheetIndices) {
+          const bnd = structuredBoundariesBySheetIndex[sheetIndex] ?? boundary;
+          const columnsToKeep: number[] = [];
+          for (let i = bnd.startColumn; i <= bnd.endColumn; i++) {
+            columnsToKeep.push(i);
+          }
+          const parsed = await parseExcelToRows(preview.excelBuffer, {
+            headerRowIndex: bnd.headerRowIndex,
+            dataStartRowIndex: bnd.dataStartRowIndex,
+            dataEndRowIndex: bnd.dataEndRowIndex,
+            columnsToKeep,
+            sheetIndex,
+          });
+          parsedSheets.push({
+            sheetIndex,
+            sheetName: preview.sheetNames?.[sheetIndex] ?? `Sheet ${sheetIndex + 1}`,
+            columns: parsed.columns,
+            rows: parsed.rows,
+          });
+        }
+        if (parsedSheets.length === 0) {
+          throw new Error("No sheets selected for parsing");
+        }
+
+        // Mapping now runs per sheet in the mapping builder loop.
+        // Seed workflow with the first sheet so mapping has immediate data context.
+        const firstSheet = parsedSheets[0];
+        setRawData(firstSheet.columns, firstSheet.rows);
+        setColumnMappings([]);
+        setPivotConfig({ enabled: false, groupByColumns: [] });
+        setVerticalPivotConfig({ enabled: false, outputTargetPaths: [], columns: [] });
+        setDefaultValues({});
+
+        if (schemaId) {
+          setUploadState({
+            schemaId,
+            step: "preview",
+            preview: {
+              ...preview,
+              activeSheetIndex: structuredActiveSheetIndex,
+              selectedSheetIndices: Array.from(structuredSelectedSheetIndices),
+              boundariesBySheetIndex: structuredBoundariesBySheetIndex,
+            },
+            boundary,
+            analysis,
+            uploadMode: "structured",
+            structuredMapping: {
+              sheets: parsedSheets,
+              reviewIndex: 0,
+              confirmedSheets: [],
+            },
+            ...(datasetTargetId ? { datasetTargetId } : {}),
+          });
+        }
+
+        router.push("/mapping");
+        return;
       } else if (preview.csvText) {
+        const columnsToKeep: number[] = [];
+        for (let i = boundary.startColumn; i <= boundary.endColumn; i++) {
+          columnsToKeep.push(i);
+        }
         const { columns, rows } = parseCsvToRows(preview.csvText, {
           headerRowIndex: boundary.headerRowIndex,
           dataStartRowIndex: boundary.dataStartRowIndex,
@@ -536,7 +652,20 @@ function UploadPageContent() {
       }
 
       if (schemaId) {
-        setUploadState({ schemaId, step: "preview", preview, boundary, analysis, uploadMode: "structured", ...(datasetTargetId ? { datasetTargetId } : {}) });
+        setUploadState({
+          schemaId,
+          step: "preview",
+          preview: {
+            ...preview,
+            activeSheetIndex: structuredActiveSheetIndex,
+            selectedSheetIndices: Array.from(structuredSelectedSheetIndices),
+            boundariesBySheetIndex: structuredBoundariesBySheetIndex,
+          },
+          boundary,
+          analysis,
+          uploadMode: "structured",
+          ...(datasetTargetId ? { datasetTargetId } : {}),
+        });
       }
 
       router.push("/mapping");
@@ -544,11 +673,27 @@ function UploadPageContent() {
       setError(e instanceof Error ? e.message : "Failed to parse file");
       setStructuredStep("preview");
     }
-  }, [preview, boundary, schemaId, analysis, datasetTargetId, setRawData, router, setUploadState]);
+  }, [
+    preview,
+    boundary,
+    schemaId,
+    analysis,
+    datasetTargetId,
+    setRawData,
+    setColumnMappings,
+    setPivotConfig,
+    setVerticalPivotConfig,
+    setDefaultValues,
+    router,
+    setUploadState,
+    structuredSelectedSheetIndices,
+    structuredActiveSheetIndex,
+    structuredBoundariesBySheetIndex,
+  ]);
 
   const switchToSheet = useCallback(
     async (sheetIndex: number) => {
-      if (!preview?.isExcel || !preview.excelBuffer || preview.activeSheetIndex === sheetIndex)
+      if (!preview?.isExcel || !preview.excelBuffer || structuredActiveSheetIndex === sheetIndex)
         return;
       const { rows: previewRows, totalRows, totalColumns } = await extractExcelGridTopBottom(
         preview.excelBuffer,
@@ -557,6 +702,7 @@ function UploadPageContent() {
         PREVIEW_MAX_COLS,
         sheetIndex,
       );
+      loadedCountRef.current = PREVIEW_TOP_N;
       const defaultBoundary: DataBoundary = {
         headerRowIndex: 0,
         dataStartRowIndex: 1,
@@ -564,7 +710,12 @@ function UploadPageContent() {
         startColumn: 0,
         endColumn: Math.max(0, totalColumns - 1),
       };
-      setBoundary(defaultBoundary);
+      const nextBoundary = structuredBoundariesBySheetIndex[sheetIndex] ?? defaultBoundary;
+      setBoundary(nextBoundary);
+      setStructuredActiveSheetIndex(sheetIndex);
+      setStructuredBoundariesBySheetIndex((prev) =>
+        prev[sheetIndex] ? prev : { ...prev, [sheetIndex]: nextBoundary },
+      );
       setPreview((prev) =>
         prev
           ? {
@@ -573,17 +724,41 @@ function UploadPageContent() {
               totalRows,
               totalColumns,
               activeSheetIndex: sheetIndex,
+              selectedSheetIndices: Array.from(structuredSelectedSheetIndices),
+              boundariesBySheetIndex: {
+                ...(prev.boundariesBySheetIndex ?? {}),
+                ...(structuredBoundariesBySheetIndex[sheetIndex]
+                  ? {}
+                  : { [sheetIndex]: nextBoundary }),
+              },
             }
           : prev,
       );
       if (sheetIndex !== 0) setAnalysis(null);
     },
-    [preview],
+    [preview, structuredActiveSheetIndex, structuredBoundariesBySheetIndex, structuredSelectedSheetIndices],
   );
 
   const handleBoundaryChange = useCallback((newBoundary: DataBoundary) => {
     setBoundary(newBoundary);
-  }, []);
+    if (preview?.isExcel) {
+      setStructuredBoundariesBySheetIndex((prev) => ({
+        ...prev,
+        [structuredActiveSheetIndex]: newBoundary,
+      }));
+      setPreview((prev) =>
+        prev
+          ? {
+              ...prev,
+              boundariesBySheetIndex: {
+                ...(prev.boundariesBySheetIndex ?? {}),
+                [structuredActiveSheetIndex]: newBoundary,
+              },
+            }
+          : prev,
+      );
+    }
+  }, [preview?.isExcel, structuredActiveSheetIndex]);
 
   const loadMoreRows = useCallback(async () => {
     if (!preview || loadingMore) return;
@@ -603,7 +778,7 @@ function UploadPageContent() {
           nextCount,
           PREVIEW_BOTTOM_N,
           PREVIEW_MAX_COLS,
-          preview.activeSheetIndex ?? 0,
+          structuredActiveSheetIndex,
           bnd,
         );
         loadedCountRef.current = nextCount;
@@ -625,13 +800,16 @@ function UploadPageContent() {
     } finally {
       setLoadingMore(false);
     }
-  }, [preview, boundary, loadingMore]);
+  }, [preview, boundary, loadingMore, structuredActiveSheetIndex]);
 
   const resetToIdle = () => {
     setStructuredStep("idle");
     setPreview(null);
     setBoundary(null);
     setAnalysis(null);
+    setStructuredSelectedSheetIndices(new Set());
+    setStructuredBoundariesBySheetIndex({});
+    setStructuredActiveSheetIndex(0);
     setError(null);
     setUploadState(null);
     loadedCountRef.current = PREVIEW_TOP_N;
@@ -742,6 +920,20 @@ function UploadPageContent() {
       setUnstructuredStep("idle");
     }
   }, []);
+
+  const toggleStructuredSheetSelection = useCallback((sheetIndex: number) => {
+    setStructuredSelectedSheetIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(sheetIndex)) next.delete(sheetIndex);
+      else next.add(sheetIndex);
+      return next;
+    });
+  }, []);
+
+  const setActiveStructuredSheetPreview = useCallback((sheetIndex: number) => {
+    if (!preview?.isExcel) return;
+    void switchToSheet(sheetIndex);
+  }, [preview?.isExcel, switchToSheet]);
 
   const toggleSheetSelection = useCallback((sheetId: string) => {
     setSelectedSheetIds((prev) => {
@@ -1193,7 +1385,10 @@ function UploadPageContent() {
                   <RotateCcw className="mr-2 h-4 w-4" />
                   Upload different file
                 </Button>
-                <Button onClick={confirmAndParse}>
+                <Button
+                  onClick={confirmAndParse}
+                  disabled={preview.isExcel && structuredSelectedSheetIndices.size === 0}
+                >
                   Confirm & Continue to Mapping
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
@@ -1270,40 +1465,131 @@ function UploadPageContent() {
 
               {structuredStep === "preview" && preview && boundary && (
                 <>
-                  {preview.isExcel && preview.sheetNames && preview.sheetNames.length > 1 && (
-                    <div className="space-y-1.5">
-                      <p className="text-xs font-medium text-muted-foreground">Sheets</p>
-                      <div className="flex flex-wrap gap-1 border-b border-border pb-0">
-                        {preview.sheetNames.map((name, index) => (
-                          <button
-                            key={index}
-                            type="button"
-                            onClick={() => switchToSheet(index)}
-                            className={`rounded-t-md px-3 py-2 text-sm font-medium transition-colors ${
-                              (preview.activeSheetIndex ?? 0) === index
-                                ? "border border-b-0 border-primary/30 bg-background text-foreground -mb-px ring-2 ring-primary/35 ring-offset-1 ring-offset-background shadow-lg shadow-primary/20"
-                                : "border border-transparent text-muted-foreground/75 opacity-80 hover:opacity-100 hover:text-foreground hover:bg-muted/50"
-                            }`}
-                          >
-                            {name || `Sheet ${index + 1}`}
-                          </button>
-                        ))}
-                      </div>
-                      <p className="text-[10px] text-muted-foreground">
-                        Only the active sheet will be processed. Click a sheet to switch.
-                      </p>
-                    </div>
-                  )}
+                  {preview.isExcel && preview.sheetNames && preview.sheetNames.length > 1 ? (
+                    <Card className="min-h-screen w-full">
+                      <CardHeader>
+                        <CardTitle>Select Sheets to Process</CardTitle>
+                        <CardDescription>
+                          Choose one or more sheets. Configure boundaries for each selected sheet from the preview panel.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="grid min-h-[calc(100vh-14rem)] w-full grid-cols-1 gap-4 overflow-hidden px-4 pb-4 lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-stretch">
+                        <div className="flex h-[calc(100vh-18rem)] min-h-0 min-w-0 flex-col overflow-hidden rounded-md border">
+                          <div className="flex min-h-16 items-center border-b px-4 py-3">
+                            <div className="text-sm font-medium">
+                              Sheets ({structuredSelectedSheetIndices.size} selected)
+                            </div>
+                          </div>
+                          <div className="min-h-0 flex-1 p-2">
+                            <ScrollArea className="h-full w-full">
+                              <div className="space-y-2 pr-2">
+                                {preview.sheetNames.map((name, index) => {
+                                  const isSelected = structuredSelectedSheetIndices.has(index);
+                                  const isPreviewed = structuredActiveSheetIndex === index;
+                                  return (
+                                    <div
+                                      key={index}
+                                      className={`flex items-center gap-2 rounded-md border p-2 transition-colors ${
+                                        isSelected ? "border-primary/40 bg-primary/5" : "hover:bg-muted/40"
+                                      } ${isPreviewed ? "ring-1 ring-primary/30" : ""}`}
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleStructuredSheetSelection(index)}
+                                        aria-pressed={isSelected}
+                                        aria-label={isSelected ? `Deselect ${name}` : `Select ${name}`}
+                                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                                          isSelected
+                                            ? "border-primary bg-primary text-primary-foreground"
+                                            : "border-border bg-background hover:bg-muted"
+                                        }`}
+                                      >
+                                        {isSelected ? (
+                                          <CheckCircle2 className="h-4 w-4" />
+                                        ) : (
+                                          <span className="h-3.5 w-3.5 rounded-sm border border-muted-foreground/50" />
+                                        )}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setActiveStructuredSheetPreview(index)}
+                                        className="flex min-w-0 flex-1 items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-muted/60"
+                                      >
+                                        <div className="min-w-0">
+                                          <div className="truncate font-medium">{name || `Sheet ${index + 1}`}</div>
+                                          <div className="truncate text-sm text-muted-foreground">
+                                            {isSelected ? "Included in parse" : "Not selected"}
+                                          </div>
+                                        </div>
+                                        <span className="ml-3 shrink-0 text-xs text-muted-foreground">
+                                          {isPreviewed ? "Previewing" : "Preview"}
+                                        </span>
+                                      </button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </ScrollArea>
+                          </div>
+                          <div className="border-t p-3 text-xs text-muted-foreground">
+                            Selected sheets will be merged into one dataset before mapping.
+                          </div>
+                        </div>
 
-                  <DataPreviewTable
-                    rows={preview.rows}
-                    totalRows={preview.totalRows}
-                    totalColumns={preview.totalColumns}
-                    initialBoundary={boundary}
-                    onBoundaryChange={handleBoundaryChange}
-                    onLoadMore={loadMoreRows}
-                    loadingMore={loadingMore}
-                  />
+                        <div className="flex h-[calc(100vh-18rem)] min-h-0 min-w-0 flex-col overflow-hidden rounded-md border lg:sticky lg:top-0">
+                          <div className="flex min-h-16 items-center justify-between border-b px-4 py-3">
+                            <div>
+                              <div className="text-sm font-medium">Sheet Preview & Boundary</div>
+                              <div className="text-xs text-muted-foreground">
+                                {preview.sheetNames[structuredActiveSheetIndex] || `Sheet ${structuredActiveSheetIndex + 1}`}
+                              </div>
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {preview.totalRows} rows, {preview.totalColumns} cols
+                            </div>
+                          </div>
+                          <div className="min-h-0 flex-1 overflow-auto p-3">
+                            <DataPreviewTable
+                              key={`structured-sheet-${structuredActiveSheetIndex}`}
+                              rows={preview.rows}
+                              totalRows={preview.totalRows}
+                              totalColumns={preview.totalColumns}
+                              initialBoundary={boundary}
+                              onBoundaryChange={handleBoundaryChange}
+                              onLoadMore={loadMoreRows}
+                              loadingMore={loadingMore}
+                            />
+                          </div>
+                          <div className="flex min-h-16 items-center justify-between gap-2 border-t px-3 py-2">
+                            <p className="text-xs text-muted-foreground">
+                              Showing {preview.rows.length} of {preview.totalRows} rows
+                            </p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={loadMoreRows}
+                              disabled={loadingMore || preview.rows.length >= preview.totalRows}
+                            >
+                              {loadingMore && (
+                                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                              )}
+                              Load more rows
+                            </Button>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <DataPreviewTable
+                      rows={preview.rows}
+                      totalRows={preview.totalRows}
+                      totalColumns={preview.totalColumns}
+                      initialBoundary={boundary}
+                      onBoundaryChange={handleBoundaryChange}
+                      onLoadMore={loadMoreRows}
+                      loadingMore={loadingMore}
+                    />
+                  )}
                 </>
               )}
             </>

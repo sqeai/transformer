@@ -66,6 +66,7 @@ export default function DataPreviewTable({
   const [draftDataEnd, setDraftDataEnd] = useState(String(dataEnd + 1));
   const [draftStartCol, setDraftStartCol] = useState(String(startCol + 1));
   const [draftEndCol, setDraftEndCol] = useState(String(endCol + 1));
+  const pendingArrowField = useRef<"headerRow" | "dataStart" | "dataEnd" | "startCol" | "endCol" | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const DEBOUNCE_MS = 500;
@@ -125,47 +126,6 @@ export default function DataPreviewTable({
     },
     [maxRowIdx, maxColIdx, headerRow, dataStart, dataEnd, startCol, endCol, onBoundaryChange],
   );
-
-  const stepBoundary = useCallback(
-    (field: "headerRow" | "dataStart" | "dataEnd" | "startCol" | "endCol", delta: number) => {
-      const getMax = () => {
-        switch (field) {
-          case "headerRow":
-          case "dataStart":
-          case "dataEnd":
-            return maxRowIdx + 1;
-          case "startCol":
-          case "endCol":
-            return maxColIdx + 1;
-        }
-      };
-      const getCurrent = () => {
-        switch (field) {
-          case "headerRow": return Number(draftHeaderRow) || 1;
-          case "dataStart": return Number(draftDataStart) || 1;
-          case "dataEnd": return Number(draftDataEnd) || 1;
-          case "startCol": return Number(draftStartCol) || 1;
-          case "endCol": return Number(draftEndCol) || 1;
-        }
-      };
-      const min = 1;
-      const max = getMax();
-      const next = Math.max(min, Math.min(max, getCurrent() + delta));
-      commitBoundary(field, String(next));
-    },
-    [
-      maxRowIdx,
-      maxColIdx,
-      draftHeaderRow,
-      draftDataStart,
-      draftDataEnd,
-      draftStartCol,
-      draftEndCol,
-      commitBoundary,
-    ],
-  );
-
-  const pendingArrowField = useRef<"headerRow" | "dataStart" | "dataEnd" | "startCol" | "endCol" | null>(null);
 
   const handleDraftChange = useCallback(
     (field: "headerRow" | "dataStart" | "dataEnd" | "startCol" | "endCol", raw: string) => {
@@ -316,37 +276,15 @@ export default function DataPreviewTable({
                 <Rows3 className="h-3 w-3 text-blue-500" />
                 Header Row
               </Label>
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-10 w-10 shrink-0"
-                  onClick={() => stepBoundary("headerRow", 1)}
-                  aria-label="Increase header row"
-                >
-                  <ChevronUp className="h-6 w-6" />
-                </Button>
-                <Input
-                  type="number"
-                  min={1}
-                  max={maxRowIdx + 1}
-                  value={draftHeaderRow}
-                  onKeyDown={(e) => handleArrowKey("headerRow", e)}
-                  onChange={(e) => handleDraftChange("headerRow", e.target.value)}
-                  className="h-10 text-sm flex-1"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-10 w-10 shrink-0"
-                  onClick={() => stepBoundary("headerRow", -1)}
-                  aria-label="Decrease header row"
-                >
-                  <ChevronDown className="h-6 w-6" />
-                </Button>
-              </div>
+              <Input
+                type="number"
+                min={1}
+                max={maxRowIdx + 1}
+                value={draftHeaderRow}
+                onKeyDown={(e) => handleArrowKey("headerRow", e)}
+                onChange={(e) => handleDraftChange("headerRow", e.target.value)}
+                className="h-10 text-sm"
+              />
               <p className="text-[10px] text-muted-foreground">1-indexed row number</p>
             </div>
             <div className="space-y-1.5">
@@ -354,37 +292,15 @@ export default function DataPreviewTable({
                 <Rows3 className="h-3 w-3 text-green-500" />
                 Data Start Row
               </Label>
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-10 w-10 shrink-0"
-                  onClick={() => stepBoundary("dataStart", 1)}
-                  aria-label="Increase data start row"
-                >
-                  <ChevronUp className="h-6 w-6" />
-                </Button>
-                <Input
-                  type="number"
-                  min={1}
-                  max={maxRowIdx + 1}
-                  value={draftDataStart}
-                  onKeyDown={(e) => handleArrowKey("dataStart", e)}
-                  onChange={(e) => handleDraftChange("dataStart", e.target.value)}
-                  className="h-10 text-sm flex-1"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-10 w-10 shrink-0"
-                  onClick={() => stepBoundary("dataStart", -1)}
-                  aria-label="Decrease data start row"
-                >
-                  <ChevronDown className="h-6 w-6" />
-                </Button>
-              </div>
+              <Input
+                type="number"
+                min={1}
+                max={maxRowIdx + 1}
+                value={draftDataStart}
+                onKeyDown={(e) => handleArrowKey("dataStart", e)}
+                onChange={(e) => handleDraftChange("dataStart", e.target.value)}
+                className="h-10 text-sm"
+              />
               <p className="text-[10px] text-muted-foreground">First data row</p>
             </div>
             <div className="space-y-1.5">
@@ -392,37 +308,15 @@ export default function DataPreviewTable({
                 <Rows3 className="h-3 w-3 text-red-500" />
                 Data End Row
               </Label>
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-10 w-10 shrink-0"
-                  onClick={() => stepBoundary("dataEnd", 1)}
-                  aria-label="Increase data end row"
-                >
-                  <ChevronUp className="h-6 w-6" />
-                </Button>
-                <Input
-                  type="number"
-                  min={1}
-                  max={totalRows}
-                  value={draftDataEnd}
-                  onKeyDown={(e) => handleArrowKey("dataEnd", e)}
-                  onChange={(e) => handleDraftChange("dataEnd", e.target.value)}
-                  className="h-10 text-sm flex-1"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-10 w-10 shrink-0"
-                  onClick={() => stepBoundary("dataEnd", -1)}
-                  aria-label="Decrease data end row"
-                >
-                  <ChevronDown className="h-6 w-6" />
-                </Button>
-              </div>
+              <Input
+                type="number"
+                min={1}
+                max={totalRows}
+                value={draftDataEnd}
+                onKeyDown={(e) => handleArrowKey("dataEnd", e)}
+                onChange={(e) => handleDraftChange("dataEnd", e.target.value)}
+                className="h-10 text-sm"
+              />
               <p className="text-[10px] text-muted-foreground">Last data row</p>
             </div>
             <div className="space-y-1.5">
@@ -430,37 +324,15 @@ export default function DataPreviewTable({
                 <Columns3 className="h-3 w-3 text-violet-500" />
                 Start Column
               </Label>
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-10 w-10 shrink-0"
-                  onClick={() => stepBoundary("startCol", 1)}
-                  aria-label="Increase start column"
-                >
-                  <ChevronUp className="h-6 w-6" />
-                </Button>
-                <Input
-                  type="number"
-                  min={1}
-                  max={maxColIdx + 1}
-                  value={draftStartCol}
-                  onKeyDown={(e) => handleArrowKey("startCol", e)}
-                  onChange={(e) => handleDraftChange("startCol", e.target.value)}
-                  className="h-10 text-sm flex-1"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-10 w-10 shrink-0"
-                  onClick={() => stepBoundary("startCol", -1)}
-                  aria-label="Decrease start column"
-                >
-                  <ChevronDown className="h-6 w-6" />
-                </Button>
-              </div>
+              <Input
+                type="number"
+                min={1}
+                max={maxColIdx + 1}
+                value={draftStartCol}
+                onKeyDown={(e) => handleArrowKey("startCol", e)}
+                onChange={(e) => handleDraftChange("startCol", e.target.value)}
+                className="h-10 text-sm"
+              />
               <p className="text-[10px] text-muted-foreground">First column</p>
             </div>
             <div className="space-y-1.5">
@@ -468,37 +340,15 @@ export default function DataPreviewTable({
                 <Columns3 className="h-3 w-3 text-violet-500" />
                 End Column
               </Label>
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-10 w-10 shrink-0"
-                  onClick={() => stepBoundary("endCol", 1)}
-                  aria-label="Increase end column"
-                >
-                  <ChevronUp className="h-6 w-6" />
-                </Button>
-                <Input
-                  type="number"
-                  min={1}
-                  max={totalColumns}
-                  value={draftEndCol}
-                  onKeyDown={(e) => handleArrowKey("endCol", e)}
-                  onChange={(e) => handleDraftChange("endCol", e.target.value)}
-                  className="h-10 text-sm flex-1"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-10 w-10 shrink-0"
-                  onClick={() => stepBoundary("endCol", -1)}
-                  aria-label="Decrease end column"
-                >
-                  <ChevronDown className="h-6 w-6" />
-                </Button>
-              </div>
+              <Input
+                type="number"
+                min={1}
+                max={totalColumns}
+                value={draftEndCol}
+                onKeyDown={(e) => handleArrowKey("endCol", e)}
+                onChange={(e) => handleDraftChange("endCol", e.target.value)}
+                className="h-10 text-sm"
+              />
               <p className="text-[10px] text-muted-foreground">Last column</p>
             </div>
           </div>
