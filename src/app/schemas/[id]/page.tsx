@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -46,7 +46,7 @@ export default function SchemaDetailPage() {
   const router = useRouter();
   const id = params.id as string;
   const { user } = useAuth();
-  const { getSchema, updateSchema, setCurrentSchema, deleteSchema, workflow } = useSchemaStore();
+  const { getSchema, updateSchema, setCurrentSchema, deleteSchema, workflow, schemasLoading } = useSchemaStore();
   const schema = getSchema(id);
   const [name, setName] = useState(schema?.name ?? "");
   const [saved, setSaved] = useState(false);
@@ -57,8 +57,36 @@ export default function SchemaDetailPage() {
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [tableHasUnsavedChanges, setTableHasUnsavedChanges] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const pendingLeaveActionRef = useRef<null | (() => void)>(null);
 
   const isOwner = !!user && !!schema?.creator && schema.creator.id === user.id;
+  const hasUnsavedChanges = useMemo(
+    () => tableHasUnsavedChanges || name.trim() !== (schema?.name ?? ""),
+    [tableHasUnsavedChanges, name, schema?.name],
+  );
+
+  const requestLeave = useCallback((action: () => void) => {
+    if (!hasUnsavedChanges) {
+      action();
+      return;
+    }
+    pendingLeaveActionRef.current = action;
+    setShowLeaveConfirm(true);
+  }, [hasUnsavedChanges]);
+
+  const confirmLeave = useCallback(() => {
+    const action = pendingLeaveActionRef.current;
+    pendingLeaveActionRef.current = null;
+    setShowLeaveConfirm(false);
+    action?.();
+  }, []);
+
+  const cancelLeave = useCallback(() => {
+    pendingLeaveActionRef.current = null;
+    setShowLeaveConfirm(false);
+  }, []);
 
   const fetchGrants = useCallback(() => {
     if (!id || !isOwner) return;
@@ -72,6 +100,63 @@ export default function SchemaDetailPage() {
   useEffect(() => {
     if (isOwner) fetchGrants();
   }, [isOwner, fetchGrants]);
+
+  useEffect(() => {
+    setName(schema?.name ?? "");
+  }, [schema?.id, schema?.name]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedChanges) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (!hasUnsavedChanges) return;
+      if (event.defaultPrevented) return;
+      if (event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+      const target = event.target as Element | null;
+      const anchor = target?.closest("a[href]") as HTMLAnchorElement | null;
+      if (!anchor) return;
+      if (anchor.target && anchor.target !== "_self") return;
+      if (anchor.hasAttribute("download")) return;
+
+      const href = anchor.getAttribute("href");
+      if (!href) return;
+      if (href.startsWith("#")) return;
+
+      const url = new URL(anchor.href, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const next = `${url.pathname}${url.search}${url.hash}`;
+      if (next === current) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      requestLeave(() => router.push(next));
+    };
+
+    document.addEventListener("click", handleDocumentClick, true);
+    return () => document.removeEventListener("click", handleDocumentClick, true);
+  }, [hasUnsavedChanges, requestLeave, router]);
+
+  if (schemasLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <Loader2 className="h-10 w-10 text-muted-foreground animate-spin mb-4" />
+          <p className="text-muted-foreground text-lg">Loading schema...</p>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   if (!schema) {
     return (
@@ -108,8 +193,10 @@ export default function SchemaDetailPage() {
   };
 
   const handleUseSchema = () => {
-    setCurrentSchema(id);
-    router.push("/upload");
+    requestLeave(() => {
+      setCurrentSchema(id);
+      router.push("/upload");
+    });
   };
 
   const handleGrant = async () => {
@@ -161,7 +248,7 @@ export default function SchemaDetailPage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => router.push("/schemas")}>
+            <Button variant="ghost" size="icon" onClick={() => requestLeave(() => router.push("/schemas"))}>
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div>
@@ -335,6 +422,7 @@ export default function SchemaDetailPage() {
           rawRows={workflow.currentSchemaId === id ? workflow.rawRows : []}
           columnMappings={workflow.currentSchemaId === id ? workflow.columnMappings : []}
           readOnly={false}
+          onDirtyChange={setTableHasUnsavedChanges}
         />
       </div>
 
@@ -366,6 +454,23 @@ export default function SchemaDetailPage() {
             >
               {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showLeaveConfirm} onOpenChange={(open) => (!open ? cancelLeave() : setShowLeaveConfirm(true))}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved schema edits. If you leave this page now, your changes will be lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={cancelLeave}>Stay</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmLeave}>
+              Leave without saving
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
