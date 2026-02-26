@@ -402,20 +402,6 @@ export default function SchemasPage() {
                         onClick={() => router.push(`/schemas/${s.id}`)}
                       >
                         <TableCell onClick={(e) => e.stopPropagation()}>
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              resetWorkflow();
-                              setCurrentSchema(s.id);
-                              router.push("/upload");
-                            }}
-                            className="font-medium"
-                          >
-                            <Play className="mr-1.5 h-4 w-4" />
-                            Use this schema
-                          </Button>
-                        </TableCell>
-                        <TableCell className="font-medium">
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
@@ -428,9 +414,21 @@ export default function SchemasPage() {
                             >
                               {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                             </button>
-                            <span>{s.name}</span>
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                resetWorkflow();
+                                setCurrentSchema(s.id);
+                                router.push("/upload");
+                              }}
+                              className="font-medium"
+                            >
+                              <Play className="mr-1.5 h-4 w-4" />
+                              Use this schema
+                            </Button>
                           </div>
                         </TableCell>
+                        <TableCell className="font-medium">{s.name}</TableCell>
                         <TableCell className="text-muted-foreground text-sm">
                           {s.creator?.name ?? s.creator?.email ?? "—"}
                         </TableCell>
@@ -464,81 +462,94 @@ export default function SchemasPage() {
                       <TableRow key={`${s.id}-datasets`} className="bg-muted/20">
                         <TableCell colSpan={7} className="py-0 pl-16 pr-4">
                           {isExpanded ? (
-                            <div className="py-3 space-y-2">
+                            <div className="relative py-3 pl-6 space-y-2">
+                              <div className="pointer-events-none absolute left-2 -top-3 bottom-0 w-px bg-border/80" />
                               <div className="flex items-center justify-between">
                                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground flex items-center gap-2">
                                   <Database className="h-3.5 w-3.5" />
                                   Datasets ({datasetState.total ?? visibleDatasets.length})
                                 </div>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    resetWorkflow();
-                                    setCurrentSchema(s.id);
-                                    router.push(`/upload?schemaId=${s.id}`);
-                                  }}
-                                >
-                                  <Plus className="mr-1 h-3.5 w-3.5" />
-                                  New dataset
-                                </Button>
+                              </div>
+
+                              <div
+                                className="relative"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  resetWorkflow();
+                                  setCurrentSchema(s.id);
+                                  router.push(`/upload?schemaId=${s.id}`);
+                                }}
+                              >
+                                <div className="absolute left-2 top-1/2 h-px w-4 -translate-y-1/2 bg-border/80" />
+                                <div className="rounded-md border-2 border-primary/40 bg-primary/10 p-3 flex items-center justify-between gap-3 cursor-pointer hover:bg-primary/15 transition-colors">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <PlusCircle className="h-4 w-4 text-primary shrink-0" />
+                                    <div className="min-w-0">
+                                      <div className="text-sm font-semibold text-foreground">Create new dataset</div>
+                                      <div className="text-xs text-muted-foreground">Add transformed rows under this schema</div>
+                                    </div>
+                                  </div>
+                                  <Plus className="h-4 w-4 text-primary shrink-0" />
+                                </div>
                               </div>
 
                               {visibleDatasets.length === 0 ? (
                                 <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                                  No datasets yet. Run a transformation to create the first dataset.
+                                  No datasets yet. Use New dataset to create the first dataset.
                                 </div>
                               ) : (
                                 visibleDatasets.map((d) => (
-                                  <div key={d.id} className="rounded-md border bg-background p-3 flex items-center justify-between gap-3">
-                                    <div
-                                      className="min-w-0 cursor-pointer"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        router.push(`/datasets/${d.id}`);
-                                      }}
-                                    >
-                                      <div className="font-medium truncate">{d.name}</div>
-                                      <div className="text-xs text-muted-foreground">
-                                        {d.rowCount} rows • Created {new Date(d.createdAt).toLocaleDateString()}
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      <Button
-                                        size="sm"
-                                        className="h-9"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          resetWorkflow();
-                                          setCurrentSchema(s.id);
-                                          router.push(`/upload?schemaId=${s.id}&datasetId=${d.id}`);
-                                        }}
-                                      >
-                                        <PlusCircle className="mr-1.5 h-4 w-4" />
-                                        Add to this dataset
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
+                                  <div key={d.id} className="relative">
+                                    <div className="absolute left-2 top-1/2 h-px w-4 -translate-y-1/2 bg-border/80" />
+                                    <div className="rounded-md border bg-background p-3 flex items-center justify-between gap-3">
+                                      <div
+                                        className="min-w-0 cursor-pointer"
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           router.push(`/datasets/${d.id}`);
                                         }}
                                       >
-                                        View
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        className="text-destructive hover:text-destructive"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setDeleteDatasetId(d.id);
-                                        }}
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </Button>
+                                        <div className="font-medium truncate">{d.name}</div>
+                                        <div className="text-xs text-muted-foreground">
+                                          {d.rowCount} rows • Created {new Date(d.createdAt).toLocaleDateString()}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <Button
+                                          size="sm"
+                                          className="h-9"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            resetWorkflow();
+                                            setCurrentSchema(s.id);
+                                            router.push(`/upload?schemaId=${s.id}&datasetId=${d.id}`);
+                                          }}
+                                        >
+                                          <PlusCircle className="mr-1.5 h-4 w-4" />
+                                          Add to this dataset
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            router.push(`/datasets/${d.id}`);
+                                          }}
+                                        >
+                                          View
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="text-destructive hover:text-destructive"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setDeleteDatasetId(d.id);
+                                          }}
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
                                     </div>
                                   </div>
                                 ))
