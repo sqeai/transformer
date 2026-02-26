@@ -28,28 +28,28 @@ const guideSteps = [
     title: "1. Upload & Prepare Data",
     description:
       "Select multiple sheets and define boundaries so AI can clean and unify all selected inputs.",
-    image: "/guides/03-select-multiple-sheets.png",
+    image: "/guides/03-select-multiple-sheets.jpg",
     alt: "Select multiple sheets and prepare raw data",
   },
   {
     title: "2. Let AI Determine Mapping",
     description:
       "Use Auto-map with AI, review suggested links, and confirm each sheet mapping.",
-    image: "/guides/04-ai-mapping-determination.png",
+    image: "/guides/04-ai-mapping-determination.jpg",
     alt: "AI mapping determination screen",
   },
   {
     title: "3. Save Mapping to Schema",
     description:
       "Review schema details and mapped fields, then save and reuse for future datasets.",
-    image: "/guides/02-schema-mapping-result.png",
+    image: "/guides/02-schema-mapping-result.jpg",
     alt: "Schema mapping result and saved output structure",
   },
   {
     title: "4. Export Clean Data",
     description:
       "Export transformed results to XLSX/CSV or downstream destinations after AI-assisted mapping.",
-    image: "/guides/05-data-export.png",
+    image: "/guides/05-data-export.jpg",
     alt: "Data export options after mapping",
   },
 ];
@@ -146,7 +146,7 @@ export default function Home() {
               The screenshot below highlights the mapping canvas where AI links source columns to your target schema.
             </p>
             <img
-              src="/guides/01-ai-mapping-frontpage.png"
+              src="/guides/01-ai-mapping-frontpage.jpg"
               alt="AI mapping canvas showing automatic mapping suggestions"
               className="mt-5 w-full rounded-xl border border-slate-700/90 bg-slate-950/60"
             />
