@@ -2,6 +2,26 @@ import { NextRequest, NextResponse } from "next/server";
 import { parseExcelColumns } from "@/lib/parse-excel";
 import { detectHeaderRowValuesWithLLM } from "@/lib/llm-schema";
 
+function normalizeHeader(value: unknown): string {
+  return (value ?? "")
+    .toString()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function uniqueHeaderValues(values: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const value of values) {
+    const trimmed = normalizeHeader(value);
+    const key = trimmed.toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(trimmed);
+  }
+  return unique;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -20,9 +40,9 @@ export async function POST(request: NextRequest) {
       // Use the LLM to detect header boundaries and build the best header list
       // (including multi-row headers merged into a single label per column).
       const headerValues = await detectHeaderRowValuesWithLLM(buffer, sheetIndex);
-      const fields = headerValues.map((raw, order) => {
-        const trimmed = (raw ?? "").toString().trim();
-        const base = trimmed || `Field_${order + 1}`;
+      const deduped = uniqueHeaderValues(headerValues);
+      const fields = deduped.map((name, order) => {
+        const base = normalizeHeader(name) || `Field_${order + 1}`;
         return {
           id: crypto.randomUUID(),
           name: base,
@@ -40,10 +60,11 @@ export async function POST(request: NextRequest) {
     }
 
     const columns = await parseExcelColumns(buffer, sheetIndex);
-    const fields = columns.map((name, order) => ({
+    const deduped = uniqueHeaderValues(columns);
+    const fields = deduped.map((name, order) => ({
       id: crypto.randomUUID(),
-      name: name.trim() || `Field_${order + 1}`,
-      path: name.trim() || `Field_${order + 1}`,
+      name: normalizeHeader(name) || `Field_${order + 1}`,
+      path: normalizeHeader(name) || `Field_${order + 1}`,
       level: 0,
       order,
       children: [],
