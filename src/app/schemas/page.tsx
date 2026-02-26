@@ -326,7 +326,16 @@ export default function SchemasPage() {
           </div>
         </div>
 
-        {schemas.length === 0 ? (
+        {schemasLoading && schemas.length === 0 ? (
+          <Card>
+            <CardContent className="py-10">
+              <div className="flex items-center justify-center gap-2 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span>Loading schemas...</span>
+              </div>
+            </CardContent>
+          </Card>
+        ) : schemas.length === 0 ? (
           <Card>
             <CardHeader>
               <CardTitle>No schemas yet</CardTitle>
