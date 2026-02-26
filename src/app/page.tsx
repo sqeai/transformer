@@ -1,5 +1,9 @@
+"use client";
+
 import Link from "next/link";
+import { UserCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/useAuth";
 
 const features = [
   {
@@ -51,6 +55,9 @@ const guideSteps = [
 ];
 
 export default function Home() {
+  const { user, loading } = useAuth();
+  const firstName = user?.name?.trim().split(/\s+/)[0] ?? "User";
+
   return (
     <main className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.35),_transparent_45%),radial-gradient(circle_at_bottom_right,_rgba(34,197,94,0.25),_transparent_42%)]" />
@@ -64,12 +71,34 @@ export default function Home() {
             />
           </div>
           <div className="flex items-center gap-2">
-            <Button asChild variant="ghost" className="text-slate-100 hover:bg-slate-800">
-              <Link href="/login">Log in</Link>
-            </Button>
-            <Button asChild className="bg-cyan-400 text-slate-950 hover:bg-cyan-300">
-              <Link href="/signup">Sign up</Link>
-            </Button>
+            {!loading && user ? (
+              <Button
+                asChild
+                variant="ghost"
+                className="text-slate-100 hover:bg-slate-800"
+              >
+                <Link href="/schemas">
+                  <UserCircle2 className="h-5 w-5" />
+                  {`Hi ${firstName}`}
+                </Link>
+              </Button>
+            ) : (
+              <>
+                <Button
+                  asChild
+                  variant="ghost"
+                  className="text-slate-100 hover:bg-slate-800"
+                >
+                  <Link href="/login">Log in</Link>
+                </Button>
+                <Button
+                  asChild
+                  className="bg-cyan-400 text-slate-950 hover:bg-cyan-300"
+                >
+                  <Link href="/signup">Sign up</Link>
+                </Button>
+              </>
+            )}
           </div>
         </header>
 
