@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -56,7 +56,7 @@ interface DatasetListItem {
   updatedAt: string;
 }
 
-export default function DatasetsPage() {
+function DatasetsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { schemas, schemasLoading, setDatasetWorkflow, resetDatasetWorkflow } = useSchemaStore();
@@ -431,5 +431,13 @@ export default function DatasetsPage() {
         </DialogContent>
       </Dialog>
     </DashboardLayout>
+  );
+}
+
+export default function DatasetsPage() {
+  return (
+    <Suspense fallback={null}>
+      <DatasetsPageContent />
+    </Suspense>
   );
 }
