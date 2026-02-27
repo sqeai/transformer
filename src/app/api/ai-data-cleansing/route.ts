@@ -36,9 +36,11 @@ export async function POST(request: NextRequest) {
       columns?: unknown;
       rows?: unknown;
       sheetName?: unknown;
+      userInstructions?: unknown;
     };
     const columns = Array.isArray(body.columns) ? body.columns.map((value) => String(value)) : [];
     const rows = Array.isArray(body.rows) ? body.rows : [];
+    const userInstructions = typeof body.userInstructions === "string" ? body.userInstructions.trim() : "";
 
     if (columns.length === 0 || rows.length === 0) {
       return NextResponse.json(
@@ -59,7 +61,7 @@ export async function POST(request: NextRequest) {
 
     let plan: DataCleansingPlan;
     try {
-      plan = await buildDataCleansingPlanWithLLM(columns, normalizedRows);
+      plan = await buildDataCleansingPlanWithLLM(columns, normalizedRows, userInstructions || undefined);
     } catch {
       plan = normalizePlan(
         {

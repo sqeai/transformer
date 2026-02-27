@@ -79,6 +79,7 @@ function getLeadingWhitespaceCount(value: string): number {
 function parseHierarchyLevelHints(labels: string[]): {
   starLevelByCount: Map<number, number>;
   indentLevelByWidth: Map<number, number>;
+  leafLevel: number;
 } {
   const starCounts = Array.from(
     new Set(
@@ -109,7 +110,11 @@ function parseHierarchyLevelHints(labels: string[]): {
     indentLevelByWidth.set(width, index + 2);
   });
 
-  return { starLevelByCount, indentLevelByWidth };
+  const maxStarLevel = starCounts.length > 0 ? starCounts.length : 0;
+  const maxIndentLevel = indentWidths.length > 0 ? indentWidths.length + 1 : 0;
+  const leafLevel = Math.max(maxStarLevel, maxIndentLevel) + 1;
+
+  return { starLevelByCount, indentLevelByWidth, leafLevel };
 }
 
 function isNumericLike(value: unknown): boolean {
@@ -192,13 +197,13 @@ function flattenHierarchicalRows(
   const labelColumn = plan.hierarchyLabelColumn && columns.includes(plan.hierarchyLabelColumn)
     ? plan.hierarchyLabelColumn
     : inferLabelColumn(columns, rows);
-  const valueColumn = plan.hierarchyValueColumn && columns.includes(plan.hierarchyValueColumn)
-    ? plan.hierarchyValueColumn
-    : inferValueColumn(columns, rows, labelColumn);
-  const maxDepth = Math.max(2, Math.min(8, plan.hierarchyMaxDepth ?? 4));
+  const valueColumns = columns.filter((c) => c !== labelColumn);
 
   const rawLabels = rows.map((row) => String(row[labelColumn] ?? ""));
-  const { starLevelByCount, indentLevelByWidth } = parseHierarchyLevelHints(rawLabels);
+  const { starLevelByCount, indentLevelByWidth, leafLevel } = parseHierarchyLevelHints(rawLabels);
+
+  const maxDepth = Math.max(2, Math.min(8, plan.hierarchyMaxDepth ?? leafLevel));
+  const clampedLeafLevel = Math.max(1, Math.min(maxDepth, leafLevel));
   const stack: string[] = Array(maxDepth).fill("");
   const levels: number[] = [];
   const isHeaderLikeByRow: boolean[] = [];
@@ -211,7 +216,7 @@ function flattenHierarchicalRows(
     return false;
   };
 
-  const detectLevel = (rawLabel: string, previousLevel: number): number => {
+  const detectLevel = (rawLabel: string, _previousLevel: number): number => {
     const starMatch = rawLabel.match(/^\s*(\*+)\s*/);
     if (starMatch) {
       const count = starMatch[1].length;
@@ -228,9 +233,9 @@ function flattenHierarchicalRows(
       return 1;
     }
     if (/^\d{3,}/.test(normalized)) {
-      return Math.max(1, Math.min(maxDepth, previousLevel + 1));
+      return clampedLeafLevel;
     }
-    return Math.max(1, Math.min(maxDepth, previousLevel));
+    return clampedLeafLevel;
   };
 
   let previousLevel = 1;
@@ -247,7 +252,8 @@ function flattenHierarchicalRows(
     previousLevel = level;
   }
 
-  const flattenedColumns = Array.from({ length: maxDepth }, (_, i) => `nesting_level_${i + 1}`).concat(["value"]);
+  const nestingColumns = Array.from({ length: maxDepth }, (_, i) => `nesting_level_${i + 1}`);
+  const flattenedColumns = [...nestingColumns, ...valueColumns];
   const flattenedRows: Record<string, unknown>[] = [];
 
   for (let i = 0; i < rows.length; i++) {
@@ -277,7 +283,9 @@ function flattenHierarchicalRows(
     for (let d = 0; d < maxDepth; d++) {
       out[`nesting_level_${d + 1}`] = stack[d] ?? "";
     }
-    out.value = rows[i][valueColumn] ?? "";
+    for (const vc of valueColumns) {
+      out[vc] = rows[i][vc] ?? "";
+    }
     flattenedRows.push(out);
   }
 

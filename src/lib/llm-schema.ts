@@ -141,6 +141,18 @@ Return a conservative cleansing plan for:
 2) Row filtering: identify if empty rows and total/subtotal rows should be removed.
 3) Hierarchy flattening: decide if parent/child rows should be flattened into columns nesting_level_1 (topmost), nesting_level_2, nesting_level_3, … and value. Level 1 is the top of the hierarchy; deeper nesting uses 2, 3, etc.
 
+Hierarchy detection guidelines:
+- Financial statements (trial balances, balance sheets, income statements) typically use a star/asterisk convention to indicate hierarchy depth.
+- MORE stars = HIGHER / BROADER level (closer to root). For example:
+  - "*** ASET" (3 stars) → nesting_level_1 (topmost category)
+  - "** Kas dan setara kas" (2 stars) → nesting_level_2 (sub-category)
+  - "* Current accounts" (1 star) → nesting_level_3 (sub-sub-category)
+  - "1111011 Petty Cash - Balikpapan" (no stars, starts with account code) → deepest leaf level (individual line items)
+- Rows starting with a numeric account code (e.g. "1111011", "2101001") are leaf-level line items (the deepest nesting level).
+- Rows with stars or special markers that do NOT start with a numeric code are parent/header rows.
+- The hierarchyMaxDepth should match the number of distinct nesting levels present (e.g. 3 if you see ***, **, and leaf items; 4 if you also see * rows).
+- When hierarchy is detected, set flattenHierarchy to true.
+
 Rules:
 - Only include a column in paddingColumns when forward-fill is likely correct.
 - Prefer removing obviously redundant rows (empty rows, total/subtotal/grand total rows).
@@ -515,6 +527,7 @@ export async function autoMapColumnsWithLLM(
 export async function buildDataCleansingPlanWithLLM(
   columns: string[],
   rows: Record<string, unknown>[],
+  userInstructions?: string,
 ): Promise<DataCleansingPlan> {
   const safeRows = rows.slice(0, 120).map((row) => {
     const normalized: Record<string, string> = {};
@@ -526,13 +539,26 @@ export async function buildDataCleansingPlanWithLLM(
     return normalized;
   });
 
-  const prompt = [
+  const promptParts: string[] = [];
+  if (userInstructions) {
+    promptParts.push(
+      "=== USER INSTRUCTIONS (HIGHEST PRIORITY — follow these first) ===",
+      userInstructions,
+      "=== END USER INSTRUCTIONS ===\n",
+    );
+  }
+  promptParts.push(
     `Columns (${columns.length}): ${JSON.stringify(columns)}`,
     `Sample rows (${safeRows.length}):`,
     JSON.stringify(safeRows),
-  ].join("\n\n");
+  );
+  const prompt = promptParts.join("\n\n");
 
-  const text = await callLlm(DATA_CLEANSING_PLAN_PROMPT, prompt);
+  const systemPrompt = userInstructions
+    ? `${DATA_CLEANSING_PLAN_PROMPT}\n\nCRITICAL: The user has provided explicit instructions for how to cleanse the data. You MUST treat these as the primary source of truth. Prioritise the user's instructions over any default heuristics or assumptions. If the user specifies column roles, structure, or transformations, apply them exactly. Only fall back to the generic rules above for aspects the user did not specify.`
+    : DATA_CLEANSING_PLAN_PROMPT;
+
+  const text = await callLlm(systemPrompt, prompt);
 
   let parsed: Partial<DataCleansingPlan>;
   try {

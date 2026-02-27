@@ -6,115 +6,85 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
 import type {
-  ColumnMapping,
-  DefaultValues,
   FinalSchema,
-  PivotConfig,
-  RawColumn,
   SchemaField,
-  VerticalPivotConfig,
 } from "./types";
 import { idbGet, idbSet, idbDelete } from "./idb-storage";
 import { useAuth } from "@/hooks/useAuth";
 
-const WORKFLOW_STORAGE_KEY = "ai_data_cleanser_workflow";
-const IDB_RAW_COLUMNS_KEY = "workflow_rawColumns";
-const IDB_RAW_ROWS_KEY = "workflow_rawRows";
-const IDB_UPLOAD_STATE_KEY = "workflow_uploadState";
+const IDB_DATASET_WORKFLOW_KEY = "dataset_workflow";
 
 const api = (path: string, init?: RequestInit) =>
   fetch(path, { ...init, credentials: "include" });
 
-interface WorkflowState {
-  currentSchemaId: string | null;
-  rawColumns: RawColumn[];
-  rawRows: Record<string, unknown>[];
-  columnMappings: ColumnMapping[];
-  pivotConfig: PivotConfig;
-  verticalPivotConfig: VerticalPivotConfig;
-  defaultValues: DefaultValues;
-  /** Persisted upload page state so we can restore when navigating back to /upload */
-  uploadState: {
-    schemaId: string;
-    step: string;
-    preview?: unknown;
-    boundary?: unknown;
-    analysis?: unknown;
-    uploadMode?: "structured" | "unstructured";
-    structuredMapping?: unknown;
-    unstructured?: unknown;
-    datasetTargetId?: string;
-  } | null;
+export interface UploadedFileEntry {
+  fileId: string;
+  fileName: string;
+  buffer: ArrayBuffer;
+  sheetNames: string[];
 }
 
-/** Lightweight subset stored in localStorage (no large arrays). */
-interface WorkflowMeta {
-  currentSchemaId: string | null;
-  columnMappings: ColumnMapping[];
-  pivotConfig: PivotConfig;
-  verticalPivotConfig: VerticalPivotConfig;
-  defaultValues: DefaultValues;
+export interface SheetSelection {
+  fileId: string;
+  fileName: string;
+  sheetIndex: number;
+  sheetName: string;
 }
 
-function loadWorkflowMeta(): WorkflowMeta | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const w = localStorage.getItem(WORKFLOW_STORAGE_KEY);
-    return w ? JSON.parse(w) : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveWorkflowMeta(workflow: WorkflowState) {
-  if (typeof window === "undefined") return;
-  const meta: WorkflowMeta = {
-    currentSchemaId: workflow.currentSchemaId,
-    columnMappings: workflow.columnMappings,
-    pivotConfig: workflow.pivotConfig,
-    verticalPivotConfig: workflow.verticalPivotConfig,
-    defaultValues: workflow.defaultValues,
+export interface SheetJobResult {
+  jobId: string;
+  sheet: SheetSelection;
+  status: "pending" | "running" | "completed" | "failed";
+  result?: {
+    transformedColumns: string[];
+    transformedRows: Record<string, unknown>[];
+    toolsUsed: Array<{ tool: string; params: Record<string, unknown> }>;
+    pipeline: PipelineDescriptor;
   };
-  localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(meta));
+  error?: string;
 }
 
-async function saveWorkflowLargeData(workflow: WorkflowState) {
-  await Promise.all([
-    idbSet(IDB_RAW_COLUMNS_KEY, workflow.rawColumns),
-    idbSet(IDB_RAW_ROWS_KEY, workflow.rawRows),
-    idbSet(IDB_UPLOAD_STATE_KEY, workflow.uploadState),
-  ]);
+export interface PipelineNode {
+  id: string;
+  type: "source" | "filter" | "unpivot" | "expand" | "aggregate" | "map" | "target";
+  label: string;
+  data: Record<string, unknown>;
 }
 
-async function loadWorkflowLargeData(): Promise<{
-  rawColumns: RawColumn[];
-  rawRows: Record<string, unknown>[];
-  uploadState: WorkflowState["uploadState"];
-}> {
-  const [rawColumns, rawRows, uploadState] = await Promise.all([
-    idbGet<RawColumn[]>(IDB_RAW_COLUMNS_KEY),
-    idbGet<Record<string, unknown>[]>(IDB_RAW_ROWS_KEY),
-    idbGet<WorkflowState["uploadState"]>(IDB_UPLOAD_STATE_KEY),
-  ]);
-  return {
-    rawColumns: rawColumns ?? [],
-    rawRows: rawRows ?? [],
-    uploadState: uploadState ?? null,
-  };
+export interface PipelineEdge {
+  id: string;
+  source: string;
+  target: string;
 }
 
-async function clearWorkflowLargeData() {
-  await Promise.all([
-    idbDelete(IDB_RAW_COLUMNS_KEY),
-    idbDelete(IDB_RAW_ROWS_KEY),
-    idbDelete(IDB_UPLOAD_STATE_KEY),
-  ]);
+export interface PipelineDescriptor {
+  nodes: PipelineNode[];
+  edges: PipelineEdge[];
 }
+
+export interface DatasetWorkflowState {
+  schemaId: string | null;
+  step: "upload" | "processing" | "review" | "export";
+  files: UploadedFileEntry[];
+  selectedSheets: SheetSelection[];
+  jobResults: SheetJobResult[];
+  confirmedSheetIds: string[];
+  exportTargetDatasetId: string | null;
+}
+
+const defaultDatasetWorkflow: DatasetWorkflowState = {
+  schemaId: null,
+  step: "upload",
+  files: [],
+  selectedSheets: [],
+  jobResults: [],
+  confirmedSheetIds: [],
+  exportTargetDatasetId: null,
+};
 
 interface SchemaStoreContextType {
   schemas: FinalSchema[];
@@ -123,33 +93,10 @@ interface SchemaStoreContextType {
   updateSchema: (id: string, updates: Partial<FinalSchema>) => Promise<void>;
   deleteSchema: (id: string) => Promise<void>;
   getSchema: (id: string) => FinalSchema | undefined;
-  workflow: WorkflowState;
-  setCurrentSchema: (id: string | null) => void;
-  setRawData: (columns: RawColumn[], rows: Record<string, unknown>[]) => void;
-  setColumnMappings: (mappings: ColumnMapping[]) => void;
-  setPivotConfig: (config: PivotConfig) => void;
-  setVerticalPivotConfig: (config: VerticalPivotConfig) => void;
-  setDefaultValues: (values: DefaultValues) => void;
-  resetWorkflow: () => void;
-  setUploadState: (state: WorkflowState["uploadState"]) => void;
+  datasetWorkflow: DatasetWorkflowState;
+  setDatasetWorkflow: (state: Partial<DatasetWorkflowState>) => void;
+  resetDatasetWorkflow: () => void;
 }
-
-const defaultVerticalPivotConfig: VerticalPivotConfig = {
-  enabled: false,
-  outputTargetPaths: [],
-  columns: [],
-};
-
-const defaultWorkflow: WorkflowState = {
-  currentSchemaId: null,
-  rawColumns: [],
-  rawRows: [],
-  columnMappings: [],
-  pivotConfig: { enabled: false, groupByColumns: [] },
-  verticalPivotConfig: defaultVerticalPivotConfig,
-  defaultValues: {},
-  uploadState: null,
-};
 
 const SchemaStoreContext = createContext<SchemaStoreContextType | undefined>(
   undefined,
@@ -159,11 +106,9 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [schemas, setSchemas] = useState<FinalSchema[]>([]);
   const [schemasLoading, setSchemasLoading] = useState(true);
-  const [workflow, setWorkflow] = useState<WorkflowState>(defaultWorkflow);
+  const [datasetWorkflow, setDatasetWorkflowState] = useState<DatasetWorkflowState>(defaultDatasetWorkflow);
   const [hydrated, setHydrated] = useState(false);
-  const prevWorkflowRef = useRef<WorkflowState>(defaultWorkflow);
 
-  // Load schemas from API when user is set
   useEffect(() => {
     if (!user) {
       setSchemas([]);
@@ -181,48 +126,22 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
   }, [user?.id]);
 
   useEffect(() => {
-    const meta = loadWorkflowMeta();
-
-    loadWorkflowLargeData()
-      .then((large) => {
-        const restored: WorkflowState = {
-          currentSchemaId: meta?.currentSchemaId ?? null,
-          columnMappings: meta?.columnMappings ?? [],
-          pivotConfig: meta?.pivotConfig ?? defaultWorkflow.pivotConfig,
-          verticalPivotConfig: meta?.verticalPivotConfig ?? defaultVerticalPivotConfig,
-          defaultValues: meta?.defaultValues ?? {},
-          rawColumns: large.rawColumns,
-          rawRows: large.rawRows,
-          uploadState: large.uploadState,
-        };
-        setWorkflow(restored);
-        prevWorkflowRef.current = restored;
+    idbGet<DatasetWorkflowState>(IDB_DATASET_WORKFLOW_KEY)
+      .then((saved) => {
+        if (saved) {
+          setDatasetWorkflowState(saved);
+        }
         setHydrated(true);
       })
       .catch(() => {
-        if (meta) {
-          setWorkflow((w) => ({ ...w, ...meta }));
-        }
         setHydrated(true);
       });
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
-    const prev = prevWorkflowRef.current;
-    prevWorkflowRef.current = workflow;
-
-    saveWorkflowMeta(workflow);
-
-    const largeDataChanged =
-      prev.rawColumns !== workflow.rawColumns ||
-      prev.rawRows !== workflow.rawRows ||
-      prev.uploadState !== workflow.uploadState;
-
-    if (largeDataChanged) {
-      saveWorkflowLargeData(workflow).catch(() => {});
-    }
-  }, [workflow, hydrated]);
+    idbSet(IDB_DATASET_WORKFLOW_KEY, datasetWorkflow).catch(() => {});
+  }, [datasetWorkflow, hydrated]);
 
   const addSchema = useCallback(async (schema: FinalSchema) => {
     const res = await api("/api/schemas", {
@@ -275,51 +194,14 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
     [schemas],
   );
 
-  const setCurrentSchema = useCallback((currentSchemaId: string | null) => {
-    setWorkflow((w) => ({ ...w, currentSchemaId }));
+  const setDatasetWorkflow = useCallback((updates: Partial<DatasetWorkflowState>) => {
+    setDatasetWorkflowState((prev) => ({ ...prev, ...updates }));
   }, []);
 
-  const setRawData = useCallback(
-    (rawColumns: RawColumn[], rawRows: Record<string, unknown>[]) => {
-      setWorkflow((w) => ({
-        ...w,
-        rawColumns,
-        rawRows,
-      }));
-    },
-    [],
-  );
-
-  const setColumnMappings = useCallback((columnMappings: ColumnMapping[]) => {
-    setWorkflow((w) => ({ ...w, columnMappings }));
+  const resetDatasetWorkflow = useCallback(() => {
+    setDatasetWorkflowState(defaultDatasetWorkflow);
+    idbDelete(IDB_DATASET_WORKFLOW_KEY).catch(() => {});
   }, []);
-
-  const setPivotConfig = useCallback((pivotConfig: PivotConfig) => {
-    setWorkflow((w) => ({ ...w, pivotConfig }));
-  }, []);
-
-  const setVerticalPivotConfig = useCallback((verticalPivotConfig: VerticalPivotConfig) => {
-    setWorkflow((w) => ({ ...w, verticalPivotConfig }));
-  }, []);
-
-  const setDefaultValues = useCallback((defaultValues: DefaultValues) => {
-    setWorkflow((w) => ({ ...w, defaultValues }));
-  }, []);
-
-  const resetWorkflow = useCallback(() => {
-    setWorkflow(defaultWorkflow);
-    if (typeof window !== "undefined") {
-      localStorage.removeItem(WORKFLOW_STORAGE_KEY);
-      clearWorkflowLargeData().catch(() => {});
-    }
-  }, []);
-
-  const setUploadState = useCallback(
-    (uploadState: WorkflowState["uploadState"]) => {
-      setWorkflow((w) => ({ ...w, uploadState }));
-    },
-    [],
-  );
 
   const value = useMemo(
     () => ({
@@ -329,15 +211,9 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
       updateSchema,
       deleteSchema,
       getSchema,
-      workflow,
-      setCurrentSchema,
-      setRawData,
-      setColumnMappings,
-      setPivotConfig,
-      setVerticalPivotConfig,
-      setDefaultValues,
-      resetWorkflow,
-      setUploadState,
+      datasetWorkflow,
+      setDatasetWorkflow,
+      resetDatasetWorkflow,
     }),
     [
       schemas,
@@ -346,15 +222,9 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
       updateSchema,
       deleteSchema,
       getSchema,
-      workflow,
-      setCurrentSchema,
-      setRawData,
-      setColumnMappings,
-      setPivotConfig,
-      setVerticalPivotConfig,
-      setDefaultValues,
-      resetWorkflow,
-      setUploadState,
+      datasetWorkflow,
+      setDatasetWorkflow,
+      resetDatasetWorkflow,
     ],
   );
 

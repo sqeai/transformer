@@ -7,7 +7,7 @@ import {
   type JobRow,
 } from "@/lib/jobs-db";
 import { AI_DATA_CLEANSER_MAX_CONCURRENCY } from "@/lib/jobs-config";
-import { extractUnstructuredRecordWithLLM } from "@/lib/llm-schema";
+import { runDataCleanser } from "@/lib/agent/data-cleanser";
 
 export async function POST(_request: NextRequest) {
   return processJobs();
@@ -22,32 +22,40 @@ async function processJobs() {
     const supabase = createAdminClient();
     const limit = AI_DATA_CLEANSER_MAX_CONCURRENCY;
 
-    // Claim up to max_concurrency pending jobs
     const jobs = await claimNextPendingJobs(supabase, limit);
 
     if (jobs.length === 0) {
       return NextResponse.json({ processed: 0, message: "No pending jobs" });
     }
 
-    // Process each job
     const results = await Promise.allSettled(
       jobs.map(async (job: JobRow) => {
         try {
-          if (job.type !== "extract_unstructured") {
+          if (job.type !== "data_cleanse") {
             throw new Error(`Unknown job type: ${job.type}`);
           }
 
-          const payload = job.payload as { sheetText?: string; targetPaths?: string[] };
-          if (!payload?.sheetText || !Array.isArray(payload?.targetPaths)) {
-            throw new Error("Invalid payload: missing sheetText or targetPaths");
+          const payload = job.payload as {
+            columns?: string[];
+            rows?: Record<string, unknown>[];
+            targetPaths?: string[];
+            sheetName?: string;
+            userDirective?: string;
+          };
+
+          if (!Array.isArray(payload?.columns) || !Array.isArray(payload?.rows) || !Array.isArray(payload?.targetPaths)) {
+            throw new Error("Invalid payload: missing columns, rows, or targetPaths");
           }
 
-          const { record, mapping } = await extractUnstructuredRecordWithLLM(
-            payload.sheetText,
-            payload.targetPaths,
-          );
+          const result = await runDataCleanser({
+            columns: payload.columns,
+            rows: payload.rows,
+            targetPaths: payload.targetPaths,
+            sheetName: payload.sheetName ?? "Sheet",
+            userDirective: payload.userDirective,
+          });
 
-          await updateJobResult(supabase, job.id, { record, mapping });
+          await updateJobResult(supabase, job.id, result);
           return { jobId: job.id, status: "completed" };
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);

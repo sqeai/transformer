@@ -37,6 +37,8 @@ interface DataPreviewTableProps {
   loadingMore?: boolean;
   /** Rendered between the preview row-count warning and the data table */
   slotAfterWarning?: React.ReactNode;
+  /** Rendered above the boundary settings panel (e.g. AI cleansing preview) */
+  slotAboveBoundary?: React.ReactNode;
 }
 
 export default function DataPreviewTable({
@@ -48,6 +50,7 @@ export default function DataPreviewTable({
   onLoadMore,
   loadingMore,
   slotAfterWarning,
+  slotAboveBoundary,
 }: DataPreviewTableProps) {
   const maxRowIdx = Math.max(0, totalRows - 1);
   const maxColIdx = Math.max(0, totalColumns - 1);
@@ -342,6 +345,10 @@ export default function DataPreviewTable({
           </Button>
         </div>
       </CardHeader>
+
+      {slotAboveBoundary != null && (
+        <CardContent className="border-t pt-4 pb-2">{slotAboveBoundary}</CardContent>
+      )}
 
       {showSettings && (
         <CardContent className="border-t pt-4 pb-4">

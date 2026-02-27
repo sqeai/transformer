@@ -8,9 +8,6 @@ import {
   Sparkles,
   FileStack,
   Database,
-  ArrowRightLeft,
-  Eye,
-  Download,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -27,11 +24,8 @@ import {
   TooltipProvider,
 } from "@/components/ui/tooltip";
 const nav = [
-  { name: "Final Schemas", href: "/schemas", icon: FileStack },
-  { name: "Upload raw data", href: "/upload", icon: Database },
-  { name: "Mapping Builder", href: "/mapping", icon: ArrowRightLeft },
-  { name: "Preview", href: "/preview", icon: Eye },
-  { name: "Export", href: "/export", icon: Download },
+  { name: "Schemas", href: "/schemas", icon: FileStack },
+  { name: "Datasets", href: "/datasets", icon: Database },
 ];
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";

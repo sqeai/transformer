@@ -35,15 +35,12 @@ import {
 } from "@/components/ui/collapsible";
 import { useChatContext, STORAGE_KEY } from "@/components/ChatProvider";
 import { useSchemaStore } from "@/lib/schema-store";
-import type { SchemaField, ColumnMapping, PivotConfig } from "@/lib/types";
+import type { SchemaField } from "@/lib/types";
 import { toast } from "sonner";
 
 interface ToolResultPayload {
-  type: "schema_update" | "mappings_update" | "pivot_update" | "set_pivot_config" | "set_edges";
+  type: "schema_update";
   schema?: { name: string; fields: SchemaField[] };
-  mappings?: ColumnMapping[];
-  pivotConfig?: PivotConfig;
-  edges?: { rawColumn: string; targetPath: string }[];
 }
 
 const DELIMITER_REGEX = /<!-- (?:SCHEMA_JSON|MAPPINGS_JSON|PIVOT_JSON|EDGES_JSON):(.*?) -->/g;
@@ -197,10 +194,7 @@ export function ChatBubble() {
   const { messages, sendMessage, setMessages, status } = useChatContext();
   const {
     schemas,
-    workflow,
     updateSchema,
-    setColumnMappings,
-    setPivotConfig,
   } = useSchemaStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -208,9 +202,7 @@ export function ChatBubble() {
 
   const isLoading = status === "streaming" || status === "submitted";
 
-  const currentSchema = workflow.currentSchemaId
-    ? schemas.find((s) => s.id === workflow.currentSchemaId)
-    : schemas[0];
+  const currentSchema = schemas[0];
 
   const applyPayload = useCallback(
     (payload: ToolResultPayload) => {
@@ -224,28 +216,9 @@ export function ChatBubble() {
           fields: payload.schema.fields,
         });
         toast.success("Schema updated by assistant");
-      } else if (payload.type === "mappings_update" && payload.mappings) {
-        appliedPayloads.current.add(key);
-        setColumnMappings(payload.mappings);
-        toast.success("Column mappings updated by assistant");
-      } else if (
-        (payload.type === "pivot_update" || payload.type === "set_pivot_config") &&
-        payload.pivotConfig
-      ) {
-        appliedPayloads.current.add(key);
-        setPivotConfig(payload.pivotConfig);
-        toast.success("Pivot config updated by assistant");
-      } else if (payload.type === "set_edges" && payload.edges) {
-        appliedPayloads.current.add(key);
-        const mappings: ColumnMapping[] = payload.edges.map((e) => ({
-          rawColumn: e.rawColumn,
-          targetPath: e.targetPath,
-        }));
-        setColumnMappings(mappings);
-        toast.success("Mapping edges updated by assistant");
       }
     },
-    [currentSchema, updateSchema, setColumnMappings, setPivotConfig],
+    [currentSchema, updateSchema],
   );
 
   // Scan all assistant messages for delimited payloads in text content
@@ -290,11 +263,8 @@ export function ChatBubble() {
         name: currentSchema.name,
         fields: currentSchema.fields,
       },
-      rawColumns: workflow.rawColumns,
-      columnMappings: workflow.columnMappings,
-      pivotConfig: workflow.pivotConfig,
     });
-  }, [currentSchema, workflow]);
+  }, [currentSchema]);
 
   const onSubmit = useCallback(
     (e: FormEvent) => {

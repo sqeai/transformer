@@ -7,30 +7,36 @@ export async function GET(request: NextRequest) {
   const { supabase } = auth;
 
   const { searchParams } = new URL(request.url);
-  const schemaId = searchParams.get("schemaId")?.trim();
-  const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "5") || 5, 1), 50);
+  const schemaId = searchParams.get("schemaId")?.trim() || null;
+  const search = searchParams.get("search")?.trim() || null;
+  const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "20") || 20, 1), 100);
   const offset = Math.max(Number(searchParams.get("offset") ?? "0") || 0, 0);
 
-  if (!schemaId) {
-    return NextResponse.json({ error: "schemaId is required" }, { status: 400 });
-  }
-
-  const { data: rows, error } = await supabase!
+  let query = supabase!
     .from("datasets")
-    .select("id, schema_id, name, row_count, created_at, updated_at", { count: "exact" })
-    .eq("schema_id", schemaId)
+    .select("id, schema_id, name, row_count, created_at, updated_at, schemas!inner(name)", { count: "exact" })
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);
+
+  if (schemaId) {
+    query = query.eq("schema_id", schemaId);
+  }
+
+  if (search) {
+    query = query.ilike("name", `%${search}%`);
+  }
+
+  const { data: rows, error, count } = await query;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const count = (rows as unknown as { count?: number })?.count; // defensive no-op for TS shape variance
   return NextResponse.json({
-    datasets: (rows ?? []).map((r: { id: string; schema_id: string; name: string; row_count: number; created_at: string; updated_at: string }) => ({
+    datasets: (rows ?? []).map((r: Record<string, unknown>) => ({
       id: r.id,
       schemaId: r.schema_id,
+      schemaName: (r.schemas as Record<string, unknown>)?.name ?? null,
       name: r.name,
       rowCount: r.row_count ?? 0,
       createdAt: r.created_at,
@@ -92,7 +98,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // bump schema.updated_at so schema list ordering reflects dataset creation
   await supabase!.from("schemas").update({ updated_at: new Date().toISOString() }).eq("id", schemaId);
 
   return NextResponse.json({
