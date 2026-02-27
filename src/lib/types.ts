@@ -1,3 +1,16 @@
+export const SQL_COMPATIBLE_TYPES = [
+  "STRING",
+  "INTEGER",
+  "FLOAT",
+  "NUMERIC",
+  "BOOLEAN",
+  "DATE",
+  "DATETIME",
+  "TIMESTAMP",
+] as const;
+
+export type SqlCompatibleType = (typeof SQL_COMPATIBLE_TYPES)[number];
+
 export interface SchemaField {
   id: string;
   name: string;
@@ -6,6 +19,7 @@ export interface SchemaField {
   order: number;
   description?: string;
   defaultValue?: string;
+  dataType?: SqlCompatibleType;
   children?: SchemaField[];
 }
 

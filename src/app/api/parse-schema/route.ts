@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseExcelColumns } from "@/lib/parse-excel";
-import { detectHeaderRowValuesWithLLM } from "@/lib/llm-schema";
+import { detectHeaderRowValuesWithLLM, recommendFieldTypesWithLLM } from "@/lib/llm-schema";
 
 function normalizeHeader(value: unknown): string {
   return (value ?? "")
@@ -41,6 +41,12 @@ export async function POST(request: NextRequest) {
       // (including multi-row headers merged into a single label per column).
       const headerValues = await detectHeaderRowValuesWithLLM(buffer, sheetIndex);
       const deduped = uniqueHeaderValues(headerValues);
+      let typeByPath: Record<string, string> = {};
+      try {
+        typeByPath = await recommendFieldTypesWithLLM(deduped);
+      } catch {
+        typeByPath = {};
+      }
       const fields = deduped.map((name, order) => {
         const base = normalizeHeader(name) || `Field_${order + 1}`;
         return {
@@ -49,6 +55,7 @@ export async function POST(request: NextRequest) {
           path: base,
           level: 0,
           order,
+          dataType: typeByPath[base] ?? "STRING",
           children: [],
         };
       });
@@ -61,12 +68,19 @@ export async function POST(request: NextRequest) {
 
     const columns = await parseExcelColumns(buffer, sheetIndex);
     const deduped = uniqueHeaderValues(columns);
+    let typeByPath: Record<string, string> = {};
+    try {
+      typeByPath = await recommendFieldTypesWithLLM(deduped);
+    } catch {
+      typeByPath = {};
+    }
     const fields = deduped.map((name, order) => ({
       id: crypto.randomUUID(),
       name: normalizeHeader(name) || `Field_${order + 1}`,
       path: normalizeHeader(name) || `Field_${order + 1}`,
       level: 0,
       order,
+      dataType: typeByPath[normalizeHeader(name) || `Field_${order + 1}`] ?? "STRING",
       children: [],
     }));
     return NextResponse.json({ fields });

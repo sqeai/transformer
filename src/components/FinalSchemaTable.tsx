@@ -36,6 +36,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   GripVertical,
   TableProperties,
   Plus,
@@ -48,7 +55,7 @@ import {
   Save,
   X,
 } from "lucide-react";
-import type { SchemaField, FinalSchema } from "@/lib/types";
+import { SQL_COMPATIBLE_TYPES, type SchemaField, type FinalSchema, type SqlCompatibleType } from "@/lib/types";
 
 interface FinalSchemaTableProps {
   schema: FinalSchema;
@@ -123,6 +130,7 @@ function SortableRow({
   onRename,
   onDescriptionChange,
   onDefaultValueChange,
+  onDataTypeChange,
   onRemove,
   readOnly = false,
 }: {
@@ -131,6 +139,7 @@ function SortableRow({
   onRename: (index: number, name: string) => void;
   onDescriptionChange: (index: number, desc: string) => void;
   onDefaultValueChange: (index: number, val: string) => void;
+  onDataTypeChange: (index: number, dataType: SqlCompatibleType) => void;
   onRemove: (index: number) => void;
   readOnly?: boolean;
 }) {
@@ -182,6 +191,24 @@ function SortableRow({
           readOnly={readOnly}
           className="h-7 text-xs border-transparent bg-transparent hover:border-border focus:border-border shadow-none"
         />
+      </TableCell>
+      <TableCell className="p-1">
+        <Select
+          value={item.field.dataType ?? "STRING"}
+          onValueChange={(value) => onDataTypeChange(index, value as SqlCompatibleType)}
+          disabled={readOnly}
+        >
+          <SelectTrigger className="h-7 text-xs border-transparent bg-transparent hover:border-border focus:border-border shadow-none">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SQL_COMPATIBLE_TYPES.map((sqlType) => (
+              <SelectItem key={sqlType} value={sqlType} className="text-xs">
+                {sqlType}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </TableCell>
       <TableCell className="p-1">
         <Input
@@ -336,6 +363,7 @@ export default function FinalSchemaTable({
       if (draft.path !== current.path) return true;
       if (draft.field.name !== current.field.name) return true;
       if ((draft.field.description ?? "") !== (current.field.description ?? "")) return true;
+      if ((draft.field.dataType ?? "STRING") !== (current.field.dataType ?? "STRING")) return true;
       if ((draft.field.defaultValue ?? "") !== (current.field.defaultValue ?? "")) return true;
     }
     return false;
@@ -436,6 +464,16 @@ export default function FinalSchemaTable({
     [flat],
   );
 
+  const handleDataTypeChange = useCallback(
+    (index: number, dataType: SqlCompatibleType) => {
+      const next = flat.map((item, i) =>
+        i === index ? { ...item, field: { ...item.field, dataType } } : item,
+      );
+      setDraftFlat(next);
+    },
+    [flat],
+  );
+
   const handleRemove = useCallback(
     (index: number) => {
       setDraftFlat(flat.filter((_, i) => i !== index));
@@ -450,6 +488,7 @@ export default function FinalSchemaTable({
       path: `field_${flat.length + 1}`,
       level: 0,
       order: flat.length,
+      dataType: "STRING",
     };
     setDraftFlat([...flat, { field: newField, path: newField.name }]);
   }, [flat]);
@@ -535,6 +574,7 @@ export default function FinalSchemaTable({
                       <TableHead className="w-8 text-center text-[10px]">#</TableHead>
                       <TableHead className="text-xs">Name</TableHead>
                       <TableHead className="text-xs">Description</TableHead>
+                      <TableHead className="text-xs">Type</TableHead>
                       <TableHead className="text-xs">Default</TableHead>
                       <TableHead className="text-xs">Path</TableHead>
                       <TableHead className="w-8 px-1" />
@@ -549,6 +589,7 @@ export default function FinalSchemaTable({
                         onRename={handleRename}
                         onDescriptionChange={handleDescriptionChange}
                         onDefaultValueChange={handleDefaultValueChange}
+                        onDataTypeChange={handleDataTypeChange}
                         onRemove={handleRemove}
                         readOnly={tableReadOnly}
                       />

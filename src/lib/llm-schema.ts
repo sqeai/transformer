@@ -1,6 +1,7 @@
 import { ChatAnthropic } from "@langchain/anthropic";
 import { HumanMessage, type BaseMessage } from "@langchain/core/messages";
 import { createAgent } from "langchain";
+import { SQL_COMPATIBLE_TYPES, type SqlCompatibleType } from "./types";
 import type { SchemaField, ColumnMapping, DefaultValues, PivotConfig, AggregationFunction, VerticalPivotConfig, VerticalPivotColumn } from "./types";
 import {
   extractWorkbookPreview,
@@ -18,19 +19,23 @@ Rules:
 5. Preserve a logical ordering that groups related fields together.
 6. Keep the schema practical — nest where it adds clarity, but avoid unnecessary depth.
 
+Use only these SQL/BigQuery-compatible data types:
+- STRING, INTEGER, FLOAT, NUMERIC, BOOLEAN, DATE, DATETIME, TIMESTAMP
+
 Respond ONLY with a JSON array (no markdown fences, no commentary). Each element must have:
 - "name": string (clean display name)
 - "path": string (dot-separated path, e.g. "address.city")
 - "level": number (nesting level: 1 = topmost, 2 = first nesting, 3 = second, etc.)
 - "originalColumn": string (the raw header this maps to, or "" for group parents)
+- "dataType": string (one of: STRING, INTEGER, FLOAT, NUMERIC, BOOLEAN, DATE, DATETIME, TIMESTAMP)
 
 Example output:
 [
-  {"name":"id","path":"id","level":1,"originalColumn":"Customer ID"},
-  {"name":"name","path":"name","level":1,"originalColumn":""},
-  {"name":"first","path":"name.first","level":2,"originalColumn":"First Name"},
-  {"name":"last","path":"name.last","level":2,"originalColumn":"Last Name"},
-  {"name":"email","path":"email","level":1,"originalColumn":"Email Address"}
+  {"name":"id","path":"id","level":1,"originalColumn":"Customer ID","dataType":"STRING"},
+  {"name":"name","path":"name","level":1,"originalColumn":"","dataType":"STRING"},
+  {"name":"first","path":"name.first","level":2,"originalColumn":"First Name","dataType":"STRING"},
+  {"name":"last","path":"name.last","level":2,"originalColumn":"Last Name","dataType":"STRING"},
+  {"name":"email","path":"email","level":1,"originalColumn":"Email Address","dataType":"STRING"}
 ]`;
 
 const RAW_DATA_ANALYSIS_PROMPT = `You are the "Header detection agent", a data analyst specialising in messy spreadsheet data. You will receive a raw preview of an Excel/CSV file that may contain:
@@ -99,6 +104,18 @@ Rules for vertical pivot (unpivot/melt):
 19. Do NOT include vertical-pivot columns in the regular mappings array — they are handled separately.
 20. If no repeating-category columns are detected, set verticalPivot.enabled to false with empty columns and outputTargetPaths arrays.
 
+Rules for type recommendations:
+21. Recommend a SQL/BigQuery-compatible type for EVERY target schema path.
+22. Use only these values: "STRING", "INTEGER", "FLOAT", "NUMERIC", "BOOLEAN", "DATE", "DATETIME", "TIMESTAMP".
+23. Choose practical generic types:
+   - IDs/codes/names/descriptions => STRING
+   - counts => INTEGER
+   - decimal money/amount/rate/ratio => NUMERIC (or FLOAT when clearly approximate)
+   - true/false flags => BOOLEAN
+   - date-like fields => DATE
+   - date+time without timezone => DATETIME
+   - event/log times with timezone semantics => TIMESTAMP
+
 Respond ONLY with a JSON object (no markdown fences, no commentary):
 {
   "mappings": [
@@ -125,7 +142,14 @@ Respond ONLY with a JSON object (no markdown fences, no commentary):
         }
       }
     ]
-  }
+  },
+  "typeRecommendations": [
+    {
+      "targetPath": string,        // exact target schema path
+      "dataType": string,          // one of: STRING, INTEGER, FLOAT, NUMERIC, BOOLEAN, DATE, DATETIME, TIMESTAMP
+      "confidence": number         // 0.0 to 1.0 confidence score
+    }
+  ]
 }
 
 Only include mappings with confidence >= 0.7. If no good mappings exist, return empty mappings array with pivot disabled.`;
@@ -176,6 +200,7 @@ interface LlmSchemaField {
   path: string;
   level: number;
   originalColumn: string;
+  dataType?: string;
 }
 
 export interface RawDataAnalysis {
@@ -200,6 +225,7 @@ export interface AutoMapResponse {
   pivot: PivotConfig;
   verticalPivot: VerticalPivotConfig;
   defaultValues: DefaultValues;
+  typeRecommendations: Record<string, SqlCompatibleType>;
 }
 
 export interface DataCleansingPlan {
@@ -243,6 +269,7 @@ function buildFieldTree(flat: LlmSchemaField[]): SchemaField[] {
       path: f.path,
       level: f.level,
       order: i,
+      dataType: f.dataType ? normalizeSqlCompatibleType(f.dataType) : inferSqlTypeFromPath(f.path),
       children: [],
     };
 
@@ -453,6 +480,53 @@ export async function detectHeaderRowValuesWithLLM(
 }
 
 const VALID_AGGREGATIONS = new Set<string>(["sum", "concat", "count", "min", "max", "first"]);
+const SQL_COMPATIBLE_TYPE_SET = new Set<string>(SQL_COMPATIBLE_TYPES);
+
+function normalizeSqlCompatibleType(value: unknown): SqlCompatibleType {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  return SQL_COMPATIBLE_TYPE_SET.has(normalized) ? (normalized as SqlCompatibleType) : "STRING";
+}
+
+function inferSqlTypeFromPath(path: string): SqlCompatibleType {
+  const p = String(path ?? "").toLowerCase();
+  if (/(^|[._])(is|has|can|enabled|active|deleted|valid|approved|flag)([._]|$)/.test(p)) return "BOOLEAN";
+  if (/(^|[._])(count|qty|quantity|number|num|totalcount)([._]|$)/.test(p)) return "INTEGER";
+  if (/(^|[._])(date|dob|birthdate)([._]|$)/.test(p)) return "DATE";
+  if (/(^|[._])(datetime)([._]|$)/.test(p)) return "DATETIME";
+  if (/(^|[._])(timestamp|createdat|updatedat|occurredat|eventtime|time)([._]|$)/.test(p)) return "TIMESTAMP";
+  if (/(^|[._])(amount|price|cost|balance|total|subtotal|tax|vat|fee|rate|percent|percentage|ratio|score)([._]|$)/.test(p)) return "NUMERIC";
+  return "STRING";
+}
+
+const FIELD_TYPE_RECOMMENDATION_PROMPT = `You are a schema typing specialist.
+
+Given a list of schema field paths, recommend a practical SQL/BigQuery-compatible data type for each field.
+
+Use only:
+- STRING
+- INTEGER
+- FLOAT
+- NUMERIC
+- BOOLEAN
+- DATE
+- DATETIME
+- TIMESTAMP
+
+Guidance:
+- IDs/codes/names/descriptions => STRING
+- counts/integer quantities => INTEGER
+- money/amount/rate/ratio => NUMERIC
+- booleans/flags => BOOLEAN
+- date-only => DATE
+- date+time (no timezone semantics) => DATETIME
+- event timestamps/log times => TIMESTAMP
+
+Respond ONLY JSON:
+{
+  "recommendations": [
+    { "path": string, "dataType": string, "confidence": number }
+  ]
+}`;
 
 /**
  * Auto-maps raw column headers to target schema paths using LLM semantic matching.
@@ -475,6 +549,7 @@ export async function autoMapColumnsWithLLM(
       outputTargetPaths?: string[];
       columns?: { rawColumn: string; fieldValues: Record<string, string> }[];
     };
+    typeRecommendations?: Array<{ targetPath: string; dataType: string; confidence: number }>;
   };
   try {
     parsed = JSON.parse(cleanJsonResponse(text));
@@ -537,7 +612,43 @@ export async function autoMapColumnsWithLLM(
     columns: vpColumns,
   };
 
-  return { mappings, pivot, verticalPivot, defaultValues };
+  const typeRecommendations: Record<string, SqlCompatibleType> = {};
+  for (const recommendation of parsed.typeRecommendations ?? []) {
+    if (!targetPaths.includes(recommendation.targetPath)) continue;
+    typeRecommendations[recommendation.targetPath] = normalizeSqlCompatibleType(recommendation.dataType);
+  }
+  for (const targetPath of targetPaths) {
+    if (!typeRecommendations[targetPath]) {
+      typeRecommendations[targetPath] = inferSqlTypeFromPath(targetPath);
+    }
+  }
+
+  return { mappings, pivot, verticalPivot, defaultValues, typeRecommendations };
+}
+
+export async function recommendFieldTypesWithLLM(paths: string[]): Promise<Record<string, SqlCompatibleType>> {
+  if (!paths.length) return {};
+  const text = await callLlm(
+    FIELD_TYPE_RECOMMENDATION_PROMPT,
+    `Recommend SQL-compatible data types for these fields:\n${paths.map((p, i) => `${i + 1}. "${p}"`).join("\n")}`,
+  );
+
+  let parsed: { recommendations?: Array<{ path: string; dataType: string; confidence: number }> };
+  try {
+    parsed = JSON.parse(cleanJsonResponse(text));
+  } catch {
+    parsed = {};
+  }
+
+  const output: Record<string, SqlCompatibleType> = {};
+  for (const recommendation of parsed.recommendations ?? []) {
+    if (!paths.includes(recommendation.path)) continue;
+    output[recommendation.path] = normalizeSqlCompatibleType(recommendation.dataType);
+  }
+  for (const path of paths) {
+    if (!output[path]) output[path] = inferSqlTypeFromPath(path);
+  }
+  return output;
 }
 
 export async function buildDataCleansingPlanWithLLM(

@@ -1,4 +1,11 @@
-import type { SchemaField } from "./types";
+import { SQL_COMPATIBLE_TYPES, type SchemaField, type SqlCompatibleType } from "./types";
+
+const SQL_COMPATIBLE_TYPE_SET = new Set<string>(SQL_COMPATIBLE_TYPES);
+
+function normalizeSqlType(value: string | null): SqlCompatibleType {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  return SQL_COMPATIBLE_TYPE_SET.has(normalized) ? (normalized as SqlCompatibleType) : "STRING";
+}
 
 export interface SchemaFieldRow {
   id: string;
@@ -9,6 +16,7 @@ export interface SchemaFieldRow {
   order: number;
   description: string | null;
   default_value: string | null;
+  data_type: string | null;
   parent_id: string | null;
 }
 
@@ -24,6 +32,7 @@ export function rowsToFields(rows: SchemaFieldRow[]): SchemaField[] {
       order: r.order,
       description: r.description ?? undefined,
       defaultValue: r.default_value ?? undefined,
+      dataType: normalizeSqlType(r.data_type),
       children: [],
     });
   }
@@ -58,8 +67,8 @@ export function fieldsToRows(
   fields: SchemaField[],
   parentId: string | null = null,
   level = 1,
-): { id: string; schema_id: string; name: string; path: string; level: number; order: number; description: string | null; default_value: string | null; parent_id: string | null }[] {
-  const result: { id: string; schema_id: string; name: string; path: string; level: number; order: number; description: string | null; default_value: string | null; parent_id: string | null }[] = [];
+): { id: string; schema_id: string; name: string; path: string; level: number; order: number; description: string | null; default_value: string | null; data_type: string | null; parent_id: string | null }[] {
+  const result: { id: string; schema_id: string; name: string; path: string; level: number; order: number; description: string | null; default_value: string | null; data_type: string | null; parent_id: string | null }[] = [];
   const sorted = [...fields].sort((a, b) => a.order - b.order);
   sorted.forEach((f, index) => {
     result.push({
@@ -71,6 +80,7 @@ export function fieldsToRows(
       order: index,
       description: f.description ?? null,
       default_value: f.defaultValue ?? null,
+      data_type: f.dataType ?? "STRING",
       parent_id: parentId,
     });
     if (f.children?.length) {
