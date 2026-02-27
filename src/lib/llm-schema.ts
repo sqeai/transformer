@@ -14,23 +14,23 @@ Rules:
 1. Identify which columns are meaningful data fields vs noise (row numbers, empty padding, internal IDs that are clearly auto-generated).
 2. Group related columns under a common parent when it makes semantic sense (e.g. "First Name" and "Last Name" → parent "name" with children "first" and "last"; or "Address Line 1", "City", "State", "Zip" → parent "address").
 3. Normalise field names to clean camelCase (e.g. "CUST_EMAIL" → "customerEmail", "Addr Line 1" → "addressLine1"). For bilingual headers (Vietnamese/English), prefer the English portion for the camelCase name (e.g. "Tên Công Ty\nCompany Name" → "companyName", "Đơn Giá\nUnit Price" → "unitPrice", "Thuế GTGT\nVAT" → "vat", "Tổng Cộng\nTotal Amount" → "totalAmount").
-4. Assign a nesting level: 0 for top-level, 1 for children of a group, etc.
+4. Assign a nesting level: 1 for top-level, 2 for first level of nesting, 3 for second, and so on. Use as many levels as the structure needs (e.g. 1–4 or more for deeply nested data).
 5. Preserve a logical ordering that groups related fields together.
-6. Keep the schema practical — don't over-nest. One level of nesting is usually enough.
+6. Keep the schema practical — nest where it adds clarity, but avoid unnecessary depth.
 
 Respond ONLY with a JSON array (no markdown fences, no commentary). Each element must have:
 - "name": string (clean display name)
 - "path": string (dot-separated path, e.g. "address.city")
-- "level": number (nesting depth, 0 = top)
+- "level": number (nesting level: 1 = topmost, 2 = first nesting, 3 = second, etc.)
 - "originalColumn": string (the raw header this maps to, or "" for group parents)
 
 Example output:
 [
-  {"name":"id","path":"id","level":0,"originalColumn":"Customer ID"},
-  {"name":"name","path":"name","level":0,"originalColumn":""},
-  {"name":"first","path":"name.first","level":1,"originalColumn":"First Name"},
-  {"name":"last","path":"name.last","level":1,"originalColumn":"Last Name"},
-  {"name":"email","path":"email","level":0,"originalColumn":"Email Address"}
+  {"name":"id","path":"id","level":1,"originalColumn":"Customer ID"},
+  {"name":"name","path":"name","level":1,"originalColumn":""},
+  {"name":"first","path":"name.first","level":2,"originalColumn":"First Name"},
+  {"name":"last","path":"name.last","level":2,"originalColumn":"Last Name"},
+  {"name":"email","path":"email","level":1,"originalColumn":"Email Address"}
 ]`;
 
 const RAW_DATA_ANALYSIS_PROMPT = `You are the "Header detection agent", a data analyst specialising in messy spreadsheet data. You will receive a raw preview of an Excel/CSV file that may contain:
@@ -130,6 +130,47 @@ Respond ONLY with a JSON object (no markdown fences, no commentary):
 
 Only include mappings with confidence >= 0.7. If no good mappings exist, return empty mappings array with pivot disabled.`;
 
+const DATA_CLEANSING_PLAN_PROMPT = `You are an AI data cleansing planner for tabular financial data.
+
+You will receive:
+- A list of column names.
+- Sample rows represented as objects.
+
+Return a conservative cleansing plan for:
+1) Row padding: identify columns where empty cells should be forward-filled from the previous non-empty value (typical for parent category labels in statements).
+2) Row filtering: identify if empty rows and total/subtotal rows should be removed.
+3) Hierarchy flattening: decide if parent/child rows should be flattened into columns nesting_level_1 (topmost), nesting_level_2, nesting_level_3, … and value. Level 1 is the top of the hierarchy; deeper nesting uses 2, 3, etc.
+
+Hierarchy detection guidelines:
+- Financial statements (trial balances, balance sheets, income statements) typically use a star/asterisk convention to indicate hierarchy depth.
+- MORE stars = HIGHER / BROADER level (closer to root). For example:
+  - "*** ASET" (3 stars) → nesting_level_1 (topmost category)
+  - "** Kas dan setara kas" (2 stars) → nesting_level_2 (sub-category)
+  - "* Current accounts" (1 star) → nesting_level_3 (sub-sub-category)
+  - "1111011 Petty Cash - Balikpapan" (no stars, starts with account code) → deepest leaf level (individual line items)
+- Rows starting with a numeric account code (e.g. "1111011", "2101001") are leaf-level line items (the deepest nesting level).
+- Rows with stars or special markers that do NOT start with a numeric code are parent/header rows.
+- The hierarchyMaxDepth should match the number of distinct nesting levels present (e.g. 3 if you see ***, **, and leaf items; 4 if you also see * rows).
+- When hierarchy is detected, set flattenHierarchy to true.
+
+Rules:
+- Only include a column in paddingColumns when forward-fill is likely correct.
+- Prefer removing obviously redundant rows (empty rows, total/subtotal/grand total rows).
+- Use lowercase, human-readable keywords in totalRowKeywords.
+- Be conservative to avoid deleting real data rows.
+
+Respond ONLY JSON:
+{
+  "paddingColumns": string[],
+  "removeEmptyRows": boolean,
+  "removeTotalRows": boolean,
+  "totalRowKeywords": string[],
+  "flattenHierarchy": boolean,
+  "hierarchyMaxDepth": number,
+  "hierarchyLabelColumn": string,
+  "hierarchyValueColumn": string
+}`;
+
 interface LlmSchemaField {
   name: string;
   path: string;
@@ -161,7 +202,34 @@ export interface AutoMapResponse {
   defaultValues: DefaultValues;
 }
 
+export interface DataCleansingPlan {
+  paddingColumns: string[];
+  removeEmptyRows: boolean;
+  removeTotalRows: boolean;
+  totalRowKeywords: string[];
+  flattenHierarchy?: boolean;
+  hierarchyMaxDepth?: number;
+  hierarchyLabelColumn?: string;
+  hierarchyValueColumn?: string;
+}
+
 const PLACEHOLDER_COLUMN_HEADER_RE = /^Column\s+\d+$/i;
+
+function stringifyForHeader(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object") {
+    try {
+      const json = JSON.stringify(value);
+      return json && json !== "{}" ? json : "";
+    } catch {
+      return "";
+    }
+  }
+  return String(value);
+}
 
 function buildFieldTree(flat: LlmSchemaField[]): SchemaField[] {
   const result: SchemaField[] = [];
@@ -178,12 +246,12 @@ function buildFieldTree(flat: LlmSchemaField[]): SchemaField[] {
       children: [],
     };
 
-    if (f.level === 0) {
+    if (f.level === 1) {
       result.push(field);
       parentStack.length = 0;
       parentStack.push(field);
     } else {
-      while (parentStack.length > f.level) {
+      while (parentStack.length >= f.level) {
         parentStack.pop();
       }
       const parent = parentStack[parentStack.length - 1];
@@ -371,7 +439,7 @@ export async function detectHeaderRowValuesWithLLM(
     const parts: string[] = [];
 
     for (let r = headerStart; r < inferredHeaderEndExclusive; r++) {
-      const raw = (grid[r]?.[c] ?? "").toString().trim();
+      const raw = stringifyForHeader(grid[r]?.[c]).trim();
       if (!raw) continue;
       if (PLACEHOLDER_COLUMN_HEADER_RE.test(raw)) continue;
       if (parts[parts.length - 1]?.toLowerCase() === raw.toLowerCase()) continue;
@@ -470,6 +538,81 @@ export async function autoMapColumnsWithLLM(
   };
 
   return { mappings, pivot, verticalPivot, defaultValues };
+}
+
+export async function buildDataCleansingPlanWithLLM(
+  columns: string[],
+  rows: Record<string, unknown>[],
+  userInstructions?: string,
+): Promise<DataCleansingPlan> {
+  const safeRows = rows.slice(0, 120).map((row) => {
+    const normalized: Record<string, string> = {};
+    for (const column of columns) {
+      const raw = row[column];
+      const text = String(raw ?? "").replace(/\s+/g, " ").trim();
+      normalized[column] = text.length > 120 ? `${text.slice(0, 117)}...` : text;
+    }
+    return normalized;
+  });
+
+  const promptParts: string[] = [];
+  if (userInstructions) {
+    promptParts.push(
+      "=== USER INSTRUCTIONS (HIGHEST PRIORITY — follow these first) ===",
+      userInstructions,
+      "=== END USER INSTRUCTIONS ===\n",
+    );
+  }
+  promptParts.push(
+    `Columns (${columns.length}): ${JSON.stringify(columns)}`,
+    `Sample rows (${safeRows.length}):`,
+    JSON.stringify(safeRows),
+  );
+  const prompt = promptParts.join("\n\n");
+
+  const systemPrompt = userInstructions
+    ? `${DATA_CLEANSING_PLAN_PROMPT}\n\nCRITICAL: The user has provided explicit instructions for how to cleanse the data. You MUST treat these as the primary source of truth. Prioritise the user's instructions over any default heuristics or assumptions. If the user specifies column roles, structure, or transformations, apply them exactly. Only fall back to the generic rules above for aspects the user did not specify.`
+    : DATA_CLEANSING_PLAN_PROMPT;
+
+  const text = await callLlm(systemPrompt, prompt);
+
+  let parsed: Partial<DataCleansingPlan>;
+  try {
+    parsed = JSON.parse(cleanJsonResponse(text));
+  } catch {
+    throw new Error(
+      `LLM returned invalid JSON for data cleansing plan. Raw response:\n${text.slice(0, 500)}`,
+    );
+  }
+
+  const paddingColumns = Array.isArray(parsed.paddingColumns)
+    ? parsed.paddingColumns
+        .map((value) => String(value))
+        .filter((column) => columns.includes(column))
+    : [];
+  const totalRowKeywords = Array.isArray(parsed.totalRowKeywords)
+    ? parsed.totalRowKeywords.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
+    : [];
+
+  return {
+    paddingColumns,
+    removeEmptyRows: parsed.removeEmptyRows !== false,
+    removeTotalRows: parsed.removeTotalRows !== false,
+    totalRowKeywords,
+    flattenHierarchy: parsed.flattenHierarchy === true,
+    hierarchyMaxDepth:
+      typeof parsed.hierarchyMaxDepth === "number" && Number.isFinite(parsed.hierarchyMaxDepth)
+        ? Math.max(2, Math.min(8, Math.floor(parsed.hierarchyMaxDepth)))
+        : undefined,
+    hierarchyLabelColumn:
+      typeof parsed.hierarchyLabelColumn === "string" && columns.includes(parsed.hierarchyLabelColumn)
+        ? parsed.hierarchyLabelColumn
+        : undefined,
+    hierarchyValueColumn:
+      typeof parsed.hierarchyValueColumn === "string" && columns.includes(parsed.hierarchyValueColumn)
+        ? parsed.hierarchyValueColumn
+        : undefined,
+  };
 }
 
 const EXTRACT_UNSTRUCTURED_PROMPT = `You are an AI Data Cleanser agent. You will receive a raw dump of an entire Excel sheet (all rows and columns) and a list of target schema field paths. Your job is to extract exactly ONE record from this sheet that matches the target schema.

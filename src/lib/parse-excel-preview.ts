@@ -17,6 +17,16 @@ const MAX_RAW_PREVIEW_ROWS = 30;
  */
 const MAX_COLUMNS = 200;
 
+function stringifyUnknownCellObject(value: object): string {
+  try {
+    const json = JSON.stringify(value);
+    if (json && json !== "{}") return json;
+  } catch {
+    // Fall through to avoid returning "[object Object]".
+  }
+  return "";
+}
+
 function cellToString(value: ExcelJS.CellValue): string {
   let raw: string;
   if (value == null) return "";
@@ -35,9 +45,19 @@ function cellToString(value: ExcelJS.CellValue): string {
       raw = String((value as { text: string }).text);
     } else if ("result" in value) {
       const r = (value as { result: unknown }).result;
-      raw = r != null ? String(r) : "";
+      if (typeof r === "string") {
+        raw = r;
+      } else if (typeof r === "number" || typeof r === "boolean") {
+        raw = String(r);
+      } else if (r instanceof Date) {
+        raw = r.toISOString();
+      } else if (r && typeof r === "object") {
+        raw = stringifyUnknownCellObject(r);
+      } else {
+        raw = r != null ? String(r) : "";
+      }
     } else {
-      raw = String(value);
+      raw = stringifyUnknownCellObject(value);
     }
   } else {
     raw = String(value);

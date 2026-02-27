@@ -57,7 +57,7 @@ export function fieldsToRows(
   schemaId: string,
   fields: SchemaField[],
   parentId: string | null = null,
-  level = 0,
+  level = 1,
 ): { id: string; schema_id: string; name: string; path: string; level: number; order: number; description: string | null; default_value: string | null; parent_id: string | null }[] {
   const result: { id: string; schema_id: string; name: string; path: string; level: number; order: number; description: string | null; default_value: string | null; parent_id: string | null }[] = [];
   const sorted = [...fields].sort((a, b) => a.order - b.order);

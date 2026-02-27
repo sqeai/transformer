@@ -6,7 +6,7 @@ const schemaFieldSchema: z.ZodType = z.lazy(() =>
     id: z.string().describe("Unique identifier for the field (UUID)"),
     name: z.string().describe("Display name of the field"),
     path: z.string().describe("Dot-separated path, e.g. 'address.city'"),
-    level: z.number().describe("Nesting depth (0 = top-level)"),
+    level: z.number().describe("Nesting level (1 = topmost, 2 = first nesting, 3 = second, etc.)"),
     order: z.number().describe("Sort order among siblings"),
     children: z.array(schemaFieldSchema).optional().describe("Nested child fields"),
   }),

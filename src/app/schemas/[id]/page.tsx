@@ -46,7 +46,7 @@ export default function SchemaDetailPage() {
   const router = useRouter();
   const id = params.id as string;
   const { user } = useAuth();
-  const { getSchema, updateSchema, setCurrentSchema, deleteSchema, workflow, schemasLoading } = useSchemaStore();
+  const { getSchema, updateSchema, deleteSchema, schemasLoading } = useSchemaStore();
   const schema = getSchema(id);
   const [name, setName] = useState(schema?.name ?? "");
   const [saved, setSaved] = useState(false);
@@ -194,8 +194,7 @@ export default function SchemaDetailPage() {
 
   const handleUseSchema = () => {
     requestLeave(() => {
-      setCurrentSchema(id);
-      router.push("/upload");
+      router.push(`/datasets?newSchema=${id}`);
     });
   };
 
@@ -419,8 +418,8 @@ export default function SchemaDetailPage() {
         <FinalSchemaTable
           schema={schema}
           onUpdateSchema={handleUpdateSchema}
-          rawRows={workflow.currentSchemaId === id ? workflow.rawRows : []}
-          columnMappings={workflow.currentSchemaId === id ? workflow.columnMappings : []}
+          rawRows={[]}
+          columnMappings={[]}
           readOnly={false}
           onDirtyChange={setTableHasUnsavedChanges}
         />

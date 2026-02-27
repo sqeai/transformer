@@ -9,20 +9,21 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import type { DatasetRecord } from "@/lib/types";
-import { useSchemaStore } from "@/lib/schema-store";
-import { ArrowLeft, Download, Loader2, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Trash2 } from "lucide-react";
 import ExcelJS from "exceljs";
+
+const ROWS_PER_PAGE = 100;
 
 export default function DatasetPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { resetWorkflow, setCurrentSchema } = useSchemaStore();
   const [dataset, setDataset] = useState<DatasetRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingName, setSavingName] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [exporting, setExporting] = useState<"csv" | "excel" | null>(null);
+  const [visibleRowCount, setVisibleRowCount] = useState(ROWS_PER_PAGE);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,9 +42,7 @@ export default function DatasetPage() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [id]);
 
   const columns = useMemo(() => {
@@ -54,6 +53,13 @@ export default function DatasetPage() {
     }
     return Array.from(set);
   }, [dataset]);
+
+  const visibleRows = useMemo(() => {
+    if (!dataset) return [];
+    return dataset.rows.slice(0, visibleRowCount);
+  }, [dataset, visibleRowCount]);
+
+  const canLoadMore = dataset ? visibleRowCount < dataset.rows.length : false;
 
   const saveName = async () => {
     if (!dataset) return;
@@ -119,18 +125,10 @@ export default function DatasetPage() {
     try {
       const res = await fetch(`/api/datasets/${dataset.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error();
-      router.push("/schemas");
+      router.push("/datasets");
     } finally {
       setDeleting(false);
     }
-  };
-
-  const handleAddToDataset = () => {
-    if (!dataset) return;
-    // Clear any persisted upload/file state before starting a new append flow.
-    resetWorkflow();
-    setCurrentSchema(dataset.schemaId);
-    router.push(`/upload?schemaId=${dataset.schemaId}&datasetId=${dataset.id}`);
   };
 
   if (loading) {
@@ -146,7 +144,7 @@ export default function DatasetPage() {
       <DashboardLayout>
         <Card>
           <CardHeader><CardTitle>Dataset not found</CardTitle></CardHeader>
-          <CardContent><Button onClick={() => router.push("/schemas")}>Back to Schemas</Button></CardContent>
+          <CardContent><Button onClick={() => router.push("/datasets")}>Back to Datasets</Button></CardContent>
         </Card>
       </DashboardLayout>
     );
@@ -157,19 +155,15 @@ export default function DatasetPage() {
       <div className="space-y-6 animate-fade-in">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" onClick={() => router.push("/schemas")}>
+            <Button variant="ghost" size="icon" onClick={() => router.push("/datasets")}>
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div>
               <h1 className="text-2xl font-bold tracking-tight">{dataset.name}</h1>
-              <p className="text-muted-foreground text-sm">{dataset.rowCount} rows • Created {new Date(dataset.createdAt).toLocaleString()}</p>
+              <p className="text-muted-foreground text-sm">{dataset.rowCount} rows &bull; Created {new Date(dataset.createdAt).toLocaleString()}</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button size="lg" onClick={handleAddToDataset}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add to this dataset
-            </Button>
             <Button variant="outline" onClick={() => exportRows("csv")} disabled={!!exporting}>
               <Download className="mr-2 h-4 w-4" />
               {exporting === "csv" ? "Exporting..." : "Export CSV"}
@@ -180,26 +174,27 @@ export default function DatasetPage() {
             </Button>
             <Button variant="destructive" onClick={deleteDataset} disabled={deleting}>
               <Trash2 className="mr-2 h-4 w-4" />
-              Delete Dataset
+              Delete
             </Button>
           </div>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>Dataset Settings</CardTitle>
-            <CardDescription>Rename this dataset. Mapping snapshot is saved with the dataset for flexible future use.</CardDescription>
+            <CardTitle>Dataset Name</CardTitle>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} />
-            <Button onClick={saveName} disabled={savingName}>{savingName ? "Saving..." : "Save Name"}</Button>
+            <Button onClick={saveName} disabled={savingName}>{savingName ? "Saving..." : "Save"}</Button>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Preview Data</CardTitle>
-            <CardDescription>Showing first {Math.min(50, dataset.rows.length)} rows</CardDescription>
+            <CardTitle>Data</CardTitle>
+            <CardDescription>
+              Showing {visibleRows.length} of {dataset.rows.length} rows
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <ScrollArea className="w-full rounded-md border">
@@ -210,15 +205,29 @@ export default function DatasetPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {dataset.rows.slice(0, 50).map((row, i) => (
+                  {visibleRows.map((row, i) => (
                     <TableRow key={i}>
-                      {columns.map((c) => <TableCell key={c} className="whitespace-nowrap">{String((row as Record<string, unknown>)[c] ?? "")}</TableCell>)}
+                      {columns.map((c) => (
+                        <TableCell key={c} className="whitespace-nowrap max-w-[200px] truncate">
+                          {String((row as Record<string, unknown>)[c] ?? "")}
+                        </TableCell>
+                      ))}
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
               <ScrollBar orientation="horizontal" />
             </ScrollArea>
+            {canLoadMore && (
+              <div className="flex justify-center mt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => setVisibleRowCount((prev) => prev + ROWS_PER_PAGE)}
+                >
+                  Load More
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
