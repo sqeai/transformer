@@ -24,8 +24,8 @@ import {
   TooltipProvider,
 } from "@/components/ui/tooltip";
 const nav = [
-  { name: "Schemas", href: "/schemas", icon: FileStack },
   { name: "Datasets", href: "/datasets", icon: Database },
+  { name: "Schemas", href: "/schemas", icon: FileStack },
 ];
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";

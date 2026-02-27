@@ -74,6 +74,7 @@ export default function DatasetsPage() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFileEntry[]>([]);
   const [dragging, setDragging] = useState(false);
   const [processingFiles, setProcessingFiles] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -174,6 +175,7 @@ export default function DatasetsPage() {
 
   const handleUpload = () => {
     if (!selectedSchemaId || uploadedFiles.length === 0) return;
+    setUploading(true);
     resetDatasetWorkflow();
     setDatasetWorkflow({
       schemaId: selectedSchemaId,
@@ -298,6 +300,7 @@ export default function DatasetsPage() {
         if (!open) {
           setUploadedFiles([]);
           setSelectedSchemaId("");
+          setUploading(false);
         }
       }}>
         <DialogContent className="max-w-2xl w-full">
@@ -414,10 +417,14 @@ export default function DatasetsPage() {
               </Button>
               <Button
                 onClick={handleUpload}
-                disabled={!selectedSchemaId || uploadedFiles.length === 0}
+                disabled={!selectedSchemaId || uploadedFiles.length === 0 || processingFiles || uploading}
               >
-                <Upload className="mr-2 h-4 w-4" />
-                Upload
+                {processingFiles || uploading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="mr-2 h-4 w-4" />
+                )}
+                {processingFiles ? "Processing files..." : uploading ? "Uploading..." : "Upload"}
               </Button>
             </div>
           </div>

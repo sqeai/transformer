@@ -35,7 +35,6 @@ import {
   flattenFields,
   type SheetSelection,
   type SheetJobResult,
-  type DatasetWorkflowState,
 } from "@/lib/schema-store";
 import { extractExcelGridTopBottom } from "@/lib/parse-excel-preview";
 import { parseExcelToRows } from "@/lib/parse-excel";
@@ -247,6 +246,34 @@ function NewDatasetPageContent() {
     });
   };
 
+  const toggleAllSheetsForFile = (fileId: string) => {
+    const file = files.find((f) => f.fileId === fileId);
+    if (!file) return;
+
+    const fileSheets: SheetSelection[] = file.sheetNames.map((sheetName, sheetIndex) => ({
+      fileId: file.fileId,
+      fileName: file.fileName,
+      sheetIndex,
+      sheetName,
+    }));
+
+    setSelectedSheets((prev) => {
+      const allSelected = fileSheets.every((sheet) =>
+        prev.some((s) => s.fileId === sheet.fileId && s.sheetIndex === sheet.sheetIndex),
+      );
+
+      if (allSelected) {
+        return prev.filter((s) => s.fileId !== file.fileId);
+      }
+
+      const existingKeys = new Set(prev.map((s) => `${s.fileId}:${s.sheetIndex}`));
+      const missingSheets = fileSheets.filter(
+        (sheet) => !existingKeys.has(`${sheet.fileId}:${sheet.sheetIndex}`),
+      );
+      return [...prev, ...missingSheets];
+    });
+  };
+
   const isSheetSelected = (fileId: string, sheetIndex: number) =>
     selectedSheets.some((s) => s.fileId === fileId && s.sheetIndex === sheetIndex);
 
@@ -408,10 +435,92 @@ function NewDatasetPageContent() {
     }
   }, [files]);
 
-  // Modify using AI
+  // Computed: is the currently viewed sheet being re-processed by a modify job?
+  const isModifyRunning = useMemo(() => {
+    const completedResults = jobResults.filter((r) => r.status === "completed" || r.status === "pending" || r.status === "running");
+    const currentResult = completedResults.filter((r) => r.status === "completed" || r.status === "pending" || r.status === "running")[reviewSheetIndex];
+    if (!currentResult) return false;
+    return currentResult.status === "pending" || currentResult.status === "running";
+  }, [jobResults, reviewSheetIndex]);
+
+  // Any sheet currently being re-processed (globally blocks nav)
+  const anySheetProcessing = useMemo(
+    () => jobResults.some((r) => r.status === "pending" || r.status === "running"),
+    [jobResults],
+  );
+
+  // Start polling for modify job
+  const startModifyPolling = useCallback((jobId: string) => {
+    if (modifyPollingRef.current) clearInterval(modifyPollingRef.current);
+    modifyJobIdRef.current = jobId;
+
+    modifyPollingRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/jobs?ids=${jobId}`);
+        const data = await res.json();
+        if (!res.ok) return;
+
+        const job = data.jobs?.[0];
+        if (!job) return;
+
+        setJobResults((prev) =>
+          prev.map((r) =>
+            r.jobId === jobId
+              ? {
+                  ...r,
+                  status: job.status as SheetJobResult["status"],
+                  result: job.result as SheetJobResult["result"],
+                  error: job.error,
+                }
+              : r,
+          ),
+        );
+
+        if (job.status === "completed" || job.status === "failed") {
+          if (modifyPollingRef.current) {
+            clearInterval(modifyPollingRef.current);
+            modifyPollingRef.current = null;
+          }
+          modifyJobIdRef.current = null;
+        }
+
+        fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
+      } catch {
+        // ignore polling errors
+      }
+    }, POLL_INTERVAL_MS);
+  }, []);
+
+  // Stop/cancel the modify job polling
+  const handleStopModify = useCallback(() => {
+    if (modifyPollingRef.current) {
+      clearInterval(modifyPollingRef.current);
+      modifyPollingRef.current = null;
+    }
+    const stoppedJobId = modifyJobIdRef.current;
+    modifyJobIdRef.current = null;
+
+    if (stoppedJobId) {
+      setJobResults((prev) =>
+        prev.map((r) =>
+          r.jobId === stoppedJobId && (r.status === "pending" || r.status === "running")
+            ? { ...r, status: "failed" as const, error: "Stopped by user" }
+            : r,
+        ),
+      );
+    }
+  }, []);
+
+  // Clean up modify polling on unmount
+  useEffect(() => {
+    return () => {
+      if (modifyPollingRef.current) clearInterval(modifyPollingRef.current);
+    };
+  }, []);
+
+  // Modify using AI - creates a job and polls
   const handleModifyWithAI = useCallback(async (sheetResult: SheetJobResult) => {
     if (!modifyPrompt.trim() || !schemaId) return;
-    setModifying(true);
 
     try {
       const file = files.find((f) => f.fileId === sheetResult.sheet.fileId);
@@ -441,7 +550,6 @@ function NewDatasetPageContent() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to create job");
 
-      // Update job result
       setJobResults((prev) =>
         prev.map((r) =>
           r.sheet.fileId === sheetResult.sheet.fileId && r.sheet.sheetIndex === sheetResult.sheet.sheetIndex
@@ -450,23 +558,14 @@ function NewDatasetPageContent() {
         ),
       );
 
-      // Trigger processing and start polling
-      fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
-      startPolling(
-        jobResults.map((r) =>
-          r.sheet.fileId === sheetResult.sheet.fileId && r.sheet.sheetIndex === sheetResult.sheet.sheetIndex
-            ? { ...r, jobId: data.jobId, status: "pending" as const }
-            : r,
-        ),
-      );
-
       setModifyPrompt("");
+
+      fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
+      startModifyPolling(data.jobId);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to modify");
-    } finally {
-      setModifying(false);
     }
-  }, [modifyPrompt, schemaId, files, targetPaths, jobResults]);
+  }, [modifyPrompt, schemaId, files, targetPaths, startModifyPolling]);
 
   const toggleConfirmSheet = (sheetResult: SheetJobResult) => {
     const key = `${sheetResult.sheet.fileId}:${sheetResult.sheet.sheetIndex}`;
@@ -593,26 +692,63 @@ function NewDatasetPageContent() {
                 <div className="space-y-1">
                   {files.map((file) => (
                     <div key={file.fileId}>
-                      <button
-                        type="button"
-                        className="flex items-center gap-2 w-full px-2 py-1.5 rounded hover:bg-muted text-sm text-left"
-                        onClick={() => {
-                          setExpandedFiles((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(file.fileId)) next.delete(file.fileId);
-                            else next.add(file.fileId);
-                            return next;
-                          });
-                        }}
-                      >
-                        {expandedFiles.has(file.fileId) ? (
-                          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
-                        ) : (
-                          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-                        )}
-                        <FileSpreadsheet className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <span className="truncate font-medium">{file.fileName}</span>
-                      </button>
+                      {(() => {
+                        const allFileSheetsSelected =
+                          file.sheetNames.length > 0 &&
+                          file.sheetNames.every((_, idx) => isSheetSelected(file.fileId, idx));
+                        const someFileSheetsSelected =
+                          file.sheetNames.some((_, idx) => isSheetSelected(file.fileId, idx));
+
+                        return (
+                          <div className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted">
+                            <button
+                              type="button"
+                              className="flex items-center justify-center shrink-0"
+                              onClick={() => {
+                                setExpandedFiles((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(file.fileId)) next.delete(file.fileId);
+                                  else next.add(file.fileId);
+                                  return next;
+                                });
+                              }}
+                            >
+                              {expandedFiles.has(file.fileId) ? (
+                                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                              ) : (
+                                <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                              )}
+                            </button>
+                            <input
+                              type="checkbox"
+                              checked={allFileSheetsSelected}
+                              ref={(el) => {
+                                if (el) el.indeterminate = !allFileSheetsSelected && someFileSheetsSelected;
+                              }}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                toggleAllSheetsForFile(file.fileId);
+                              }}
+                              className="rounded"
+                            />
+                            <button
+                              type="button"
+                              className="flex items-center gap-2 flex-1 text-sm text-left min-w-0"
+                              onClick={() => {
+                                setExpandedFiles((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(file.fileId)) next.delete(file.fileId);
+                                  else next.add(file.fileId);
+                                  return next;
+                                });
+                              }}
+                            >
+                              <FileSpreadsheet className="h-4 w-4 shrink-0 text-muted-foreground" />
+                              <span className="truncate font-medium">{file.fileName}</span>
+                            </button>
+                          </div>
+                        );
+                      })()}
                       {expandedFiles.has(file.fileId) && (
                         <div className="ml-6 space-y-0.5">
                           {file.sheetNames.map((name, idx) => {
@@ -677,7 +813,7 @@ function NewDatasetPageContent() {
                     Loading preview...
                   </div>
                 ) : preview ? (
-                  <ScrollArea className="w-full rounded-md border max-h-[500px]">
+                  <ScrollArea className="w-full rounded-md border max-h-[700px]">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -831,6 +967,7 @@ function NewDatasetPageContent() {
                         variant={isConfirmed ? "default" : "outline"}
                         size="sm"
                         onClick={() => toggleConfirmSheet(currentResult)}
+                        disabled={anySheetProcessing}
                       >
                         {isConfirmed ? (
                           <>
@@ -876,7 +1013,7 @@ function NewDatasetPageContent() {
                             Loading original data...
                           </div>
                         ) : originalPreview ? (
-                          <ScrollArea className="w-full rounded-md border max-h-[500px]">
+                          <ScrollArea className="w-full rounded-md border max-h-[700px]">
                             <Table>
                               <TableHeader>
                                 <TableRow>
@@ -908,13 +1045,21 @@ function NewDatasetPageContent() {
                     {reviewSubTab === "modified" && (
                       <div className="space-y-4">
                         {currentResult.status === "pending" || currentResult.status === "running" ? (
-                          <div className="flex items-center gap-2 justify-center py-10 text-muted-foreground">
-                            <Loader2 className="h-5 w-5 animate-spin" />
-                            Re-processing...
+                          <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
+                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                            <p className="text-sm font-medium">AI Data Cleanser is re-processing this sheet...</p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleStopModify}
+                            >
+                              <Square className="mr-1.5 h-3.5 w-3.5" />
+                              Stop
+                            </Button>
                           </div>
                         ) : (
                           <>
-                            <ScrollArea className="w-full rounded-md border max-h-[400px]">
+                            <ScrollArea className="w-full rounded-md border max-h-[700px]">
                               <Table>
                                 <TableHeader>
                                   <TableRow>
@@ -953,14 +1098,10 @@ function NewDatasetPageContent() {
                               />
                               <Button
                                 onClick={() => handleModifyWithAI(currentResult)}
-                                disabled={!modifyPrompt.trim() || modifying}
+                                disabled={!modifyPrompt.trim() || anySheetProcessing}
                                 className="shrink-0"
                               >
-                                {modifying ? (
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Sparkles className="mr-2 h-4 w-4" />
-                                )}
+                                <Sparkles className="mr-2 h-4 w-4" />
                                 Modify using AI
                               </Button>
                             </div>
@@ -970,7 +1111,9 @@ function NewDatasetPageContent() {
                     )}
 
                     {reviewSubTab === "mapping" && pipeline && (
-                      <MappingFlow pipeline={pipeline} />
+                      <div className="overflow-auto">
+                        <MappingFlow pipeline={pipeline} />
+                      </div>
                     )}
                     {reviewSubTab === "mapping" && !pipeline && (
                       <p className="text-muted-foreground text-center py-4">
@@ -983,13 +1126,13 @@ function NewDatasetPageContent() {
             })()}
 
             <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep("upload")}>
+              <Button variant="outline" onClick={() => setStep("upload")} disabled={anySheetProcessing}>
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back
               </Button>
               <Button
                 onClick={() => setStep("export")}
-                disabled={confirmedCount === 0}
+                disabled={confirmedCount === 0 || anySheetProcessing}
               >
                 Next: Export {confirmedCount} sheet{confirmedCount !== 1 ? "s" : ""}
                 <ArrowRight className="ml-2 h-4 w-4" />
