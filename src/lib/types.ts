@@ -2,7 +2,7 @@ export interface SchemaField {
   id: string;
   name: string;
   path: string; // e.g. "customer.name" for nesting
-  level: number; // 0 = top level
+  level: number; // 1 = topmost, 2 = first nesting, 3 = second, etc.
   order: number;
   description?: string;
   defaultValue?: string;

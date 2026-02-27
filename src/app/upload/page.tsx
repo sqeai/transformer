@@ -27,6 +27,7 @@ import { flattenFields } from "@/lib/schema-store";
 import { parseExcelToRows } from "@/lib/parse-excel";
 import { parseCsvToRows, extractCsvPreviewTopBottom } from "@/lib/parse-csv";
 import { extractExcelGridTopBottom, getExcelSheetNames, dumpSheetAsText } from "@/lib/parse-excel-preview";
+import { trimEmptyRowsAndColumns } from "@/lib/trim-preview-grid";
 import type { RawDataAnalysis } from "@/lib/llm-schema";
 import DataPreviewTable, { type DataBoundary, type IndexedRow } from "@/components/DataPreviewTable";
 import {
@@ -129,6 +130,14 @@ interface PersistedUnstructuredUploadState {
   sheetSelectionPreviewRowCount: number;
 }
 
+interface StructuredCleansingPreview {
+  status: "idle" | "running" | "done" | "error";
+  key: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  error?: string;
+}
+
 function AiLoadingNotice({
   title = "AI is processing your results",
   subtitle,
@@ -196,6 +205,8 @@ function UploadPageContent() {
   const [structuredSelectedSheetIndices, setStructuredSelectedSheetIndices] = useState<Set<number>>(new Set());
   const [structuredActiveSheetIndex, setStructuredActiveSheetIndex] = useState<number>(0);
   const [structuredBoundariesBySheetIndex, setStructuredBoundariesBySheetIndex] = useState<Record<number, DataBoundary>>({});
+  const [structuredCleansingBySheetIndex, setStructuredCleansingBySheetIndex] = useState<Record<number, StructuredCleansingPreview>>({});
+  const [structuredAutoCleansedSheetIndices, setStructuredAutoCleansedSheetIndices] = useState<Set<number>>(new Set());
   const [loadingMore, setLoadingMore] = useState(false);
   const loadedCountRef = useRef(PREVIEW_TOP_N);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -266,6 +277,8 @@ function UploadPageContent() {
       setBoundary(restoredBoundariesBySheet[restoredActiveSheetIndex] ?? (saved.boundary as DataBoundary));
       setStructuredActiveSheetIndex(restoredActiveSheetIndex);
       setStructuredBoundariesBySheetIndex(restoredBoundariesBySheet);
+      setStructuredCleansingBySheetIndex({});
+      setStructuredAutoCleansedSheetIndices(new Set());
       setStructuredSelectedSheetIndices(
         new Set(
           Array.isArray(savedPreview.selectedSheetIndices) && savedPreview.selectedSheetIndices.length > 0
@@ -473,6 +486,8 @@ function UploadPageContent() {
       setBoundary(null);
       setStructuredSelectedSheetIndices(new Set());
       setStructuredBoundariesBySheetIndex({});
+      setStructuredCleansingBySheetIndex({});
+      setStructuredAutoCleansedSheetIndices(new Set());
       setStructuredActiveSheetIndex(0);
       loadedCountRef.current = PREVIEW_TOP_N;
       const savedSchemaId = schemaId;
@@ -494,18 +509,23 @@ function UploadPageContent() {
         if (isExcel) {
           const buffer = await file.arrayBuffer();
           const sheetNames = await getExcelSheetNames(buffer);
-          const { rows: previewRows, totalRows, totalColumns } = await extractExcelGridTopBottom(
+          const raw = await extractExcelGridTopBottom(
             buffer, PREVIEW_TOP_N, PREVIEW_BOTTOM_N, PREVIEW_MAX_COLS, 0,
+          );
+          const { rows: previewRows, totalRows, totalColumns } = trimEmptyRowsAndColumns(
+            raw.rows,
+            raw.totalRows,
+            raw.totalColumns,
           );
 
           const defaultBoundary: DataBoundary = {
             headerRowIndex: 0,
             dataStartRowIndex: 1,
-            dataEndRowIndex: totalRows - 1,
+            dataEndRowIndex: Math.max(0, totalRows - 1),
             startColumn: 0,
             // Always default to using all available columns so the raw upload
             // has as many fields as possible; the user can narrow this later.
-            endColumn: totalColumns - 1,
+            endColumn: Math.max(0, totalColumns - 1),
           };
           const initialBoundariesBySheetIndex: Record<number, DataBoundary> = {
             0: defaultBoundary,
@@ -515,6 +535,8 @@ function UploadPageContent() {
           setStructuredActiveSheetIndex(0);
           setStructuredSelectedSheetIndices(new Set([0]));
           setStructuredBoundariesBySheetIndex(initialBoundariesBySheetIndex);
+          setStructuredCleansingBySheetIndex({});
+          setStructuredAutoCleansedSheetIndices(new Set());
           setPreview({
             rows: previewRows,
             totalRows,
@@ -529,19 +551,26 @@ function UploadPageContent() {
           });
         } else {
           const csvText = await file.text();
-          const { rows: previewRows, totalRows, totalColumns } = extractCsvPreviewTopBottom(
+          const raw = extractCsvPreviewTopBottom(
             csvText, PREVIEW_TOP_N, PREVIEW_BOTTOM_N,
+          );
+          const { rows: previewRows, totalRows, totalColumns } = trimEmptyRowsAndColumns(
+            raw.rows,
+            raw.totalRows,
+            raw.totalColumns,
           );
 
           const defaultBoundary: DataBoundary = {
             headerRowIndex: 0,
             dataStartRowIndex: 1,
-            dataEndRowIndex: totalRows - 1,
+            dataEndRowIndex: Math.max(0, totalRows - 1),
             startColumn: 0,
-            endColumn: totalColumns - 1,
+            endColumn: Math.max(0, totalColumns - 1),
           };
 
           setBoundary(defaultBoundary);
+          setStructuredCleansingBySheetIndex({});
+          setStructuredAutoCleansedSheetIndices(new Set());
           setPreview({
             rows: previewRows,
             totalRows,
@@ -560,6 +589,147 @@ function UploadPageContent() {
     },
     [resetWorkflow, schemaId, setCurrentSchema],
   );
+
+  const boundaryCacheKey = useCallback((bnd: DataBoundary) => {
+    return [
+      bnd.headerRowIndex,
+      bnd.dataStartRowIndex,
+      bnd.dataEndRowIndex,
+      bnd.startColumn,
+      bnd.endColumn,
+    ].join(":");
+  }, []);
+
+  const runStructuredCleansing = useCallback(
+    async (
+      sheetIndex: number,
+      bnd: DataBoundary,
+      force = false,
+    ): Promise<{ columns: string[]; rows: Record<string, unknown>[]; key: string } | null> => {
+      if (!preview) return null;
+      const key = boundaryCacheKey(bnd);
+      const existing = structuredCleansingBySheetIndex[sheetIndex];
+      if (!force && existing?.key === key && (existing.status === "running" || existing.status === "done")) {
+        return existing.status === "done" ? { columns: existing.columns, rows: existing.rows, key } : null;
+      }
+
+      setStructuredCleansingBySheetIndex((prev) => ({
+        ...prev,
+        [sheetIndex]: {
+          status: "running",
+          key,
+          columns: prev[sheetIndex]?.columns ?? [],
+          rows: prev[sheetIndex]?.rows ?? [],
+        },
+      }));
+
+      try {
+        let parsedColumns: string[] = [];
+        let parsedRows: Record<string, unknown>[] = [];
+        if (preview.isExcel && preview.excelBuffer) {
+          const columnsToKeep: number[] = [];
+          for (let i = bnd.startColumn; i <= bnd.endColumn; i++) columnsToKeep.push(i);
+          const parsed = await parseExcelToRows(preview.excelBuffer, {
+            headerRowIndex: bnd.headerRowIndex,
+            dataStartRowIndex: bnd.dataStartRowIndex,
+            dataEndRowIndex: bnd.dataEndRowIndex,
+            columnsToKeep,
+            sheetIndex,
+          });
+          parsedColumns = parsed.columns;
+          parsedRows = parsed.rows;
+        } else if (preview.csvText) {
+          const columnsToKeep: number[] = [];
+          for (let i = bnd.startColumn; i <= bnd.endColumn; i++) columnsToKeep.push(i);
+          const parsed = parseCsvToRows(preview.csvText, {
+            headerRowIndex: bnd.headerRowIndex,
+            dataStartRowIndex: bnd.dataStartRowIndex,
+            dataEndRowIndex: bnd.dataEndRowIndex,
+            columnsToKeep,
+          });
+          parsedColumns = parsed.columns;
+          parsedRows = parsed.rows;
+        } else {
+          return null;
+        }
+
+        const res = await fetch("/api/ai-data-cleansing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sheetName: preview.sheetNames?.[sheetIndex] ?? preview.fileName ?? `Sheet ${sheetIndex + 1}`,
+            columns: parsedColumns,
+            rows: parsedRows,
+          }),
+        });
+
+        if (!res.ok) {
+          const fallback = { columns: parsedColumns, rows: parsedRows, key };
+          setStructuredCleansingBySheetIndex((prev) => ({
+            ...prev,
+            [sheetIndex]: {
+              status: "error",
+              key,
+              columns: parsedColumns,
+              rows: parsedRows,
+              error: "AI cleansing failed. Using parsed rows.",
+            },
+          }));
+          return fallback;
+        }
+
+        const payload = await res.json() as {
+          cleanedColumns?: string[];
+          cleanedRows?: Record<string, unknown>[];
+        };
+        const columns = Array.isArray(payload.cleanedColumns) ? payload.cleanedColumns : parsedColumns;
+        const rows = Array.isArray(payload.cleanedRows) ? payload.cleanedRows : parsedRows;
+        setStructuredCleansingBySheetIndex((prev) => ({
+          ...prev,
+          [sheetIndex]: {
+            status: "done",
+            key,
+            columns,
+            rows,
+          },
+        }));
+        return { columns, rows, key };
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "AI cleansing failed";
+        setStructuredCleansingBySheetIndex((prev) => ({
+          ...prev,
+          [sheetIndex]: {
+            status: "error",
+            key,
+            columns: prev[sheetIndex]?.columns ?? [],
+            rows: prev[sheetIndex]?.rows ?? [],
+            error: message,
+          },
+        }));
+        return null;
+      }
+    },
+    [preview, boundaryCacheKey, structuredCleansingBySheetIndex],
+  );
+
+  useEffect(() => {
+    if (uploadMode !== "structured" || structuredStep !== "preview" || !preview || !boundary) return;
+    const sheetIndex = preview.isExcel ? structuredActiveSheetIndex : 0;
+    const bnd = preview.isExcel ? (structuredBoundariesBySheetIndex[sheetIndex] ?? boundary) : boundary;
+    if (!bnd) return;
+    if (structuredAutoCleansedSheetIndices.has(sheetIndex)) return;
+    setStructuredAutoCleansedSheetIndices((prev) => new Set(prev).add(sheetIndex));
+    void runStructuredCleansing(sheetIndex, bnd, false);
+  }, [
+    uploadMode,
+    structuredStep,
+    preview,
+    boundary,
+    structuredActiveSheetIndex,
+    structuredBoundariesBySheetIndex,
+    structuredAutoCleansedSheetIndices,
+    runStructuredCleansing,
+  ]);
 
   const confirmAndParse = useCallback(async () => {
     if (!preview || !boundary) return;
@@ -582,22 +752,20 @@ function UploadPageContent() {
 
         for (const sheetIndex of selectedSheetIndices) {
           const bnd = structuredBoundariesBySheetIndex[sheetIndex] ?? boundary;
-          const columnsToKeep: number[] = [];
-          for (let i = bnd.startColumn; i <= bnd.endColumn; i++) {
-            columnsToKeep.push(i);
+          const key = boundaryCacheKey(bnd);
+          const cached = structuredCleansingBySheetIndex[sheetIndex];
+          const cleansed =
+            cached?.status === "done" && cached.key === key
+              ? { columns: cached.columns, rows: cached.rows }
+              : await runStructuredCleansing(sheetIndex, bnd, true);
+          if (!cleansed) {
+            throw new Error(`Failed to cleanse sheet ${preview.sheetNames?.[sheetIndex] ?? sheetIndex + 1}`);
           }
-          const parsed = await parseExcelToRows(preview.excelBuffer, {
-            headerRowIndex: bnd.headerRowIndex,
-            dataStartRowIndex: bnd.dataStartRowIndex,
-            dataEndRowIndex: bnd.dataEndRowIndex,
-            columnsToKeep,
-            sheetIndex,
-          });
           parsedSheets.push({
             sheetIndex,
             sheetName: preview.sheetNames?.[sheetIndex] ?? `Sheet ${sheetIndex + 1}`,
-            columns: parsed.columns,
-            rows: parsed.rows,
+            columns: cleansed.columns,
+            rows: cleansed.rows,
           });
         }
         if (parsedSheets.length === 0) {
@@ -638,17 +806,16 @@ function UploadPageContent() {
         router.push("/mapping");
         return;
       } else if (preview.csvText) {
-        const columnsToKeep: number[] = [];
-        for (let i = boundary.startColumn; i <= boundary.endColumn; i++) {
-          columnsToKeep.push(i);
+        const key = boundaryCacheKey(boundary);
+        const cached = structuredCleansingBySheetIndex[0];
+        const cleansed =
+          cached?.status === "done" && cached.key === key
+            ? { columns: cached.columns, rows: cached.rows }
+            : await runStructuredCleansing(0, boundary, true);
+        if (!cleansed) {
+          throw new Error("Failed to cleanse CSV data");
         }
-        const { columns, rows } = parseCsvToRows(preview.csvText, {
-          headerRowIndex: boundary.headerRowIndex,
-          dataStartRowIndex: boundary.dataStartRowIndex,
-          dataEndRowIndex: boundary.dataEndRowIndex,
-          columnsToKeep,
-        });
-        setRawData(columns, rows);
+        setRawData(cleansed.columns, cleansed.rows);
       }
 
       if (schemaId) {
@@ -689,18 +856,26 @@ function UploadPageContent() {
     structuredSelectedSheetIndices,
     structuredActiveSheetIndex,
     structuredBoundariesBySheetIndex,
+    structuredCleansingBySheetIndex,
+    runStructuredCleansing,
+    boundaryCacheKey,
   ]);
 
   const switchToSheet = useCallback(
     async (sheetIndex: number) => {
       if (!preview?.isExcel || !preview.excelBuffer || structuredActiveSheetIndex === sheetIndex)
         return;
-      const { rows: previewRows, totalRows, totalColumns } = await extractExcelGridTopBottom(
+      const raw = await extractExcelGridTopBottom(
         preview.excelBuffer,
         PREVIEW_TOP_N,
         PREVIEW_BOTTOM_N,
         PREVIEW_MAX_COLS,
         sheetIndex,
+      );
+      const { rows: previewRows, totalRows, totalColumns } = trimEmptyRowsAndColumns(
+        raw.rows,
+        raw.totalRows,
+        raw.totalColumns,
       );
       loadedCountRef.current = PREVIEW_TOP_N;
       const defaultBoundary: DataBoundary = {
@@ -809,6 +984,8 @@ function UploadPageContent() {
     setAnalysis(null);
     setStructuredSelectedSheetIndices(new Set());
     setStructuredBoundariesBySheetIndex({});
+    setStructuredCleansingBySheetIndex({});
+    setStructuredAutoCleansedSheetIndices(new Set());
     setStructuredActiveSheetIndex(0);
     setError(null);
     setUploadState(null);
@@ -1345,6 +1522,20 @@ function UploadPageContent() {
     }
   }, [activeSheetPreviewId, sheetItems, pollingInterval]);
 
+  const activeStructuredPreviewIndex = preview?.isExcel ? structuredActiveSheetIndex : 0;
+  const activeStructuredBoundary =
+    preview?.isExcel
+      ? structuredBoundariesBySheetIndex[activeStructuredPreviewIndex] ?? boundary
+      : boundary;
+  const activeStructuredCleansing = structuredCleansingBySheetIndex[activeStructuredPreviewIndex];
+  const activeStructuredCleansedColumns = activeStructuredCleansing?.columns ?? [];
+  const activeStructuredCleansedRows = activeStructuredCleansing?.rows ?? [];
+
+  const runActiveStructuredCleansing = useCallback(() => {
+    if (!preview || !activeStructuredBoundary) return;
+    void runStructuredCleansing(activeStructuredPreviewIndex, activeStructuredBoundary, true);
+  }, [preview, activeStructuredBoundary, activeStructuredPreviewIndex, runStructuredCleansing]);
+
   if (!schemaId || !schema) {
     return (
       <DashboardLayout>
@@ -1558,6 +1749,53 @@ function UploadPageContent() {
                               onBoundaryChange={handleBoundaryChange}
                               onLoadMore={loadMoreRows}
                               loadingMore={loadingMore}
+                              slotAfterWarning={
+                                <>
+                                  <Button
+                                    size="sm"
+                                    onClick={runActiveStructuredCleansing}
+                                    disabled={!activeStructuredBoundary || activeStructuredCleansing?.status === "running"}
+                                    className="w-full shadow-sm"
+                                  >
+                                    {activeStructuredCleansing?.status === "running" ? (
+                                      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <Sparkles className="mr-2 h-3.5 w-3.5" />
+                                    )}
+                                    Run AI Data Cleansing
+                                  </Button>
+                                  <div className="mt-3 rounded-md border p-3 min-h-[140px] flex flex-col">
+                                    <div className="mb-2 text-sm font-medium">AI Cleansed Preview</div>
+                                    {activeStructuredCleansing?.status === "running" ? (
+                                      <div className="flex flex-1 min-h-[100px] items-center justify-center text-muted-foreground">
+                                        <Loader2 className="h-8 w-8 animate-spin" />
+                                      </div>
+                                    ) : activeStructuredCleansedColumns.length > 0 && activeStructuredCleansedRows.length > 0 ? (
+                                      <ScrollArea className="w-full rounded-md border">
+                                        <Table>
+                                          <TableBody>
+                                            <TableRow>
+                                              {activeStructuredCleansedColumns.slice(0, 12).map((column) => (
+                                                <TableCell key={column} className="text-xs font-semibold">{column}</TableCell>
+                                              ))}
+                                            </TableRow>
+                                            {activeStructuredCleansedRows.slice(0, 10).map((row, rowIdx) => (
+                                              <TableRow key={rowIdx}>
+                                                {activeStructuredCleansedColumns.slice(0, 12).map((column) => (
+                                                  <TableCell key={`${rowIdx}-${column}`} className="max-w-48 truncate whitespace-nowrap text-xs">
+                                                    {String(row[column] ?? "") || <span className="text-muted-foreground">-</span>}
+                                                  </TableCell>
+                                                ))}
+                                              </TableRow>
+                                            ))}
+                                          </TableBody>
+                                        </Table>
+                                        <ScrollBar orientation="horizontal" />
+                                      </ScrollArea>
+                                    ) : null}
+                                  </div>
+                                </>
+                              }
                             />
                           </div>
                           <div className="flex min-h-16 items-center justify-between gap-2 border-t px-3 py-2">
@@ -1580,15 +1818,64 @@ function UploadPageContent() {
                       </CardContent>
                     </Card>
                   ) : (
-                    <DataPreviewTable
-                      rows={preview.rows}
-                      totalRows={preview.totalRows}
-                      totalColumns={preview.totalColumns}
-                      initialBoundary={boundary}
-                      onBoundaryChange={handleBoundaryChange}
-                      onLoadMore={loadMoreRows}
-                      loadingMore={loadingMore}
-                    />
+                    <div className="space-y-3">
+                      <DataPreviewTable
+                        rows={preview.rows}
+                        totalRows={preview.totalRows}
+                        totalColumns={preview.totalColumns}
+                        initialBoundary={boundary}
+                        onBoundaryChange={handleBoundaryChange}
+                        onLoadMore={loadMoreRows}
+                        loadingMore={loadingMore}
+                        slotAfterWarning={
+                          <>
+                            <Button
+                              size="sm"
+                              onClick={runActiveStructuredCleansing}
+                              disabled={!activeStructuredBoundary || activeStructuredCleansing?.status === "running"}
+                              className="w-full shadow-sm"
+                            >
+                              {activeStructuredCleansing?.status === "running" ? (
+                                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Sparkles className="mr-2 h-3.5 w-3.5" />
+                              )}
+                              Run AI Data Cleansing
+                            </Button>
+                            <div className="mt-3 rounded-md border p-3 min-h-[140px] flex flex-col">
+                              <div className="mb-2 text-sm font-medium">AI Cleansed Preview</div>
+                              {activeStructuredCleansing?.status === "running" ? (
+                                <div className="flex flex-1 min-h-[100px] items-center justify-center text-muted-foreground">
+                                  <Loader2 className="h-8 w-8 animate-spin" />
+                                </div>
+                              ) : activeStructuredCleansedColumns.length > 0 && activeStructuredCleansedRows.length > 0 ? (
+                                <ScrollArea className="w-full rounded-md border">
+                                  <Table>
+                                    <TableBody>
+                                      <TableRow>
+                                        {activeStructuredCleansedColumns.slice(0, 12).map((column) => (
+                                          <TableCell key={column} className="text-xs font-semibold">{column}</TableCell>
+                                        ))}
+                                      </TableRow>
+                                      {activeStructuredCleansedRows.slice(0, 10).map((row, rowIdx) => (
+                                        <TableRow key={rowIdx}>
+                                          {activeStructuredCleansedColumns.slice(0, 12).map((column) => (
+                                            <TableCell key={`${rowIdx}-${column}`} className="max-w-48 truncate whitespace-nowrap text-xs">
+                                              {String(row[column] ?? "") || <span className="text-muted-foreground">-</span>}
+                                            </TableCell>
+                                          ))}
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                  <ScrollBar orientation="horizontal" />
+                                </ScrollArea>
+                              ) : null}
+                            </div>
+                          </>
+                        }
+                      />
+                    </div>
                   )}
                 </>
               )}
@@ -2119,7 +2406,7 @@ function UploadPageContent() {
               {uploadMode === "structured" && structuredStep === "parsing" && (
                 <AiLoadingNotice
                   title="AI is processing your results"
-                  subtitle="Parsing data with the selected boundaries..."
+                  subtitle="AI is cleansing the data, please hold on"
                 />
               )}
               {error && (

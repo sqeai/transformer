@@ -35,6 +35,8 @@ interface DataPreviewTableProps {
   onBoundaryChange: (boundary: DataBoundary) => void;
   onLoadMore?: () => void;
   loadingMore?: boolean;
+  /** Rendered between the preview row-count warning and the data table */
+  slotAfterWarning?: React.ReactNode;
 }
 
 export default function DataPreviewTable({
@@ -45,6 +47,7 @@ export default function DataPreviewTable({
   onBoundaryChange,
   onLoadMore,
   loadingMore,
+  slotAfterWarning,
 }: DataPreviewTableProps) {
   const maxRowIdx = Math.max(0, totalRows - 1);
   const maxColIdx = Math.max(0, totalColumns - 1);
@@ -54,7 +57,7 @@ export default function DataPreviewTable({
   const [dataEnd, setDataEnd] = useState(initialBoundary?.dataEndRowIndex ?? maxRowIdx);
   const [startCol, setStartCol] = useState(initialBoundary?.startColumn ?? 0);
   const [endCol, setEndCol] = useState(initialBoundary?.endColumn ?? maxColIdx);
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState(true);
   /** Selected row (originalIndex) — centered in view with 5 rows above/below */
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(
     initialBoundary != null ? (initialBoundary.headerRowIndex ?? 0) : null,
@@ -210,6 +213,78 @@ export default function DataPreviewTable({
     return result;
   }, [rows, hasTrailingGap]);
 
+  const isNumericLike = useCallback((value: string) => {
+    const s = value.trim();
+    if (!s) return false;
+    // Common number formats: 1,234.56 | (123) | -10% | 10.2 | 1 234,56
+    return /^-?\(?\s*\d[\d\s,.'’]*\)?\s*%?$/.test(s);
+  }, []);
+
+  const padColumnIndices = useMemo(() => {
+    // Heuristic: forward-fill columns that are mostly non-numeric and have many blanks in the data range.
+    // This helps make hierarchical / merged-cell style sheets readable as a flat table.
+    const indices: number[] = [];
+    const sc = Math.max(0, startCol);
+    const ec = Math.max(sc, endCol);
+    for (let c = sc; c <= ec; c++) {
+      let nonEmpty = 0;
+      let empty = 0;
+      let numericLike = 0;
+      for (const r of rows) {
+        const idx = r.originalIndex;
+        if (idx === headerRow) continue;
+        if (idx < dataStart || idx > dataEnd) continue;
+        const cell = (r.data[c] ?? "").trim();
+        if (!cell) {
+          empty++;
+        } else {
+          nonEmpty++;
+          if (isNumericLike(cell)) numericLike++;
+        }
+      }
+      const total = nonEmpty + empty;
+      if (total < 5) continue;
+      const emptyRatio = empty / total;
+      const numericRatio = nonEmpty > 0 ? numericLike / nonEmpty : 0;
+      if (nonEmpty >= 2 && emptyRatio >= 0.25 && numericRatio <= 0.25) {
+        indices.push(c);
+      }
+    }
+    return indices;
+  }, [rows, startCol, endCol, headerRow, dataStart, dataEnd, isNumericLike]);
+
+  const paddedRowDataByOriginalIndex = useMemo(() => {
+    if (padColumnIndices.length === 0) return new Map<number, string[]>();
+    const map = new Map<number, string[]>();
+    const lastSeen = new Map<number, string>();
+    let lastOriginalIdx: number | null = null;
+
+    for (const r of rows) {
+      const idx = r.originalIndex;
+      const isGap = lastOriginalIdx != null && idx - lastOriginalIdx > 1;
+      if (isGap) lastSeen.clear();
+      lastOriginalIdx = idx;
+
+      const isHeader = idx === headerRow;
+      const isIncluded = !isHeader && idx >= dataStart && idx <= dataEnd;
+      if (!isIncluded) continue;
+
+      const next = [...r.data];
+      for (const c of padColumnIndices) {
+        const raw = (next[c] ?? "").trim();
+        if (raw) {
+          lastSeen.set(c, next[c] ?? "");
+        } else {
+          const carry = lastSeen.get(c);
+          if (carry != null && carry.trim() !== "") next[c] = carry;
+        }
+      }
+      map.set(idx, next);
+    }
+
+    return map;
+  }, [rows, padColumnIndices, headerRow, dataStart, dataEnd]);
+
   const skippedCount = useMemo(() => {
     if (!hasGap) return 0;
     for (let i = 1; i < rows.length; i++) {
@@ -364,6 +439,7 @@ export default function DataPreviewTable({
             </AlertDescription>
           </Alert>
         )}
+        {slotAfterWarning != null && <div className="mb-3">{slotAfterWarning}</div>}
         <div
           ref={scrollContainerRef}
           className="rounded-md border overflow-x-auto overflow-y-visible max-w-full"
@@ -448,7 +524,7 @@ export default function DataPreviewTable({
                 );
               }
               const rowIdx = entry.originalIndex;
-              const rowData = entry.data;
+              const rowData = paddedRowDataByOriginalIndex.get(rowIdx) ?? entry.data;
               const isHeader = rowIdx === headerRow;
               const isOutside =
                 !isHeader && (rowIdx < dataStart || rowIdx > dataEnd);

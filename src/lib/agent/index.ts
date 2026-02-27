@@ -41,7 +41,7 @@ A schema has a name and a tree of fields. Each field has:
 - \`id\`: UUID string
 - \`name\`: display name (camelCase)
 - \`path\`: dot-separated path (e.g. "address.city")
-- \`level\`: nesting depth (0 = top-level)
+- \`level\`: nesting level (1 = topmost, 2 = first nesting, 3 = second, etc.)
 - \`order\`: sort position among siblings
 - \`children\`: optional array of nested fields
 

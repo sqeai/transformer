@@ -598,7 +598,8 @@ export default function MappingPage() {
   }, [isStructuredLoop, effectiveRawColumns, targetPaths, effectiveColumnMappings.length, setColumnMappings]);
 
   useEffect(() => {
-    const key = isStructuredLoop ? `sheet:${activeSheetId}` : "single";
+    const columnSignature = effectiveRawColumns.join("||");
+    const key = isStructuredLoop ? `sheet:${activeSheetId}:${columnSignature}` : `single:${columnSignature}`;
     if (autoMapDone.current.has(key)) return;
     if (effectiveRawColumns.length === 0 || targetPaths.length === 0) return;
     if (effectiveColumnMappings.length > 0) return;
