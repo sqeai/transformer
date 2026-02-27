@@ -57,7 +57,7 @@ function PipelineNode({ data }: { data: { label: string; nodeType: string; param
 
   return (
     <div className={cn("rounded-lg border-2 px-4 py-3 min-w-[180px] max-w-[280px] shadow-sm", colorClass)}>
-      <Handle type="target" position={Position.Top} className="!bg-border !w-3 !h-3" />
+      <Handle type="target" position={Position.Left} className="!bg-border !w-3 !h-3" />
       <div className="flex items-center gap-2 mb-1">
         <Icon className="h-4 w-4 shrink-0" />
         <span className="text-sm font-semibold">{data.label}</span>
@@ -83,7 +83,7 @@ function PipelineNode({ data }: { data: { label: string; nodeType: string; param
           )}
         </div>
       )}
-      <Handle type="source" position={Position.Bottom} className="!bg-border !w-3 !h-3" />
+      <Handle type="source" position={Position.Right} className="!bg-border !w-3 !h-3" />
     </div>
   );
 }
@@ -103,7 +103,7 @@ export default function MappingFlow({ pipeline, className }: MappingFlowProps) {
       pipeline.nodes.map((node, i) => ({
         id: node.id,
         type: "pipeline",
-        position: { x: 200, y: i * 160 },
+        position: { x: i * 320, y: 200 },
         data: {
           label: node.label,
           nodeType: node.type,

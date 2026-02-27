@@ -44,6 +44,10 @@ export interface DataCleanserInput {
   targetPaths: string[];
   sheetName: string;
   userDirective?: string;
+  originalColumns?: string[];
+  originalRows?: Record<string, unknown>[];
+  modifiedColumns?: string[];
+  modifiedRows?: Record<string, unknown>[];
 }
 
 export interface DataCleanserResult {
@@ -483,6 +487,23 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
 
   if (input.userDirective) {
     userMessage.push("", `User directive (HIGHEST PRIORITY): ${input.userDirective}`);
+  }
+
+  if (
+    Array.isArray(input.originalColumns) &&
+    Array.isArray(input.originalRows) &&
+    Array.isArray(input.modifiedColumns) &&
+    Array.isArray(input.modifiedRows)
+  ) {
+    userMessage.push(
+      "",
+      "Context for modify request:",
+      `Original sheet: ${input.originalRows.length} rows, ${input.originalColumns.length} columns`,
+      `Original columns: ${input.originalColumns.join(", ")}`,
+      `Modified sheet before this run: ${input.modifiedRows.length} rows, ${input.modifiedColumns.length} columns`,
+      `Modified columns: ${input.modifiedColumns.join(", ")}`,
+      "Apply the directive to the modified sheet while using the original sheet as reference context.",
+    );
   }
 
   const result = await agent.invoke(

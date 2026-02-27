@@ -137,6 +137,7 @@ function NewDatasetPageContent() {
   const [previewSheet, setPreviewSheet] = useState<SheetSelection | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewTopRows, setPreviewTopRows] = useState(PREVIEW_ROWS);
 
   // Processing state
   const [jobResults, setJobResults] = useState<SheetJobResult[]>(datasetWorkflow.jobResults);
@@ -151,6 +152,7 @@ function NewDatasetPageContent() {
   const [modifyPrompt, setModifyPrompt] = useState("");
   const modifyPollingRef = useRef<NodeJS.Timeout | null>(null);
   const modifyJobIdRef = useRef<string | null>(null);
+  const [modifySubmittingSheetKey, setModifySubmittingSheetKey] = useState<string | null>(null);
   const [originalPreview, setOriginalPreview] = useState<PreviewState | null>(null);
   const [originalPreviewLoading, setOriginalPreviewLoading] = useState(false);
 
@@ -191,6 +193,10 @@ function NewDatasetPageContent() {
 
   // Load preview for selected sheet
   useEffect(() => {
+    setPreviewTopRows(PREVIEW_ROWS);
+  }, [previewSheet?.fileId, previewSheet?.sheetIndex]);
+
+  useEffect(() => {
     if (!previewSheet) return;
     const file = files.find((f) => f.fileId === previewSheet.fileId);
     if (!file) return;
@@ -202,7 +208,7 @@ function NewDatasetPageContent() {
       try {
         const result = await extractExcelGridTopBottom(
           file.buffer,
-          PREVIEW_ROWS,
+          previewTopRows,
           0,
           100,
           previewSheet.sheetIndex,
@@ -225,7 +231,7 @@ function NewDatasetPageContent() {
     })();
 
     return () => { cancelled = true; };
-  }, [previewSheet, files]);
+  }, [previewSheet, files, previewTopRows]);
 
   // Persist workflow state
   useEffect(() => {
@@ -435,14 +441,6 @@ function NewDatasetPageContent() {
     }
   }, [files]);
 
-  // Computed: is the currently viewed sheet being re-processed by a modify job?
-  const isModifyRunning = useMemo(() => {
-    const completedResults = jobResults.filter((r) => r.status === "completed" || r.status === "pending" || r.status === "running");
-    const currentResult = completedResults.filter((r) => r.status === "completed" || r.status === "pending" || r.status === "running")[reviewSheetIndex];
-    if (!currentResult) return false;
-    return currentResult.status === "pending" || currentResult.status === "running";
-  }, [jobResults, reviewSheetIndex]);
-
   // Any sheet currently being re-processed (globally blocks nav)
   const anySheetProcessing = useMemo(
     () => jobResults.some((r) => r.status === "pending" || r.status === "running"),
@@ -469,7 +467,7 @@ function NewDatasetPageContent() {
               ? {
                   ...r,
                   status: job.status as SheetJobResult["status"],
-                  result: job.result as SheetJobResult["result"],
+                  result: (job.result as SheetJobResult["result"] | undefined) ?? r.result,
                   error: job.error,
                 }
               : r,
@@ -522,15 +520,21 @@ function NewDatasetPageContent() {
   const handleModifyWithAI = useCallback(async (sheetResult: SheetJobResult) => {
     if (!modifyPrompt.trim() || !schemaId) return;
 
+    const currentSheetKey = `${sheetResult.sheet.fileId}:${sheetResult.sheet.sheetIndex}`;
+    setModifySubmittingSheetKey(currentSheetKey);
+
     try {
       const file = files.find((f) => f.fileId === sheetResult.sheet.fileId);
       if (!file) throw new Error("File not found");
+      if (!sheetResult.result) throw new Error("No modified sheet is available yet for this tab.");
 
       const parsed = await parseExcelToRows(file.buffer, {
         headerRowIndex: 0,
         dataStartRowIndex: 1,
         sheetIndex: sheetResult.sheet.sheetIndex,
       });
+      const modifiedColumns = sheetResult.result.transformedColumns;
+      const modifiedRows = sheetResult.result.transformedRows;
 
       const res = await fetch("/api/jobs", {
         method: "POST",
@@ -538,11 +542,15 @@ function NewDatasetPageContent() {
         body: JSON.stringify({
           type: "data_cleanse",
           payload: {
-            columns: parsed.columns,
-            rows: parsed.rows,
+            columns: modifiedColumns,
+            rows: modifiedRows,
             targetPaths,
             sheetName: sheetResult.sheet.sheetName,
             userDirective: modifyPrompt.trim(),
+            originalColumns: parsed.columns,
+            originalRows: parsed.rows,
+            modifiedColumns,
+            modifiedRows,
           },
         }),
       });
@@ -553,16 +561,18 @@ function NewDatasetPageContent() {
       setJobResults((prev) =>
         prev.map((r) =>
           r.sheet.fileId === sheetResult.sheet.fileId && r.sheet.sheetIndex === sheetResult.sheet.sheetIndex
-            ? { ...r, jobId: data.jobId, status: "pending" as const, result: undefined, error: undefined }
+            ? { ...r, jobId: data.jobId, status: "pending" as const, result: r.result, error: undefined }
             : r,
         ),
       );
 
       setModifyPrompt("");
+      setModifySubmittingSheetKey(null);
 
       fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
       startModifyPolling(data.jobId);
     } catch (err) {
+      setModifySubmittingSheetKey(null);
       alert(err instanceof Error ? err.message : "Failed to modify");
     }
   }, [modifyPrompt, schemaId, files, targetPaths, startModifyPolling]);
@@ -658,7 +668,9 @@ function NewDatasetPageContent() {
     );
   }
 
-  const completedResults = jobResults.filter((r) => r.status === "completed");
+  const reviewableResults = jobResults.filter(
+    (r) => (r.status === "completed" || r.status === "pending" || r.status === "running") && Boolean(r.result),
+  );
   const confirmedCount = Array.from(confirmedSheets).filter((key) =>
     jobResults.some((r) => `${r.sheet.fileId}:${r.sheet.sheetIndex}` === key && r.status === "completed"),
   ).length;
@@ -817,6 +829,7 @@ function NewDatasetPageContent() {
                     <Table>
                       <TableHeader>
                         <TableRow>
+                          <TableHead className="w-14 whitespace-nowrap">#</TableHead>
                           {preview.columns.map((col) => (
                             <TableHead key={col} className="whitespace-nowrap">{col}</TableHead>
                           ))}
@@ -825,6 +838,7 @@ function NewDatasetPageContent() {
                       <TableBody>
                         {preview.rows.map((row, i) => (
                           <TableRow key={i}>
+                            <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                             {preview.columns.map((col) => (
                               <TableCell key={col} className="whitespace-nowrap max-w-[200px] truncate">
                                 {String(row[col] ?? "")}
@@ -842,9 +856,20 @@ function NewDatasetPageContent() {
                   </div>
                 )}
                 {preview && preview.totalRows > preview.visibleRows && (
-                  <p className="text-xs text-muted-foreground mt-2 text-center">
-                    Showing {preview.visibleRows} of {preview.totalRows} rows
-                  </p>
+                  <div className="mt-2 flex flex-col items-center gap-2">
+                    <p className="text-xs text-muted-foreground text-center">
+                      Showing {preview.visibleRows} of {preview.totalRows} rows
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPreviewTopRows((prev) => prev + PREVIEW_ROWS)}
+                      disabled={previewLoading}
+                    >
+                      {previewLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+                      Load more
+                    </Button>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -918,7 +943,7 @@ function NewDatasetPageContent() {
           <div className="space-y-4">
             {/* Sheet tabs */}
             <div className="flex flex-wrap gap-2 border-b pb-2">
-              {completedResults.map((r, i) => {
+              {reviewableResults.map((r, i) => {
                 const key = `${r.sheet.fileId}:${r.sheet.sheetIndex}`;
                 const isConfirmed = confirmedSheets.has(key);
                 return (
@@ -943,13 +968,17 @@ function NewDatasetPageContent() {
               })}
             </div>
 
-            {completedResults.length > 0 && completedResults[reviewSheetIndex] && (() => {
-              const currentResult = completedResults[reviewSheetIndex];
+            {reviewableResults.length > 0 && reviewableResults[reviewSheetIndex] && (() => {
+              const currentResult = reviewableResults[reviewSheetIndex];
               const currentKey = `${currentResult.sheet.fileId}:${currentResult.sheet.sheetIndex}`;
               const isConfirmed = confirmedSheets.has(currentKey);
               const transformedRows = currentResult.result?.transformedRows ?? [];
               const transformedCols = currentResult.result?.transformedColumns ?? [];
               const pipeline = currentResult.result?.pipeline;
+              const currentSheetProcessing = currentResult.status === "pending" || currentResult.status === "running";
+              const currentSheetKey = `${currentResult.sheet.fileId}:${currentResult.sheet.sheetIndex}`;
+              const currentSheetSubmitting = modifySubmittingSheetKey === currentSheetKey;
+              const showModifyLoading = currentSheetProcessing || currentSheetSubmitting;
 
               return (
                 <Card>
@@ -1013,10 +1042,11 @@ function NewDatasetPageContent() {
                             Loading original data...
                           </div>
                         ) : originalPreview ? (
-                          <ScrollArea className="w-full rounded-md border max-h-[700px]">
+                          <ScrollArea className="w-full rounded-md border max-h-[700px] overflow-auto">
                             <Table>
                               <TableHeader>
                                 <TableRow>
+                                  <TableHead className="w-14 whitespace-nowrap">#</TableHead>
                                   {originalPreview.columns.map((col) => (
                                     <TableHead key={col} className="whitespace-nowrap">{col}</TableHead>
                                   ))}
@@ -1025,6 +1055,7 @@ function NewDatasetPageContent() {
                               <TableBody>
                                 {originalPreview.rows.map((row, i) => (
                                   <TableRow key={i}>
+                                    <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                                     {originalPreview.columns.map((col) => (
                                       <TableCell key={col} className="whitespace-nowrap max-w-[200px] truncate">
                                         {String(row[col] ?? "")}
@@ -1044,10 +1075,43 @@ function NewDatasetPageContent() {
 
                     {reviewSubTab === "modified" && (
                       <div className="space-y-4">
-                        {currentResult.status === "pending" || currentResult.status === "running" ? (
-                          <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
-                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                            <p className="text-sm font-medium">AI Data Cleanser is re-processing this sheet...</p>
+                        <ScrollArea className="w-full rounded-md border max-h-[700px] overflow-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="w-14 whitespace-nowrap">#</TableHead>
+                                {transformedCols.map((col) => (
+                                  <TableHead key={col} className="whitespace-nowrap">{col}</TableHead>
+                                ))}
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {transformedRows.slice(0, PREVIEW_ROWS).map((row, i) => (
+                                <TableRow key={i}>
+                                  <TableCell className="text-muted-foreground">{i + 1}</TableCell>
+                                  {transformedCols.map((col) => (
+                                    <TableCell key={col} className="whitespace-nowrap max-w-[200px] truncate">
+                                      {String(row[col] ?? "")}
+                                    </TableCell>
+                                  ))}
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                          <ScrollBar orientation="horizontal" />
+                        </ScrollArea>
+                        {transformedRows.length > PREVIEW_ROWS && (
+                          <p className="text-xs text-muted-foreground text-center">
+                            Showing {PREVIEW_ROWS} of {transformedRows.length} rows
+                          </p>
+                        )}
+
+                        {currentSheetProcessing && (
+                          <div className="flex items-center justify-between gap-2 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                            <div className="flex items-center gap-2">
+                              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                              AI Data Cleanser is re-processing this sheet...
+                            </div>
                             <Button
                               variant="outline"
                               size="sm"
@@ -1057,56 +1121,30 @@ function NewDatasetPageContent() {
                               Stop
                             </Button>
                           </div>
-                        ) : (
-                          <>
-                            <ScrollArea className="w-full rounded-md border max-h-[700px]">
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    {transformedCols.map((col) => (
-                                      <TableHead key={col} className="whitespace-nowrap">{col}</TableHead>
-                                    ))}
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {transformedRows.slice(0, PREVIEW_ROWS).map((row, i) => (
-                                    <TableRow key={i}>
-                                      {transformedCols.map((col) => (
-                                        <TableCell key={col} className="whitespace-nowrap max-w-[200px] truncate">
-                                          {String(row[col] ?? "")}
-                                        </TableCell>
-                                      ))}
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                              <ScrollBar orientation="horizontal" />
-                            </ScrollArea>
-                            {transformedRows.length > PREVIEW_ROWS && (
-                              <p className="text-xs text-muted-foreground text-center">
-                                Showing {PREVIEW_ROWS} of {transformedRows.length} rows
-                              </p>
-                            )}
-
-                            <div className="flex gap-2">
-                              <Textarea
-                                placeholder="Describe how to modify this data (e.g. 'Remove all rows where amount is 0', 'Combine first and last name columns')..."
-                                value={modifyPrompt}
-                                onChange={(e) => setModifyPrompt(e.target.value)}
-                                className="flex-1"
-                                rows={2}
-                              />
-                              <Button
-                                onClick={() => handleModifyWithAI(currentResult)}
-                                disabled={!modifyPrompt.trim() || anySheetProcessing}
-                                className="shrink-0"
-                              >
-                                <Sparkles className="mr-2 h-4 w-4" />
-                                Modify using AI
-                              </Button>
-                            </div>
-                          </>
                         )}
+
+                        <div className="flex gap-2">
+                          <Textarea
+                            placeholder="Describe how to modify this data (e.g. 'Remove all rows where amount is 0', 'Combine first and last name columns')..."
+                            value={modifyPrompt}
+                            onChange={(e) => setModifyPrompt(e.target.value)}
+                            className="flex-1"
+                            rows={2}
+                            disabled={showModifyLoading}
+                          />
+                          <Button
+                            onClick={() => handleModifyWithAI(currentResult)}
+                            disabled={!modifyPrompt.trim() || anySheetProcessing || currentSheetSubmitting}
+                            className="shrink-0"
+                          >
+                            {showModifyLoading ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Sparkles className="mr-2 h-4 w-4" />
+                            )}
+                            Modify using AI
+                          </Button>
+                        </div>
                       </div>
                     )}
 

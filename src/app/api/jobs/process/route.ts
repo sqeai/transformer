@@ -41,6 +41,10 @@ async function processJobs() {
             targetPaths?: string[];
             sheetName?: string;
             userDirective?: string;
+            originalColumns?: string[];
+            originalRows?: Record<string, unknown>[];
+            modifiedColumns?: string[];
+            modifiedRows?: Record<string, unknown>[];
           };
 
           if (!Array.isArray(payload?.columns) || !Array.isArray(payload?.rows) || !Array.isArray(payload?.targetPaths)) {
@@ -53,6 +57,10 @@ async function processJobs() {
             targetPaths: payload.targetPaths,
             sheetName: payload.sheetName ?? "Sheet",
             userDirective: payload.userDirective,
+            originalColumns: payload.originalColumns,
+            originalRows: payload.originalRows,
+            modifiedColumns: payload.modifiedColumns,
+            modifiedRows: payload.modifiedRows,
           });
 
           await updateJobResult(supabase, job.id, result);

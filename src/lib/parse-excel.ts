@@ -8,6 +8,16 @@ const MAX_DETECT_ROWS = 500;
  */
 const MAX_DETECT_COLS = 200;
 
+function stringifyUnknownCellObject(value: object): string {
+  try {
+    const json = JSON.stringify(value);
+    if (json && json !== "{}") return json;
+  } catch {
+    // Fall through to avoid returning "[object Object]".
+  }
+  return "";
+}
+
 function extractCellText(v: ExcelJS.CellValue, fallback: string): string {
   let raw: string;
   if (typeof v === "string") {
@@ -19,7 +29,7 @@ function extractCellText(v: ExcelJS.CellValue, fallback: string): string {
   } else if (v && typeof v === "object" && "text" in v) {
     raw = String((v as { text: string }).text);
   } else if (v != null) {
-    raw = String(v);
+    raw = typeof v === "object" ? stringifyUnknownCellObject(v) : String(v);
   } else {
     return fallback;
   }
@@ -38,8 +48,13 @@ function cellToStringSimple(value: ExcelJS.CellValue): string {
     if ("text" in value) return String((value as { text: string }).text).trim();
     if ("result" in value) {
       const r = (value as { result: unknown }).result;
+      if (typeof r === "string") return r.trim();
+      if (typeof r === "number" || typeof r === "boolean") return String(r).trim();
+      if (r instanceof Date) return r.toISOString();
+      if (r && typeof r === "object") return stringifyUnknownCellObject(r).trim();
       return r != null ? String(r).trim() : "";
     }
+    return stringifyUnknownCellObject(value).trim();
   }
   return String(value).trim();
 }

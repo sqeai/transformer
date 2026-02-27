@@ -215,6 +215,22 @@ export interface DataCleansingPlan {
 
 const PLACEHOLDER_COLUMN_HEADER_RE = /^Column\s+\d+$/i;
 
+function stringifyForHeader(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object") {
+    try {
+      const json = JSON.stringify(value);
+      return json && json !== "{}" ? json : "";
+    } catch {
+      return "";
+    }
+  }
+  return String(value);
+}
+
 function buildFieldTree(flat: LlmSchemaField[]): SchemaField[] {
   const result: SchemaField[] = [];
   const parentStack: SchemaField[] = [];
@@ -423,7 +439,7 @@ export async function detectHeaderRowValuesWithLLM(
     const parts: string[] = [];
 
     for (let r = headerStart; r < inferredHeaderEndExclusive; r++) {
-      const raw = (grid[r]?.[c] ?? "").toString().trim();
+      const raw = stringifyForHeader(grid[r]?.[c]).trim();
       if (!raw) continue;
       if (PLACEHOLDER_COLUMN_HEADER_RE.test(raw)) continue;
       if (parts[parts.length - 1]?.toLowerCase() === raw.toLowerCase()) continue;
