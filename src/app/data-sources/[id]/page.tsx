@@ -145,7 +145,11 @@ export default function DataSourceDetailPage({
         const c = d.config as Record<string, unknown>;
         setBqProjectId((c.projectId as string) ?? "");
         if (c.credentials) {
-          setBqCredentials(JSON.stringify(c.credentials, null, 2));
+          setBqCredentials(
+            typeof c.credentials === "string"
+              ? c.credentials
+              : JSON.stringify(c.credentials, null, 2)
+          );
         }
       } else if (d.type === "postgres") {
         const c = d.config as Record<string, unknown>;

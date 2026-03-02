@@ -1,6 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 
+function redactSensitiveConfig(config: unknown) {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return config;
+  const base = { ...(config as Record<string, unknown>) };
+
+  if ("credentials" in base) {
+    base.credentials = "***";
+  }
+  if ("service_account" in base) {
+    base.service_account = "***";
+  }
+
+  return base;
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -25,7 +39,7 @@ export async function GET(
       id: data.id,
       name: data.name,
       type: data.type,
-      config: data.config,
+      config: redactSensitiveConfig(data.config),
       createdAt: data.created_at,
       updatedAt: data.updated_at,
     },
