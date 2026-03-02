@@ -125,6 +125,7 @@ export default function DatasetPage() {
   // Export dialog state
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [dataSources, setDataSources] = useState<DataSourceItem[]>([]);
+  const [loadingDataSources, setLoadingDataSources] = useState(false);
   const [selectedDataSourceId, setSelectedDataSourceId] = useState("");
   const [exportTables, setExportTables] = useState<ExportTableCandidate[]>([]);
   const [loadingExportTables, setLoadingExportTables] = useState(false);
@@ -216,6 +217,7 @@ export default function DatasetPage() {
   }, []);
 
   const fetchDataSources = useCallback(async () => {
+    setLoadingDataSources(true);
     try {
       const res = await fetch("/api/data-sources");
       const data = await res.json().catch(() => ({}));
@@ -226,10 +228,13 @@ export default function DatasetPage() {
         setDataSources(sources);
         setSelectedDataSourceId((prev) => {
           if (prev && sources.some((ds: DataSourceItem) => ds.id === prev)) return prev;
-          return sources[0]?.id ?? "";
+          return "";
         });
       }
     } catch { /* ignore */ }
+    finally {
+      setLoadingDataSources(false);
+    }
   }, []);
 
   const columns = useMemo(() => {
@@ -445,16 +450,18 @@ export default function DatasetPage() {
                 .filter(Boolean)
             );
             const matchedColumns = [...requiredColumnSet].filter((column) => tableColumns.has(column)).length;
+            const tableColumnCount = tableColumns.size;
             const matchPercent = requiredColumnCount === 0
               ? 0
               : Math.round((matchedColumns / requiredColumnCount) * 100);
+            const isSubsetSchema = tableColumnCount > 0 && [...tableColumns].every((column) => requiredColumnSet.has(column));
             return {
               schema: table.schema,
               name: table.name,
               matchedColumns,
               requiredColumns: requiredColumnCount,
               matchPercent,
-              compatible: matchPercent === 100,
+              compatible: isSubsetSchema,
             } as ExportTableCandidate;
           } catch {
             return {
@@ -504,7 +511,8 @@ export default function DatasetPage() {
   };
 
   const openExportDialog = () => {
-    fetchDataSources();
+    setSelectedDataSourceId("");
+    setDataSources([]);
     setExportTargetTable(dataset?.name?.replace(/[^a-zA-Z0-9_]/g, "_").toLowerCase() ?? "");
     setExportTargetSchema("public");
     setExportTables([]);
@@ -1204,14 +1212,28 @@ export default function DatasetPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Data Source</label>
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">Data Source</label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={loadingDataSources}
+                  onClick={() => { void fetchDataSources(); }}
+                >
+                  {loadingDataSources ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
+                  {loadingDataSources ? "Loading..." : "Load Connections"}
+                </Button>
+              </div>
               <Select value={selectedDataSourceId} onValueChange={setSelectedDataSourceId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select a data source..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {dataSources.length === 0 ? (
-                    <SelectItem value="_none" disabled>No external database data sources configured</SelectItem>
+                  {loadingDataSources ? (
+                    <SelectItem value="_loading" disabled>Loading connections...</SelectItem>
+                  ) : dataSources.length === 0 ? (
+                    <SelectItem value="_none" disabled>Load connections to choose a data source</SelectItem>
                   ) : (
                     dataSources.map((ds) => (
                       <SelectItem key={ds.id} value={ds.id}>
@@ -1274,7 +1296,7 @@ export default function DatasetPage() {
                         <span className="shrink-0 text-xs">
                           {table.compatible ? (
                             <Badge variant="outline" className="border-green-300 text-green-700 dark:border-green-800 dark:text-green-300">
-                              100% Match
+                              {table.matchPercent === 100 ? "100% Match" : `Compatible (${table.matchPercent}% Match)`}
                             </Badge>
                           ) : (
                             <Badge variant="outline">Schema Incompatible</Badge>
