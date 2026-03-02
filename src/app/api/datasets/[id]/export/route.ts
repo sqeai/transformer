@@ -3,6 +3,50 @@ import { getAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createConnector, type DataSourceType } from "@/lib/connectors";
 
+type BigQueryConfigShape = {
+  projectId?: string;
+  credentials?: Record<string, unknown>;
+  service_account?: Record<string, unknown> | string;
+  keyFilename?: string;
+};
+
+function parseServiceAccount(
+  value: BigQueryConfigShape["service_account"]
+): Record<string, unknown> | undefined {
+  if (!value) return undefined;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === "object") {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+  if (typeof value === "object") return value;
+  return undefined;
+}
+
+function formatBigQueryError(err: unknown, context: Record<string, unknown>) {
+  const e = err as {
+    message?: string;
+    code?: number | string;
+    errors?: Array<{ message?: string; reason?: string; location?: string }>;
+    response?: { status?: number; statusText?: string; data?: unknown };
+  };
+  return {
+    message: e?.message ?? "Unknown BigQuery error",
+    code: e?.code,
+    errors: e?.errors ?? [],
+    httpStatus: e?.response?.status,
+    httpStatusText: e?.response?.statusText,
+    responseData: e?.response?.data,
+    context,
+  };
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -80,21 +124,72 @@ export async function POST(
   try {
     if (dsType === "bigquery") {
       const { BigQuery } = await import("@google-cloud/bigquery");
-      const bqConfig = dsConfig as { projectId: string; credentials?: Record<string, unknown>; keyFilename?: string };
+      const bqConfig = dsConfig as BigQueryConfigShape;
+      const serviceAccount = parseServiceAccount(bqConfig.service_account);
+      const credentials = bqConfig.credentials ?? serviceAccount;
+      if (!bqConfig.projectId) {
+        return NextResponse.json({ error: "BigQuery config missing projectId" }, { status: 400 });
+      }
+
       const client = new BigQuery({
         projectId: bqConfig.projectId,
-        ...(bqConfig.credentials ? { credentials: bqConfig.credentials } : {}),
+        ...(credentials ? { credentials } : {}),
         ...(bqConfig.keyFilename ? { keyFilename: bqConfig.keyFilename } : {}),
       });
 
-      const datasetRef = client.dataset(schemaName);
-      const [datasetExists] = await datasetRef.exists();
-      if (!datasetExists) {
-        await client.createDataset(schemaName);
+      const bqDatasetName = schemaName;
+      const bqTableName = targetTable;
+      const datasetRef = client.dataset(bqDatasetName);
+
+      let datasetExists = false;
+      try {
+        [datasetExists] = await datasetRef.exists();
+      } catch (err) {
+        const detail = formatBigQueryError(err, {
+          step: "check_dataset_exists",
+          projectId: bqConfig.projectId,
+          dataset: bqDatasetName,
+          table: bqTableName,
+        });
+        return NextResponse.json(
+          { error: `BigQuery export failed at check_dataset_exists: ${detail.message}`, details: detail },
+          { status: 500 }
+        );
       }
 
-      const tableRef = datasetRef.table(targetTable);
-      const [tableExists] = await tableRef.exists();
+      if (!datasetExists) {
+        try {
+          await client.createDataset(bqDatasetName);
+        } catch (err) {
+          const detail = formatBigQueryError(err, {
+            step: "create_dataset",
+            projectId: bqConfig.projectId,
+            dataset: bqDatasetName,
+            table: bqTableName,
+          });
+          return NextResponse.json(
+            { error: `BigQuery export failed at create_dataset: ${detail.message}`, details: detail },
+            { status: 500 }
+          );
+        }
+      }
+
+      const tableRef = datasetRef.table(bqTableName);
+      let tableExists = false;
+      try {
+        [tableExists] = await tableRef.exists();
+      } catch (err) {
+        const detail = formatBigQueryError(err, {
+          step: "check_table_exists",
+          projectId: bqConfig.projectId,
+          dataset: bqDatasetName,
+          table: bqTableName,
+        });
+        return NextResponse.json(
+          { error: `BigQuery export failed at check_table_exists: ${detail.message}`, details: detail },
+          { status: 500 }
+        );
+      }
 
       if (!tableExists && createTable) {
         const schema = columns.map((col) => ({
@@ -102,7 +197,25 @@ export async function POST(
           type: "STRING",
           mode: "NULLABLE" as const,
         }));
-        await datasetRef.createTable(targetTable, { schema });
+        try {
+          await datasetRef.createTable(bqTableName, { schema });
+        } catch (err) {
+          const detail = formatBigQueryError(err, {
+            step: "create_table",
+            projectId: bqConfig.projectId,
+            dataset: bqDatasetName,
+            table: bqTableName,
+            columnCount: schema.length,
+          });
+          return NextResponse.json(
+            { error: `BigQuery export failed at create_table: ${detail.message}`, details: detail },
+            { status: 500 }
+          );
+        }
+      } else if (!tableExists && !createTable) {
+        return NextResponse.json({
+          error: `BigQuery table not found: ${bqDatasetName}.${bqTableName}. Enable create table to create it automatically.`,
+        }, { status: 400 });
       }
 
       const sanitizedRows = rows.map((row) => {
@@ -116,7 +229,24 @@ export async function POST(
       const BATCH_SIZE = 500;
       for (let i = 0; i < sanitizedRows.length; i += BATCH_SIZE) {
         const batch = sanitizedRows.slice(i, i + BATCH_SIZE);
-        await datasetRef.table(targetTable).insert(batch);
+        try {
+          await datasetRef.table(bqTableName).insert(batch);
+        } catch (err) {
+          const detail = formatBigQueryError(err, {
+            step: "insert_rows",
+            projectId: bqConfig.projectId,
+            dataset: bqDatasetName,
+            table: bqTableName,
+            batchStart: i,
+            batchEnd: Math.min(i + BATCH_SIZE, sanitizedRows.length) - 1,
+            batchSize: batch.length,
+            totalRows: sanitizedRows.length,
+          });
+          return NextResponse.json(
+            { error: `BigQuery export failed at insert_rows: ${detail.message}`, details: detail },
+            { status: 500 }
+          );
+        }
       }
     } else if (dsType === "postgres") {
       const pg = await import("pg");
