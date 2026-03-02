@@ -56,6 +56,7 @@ import {
   X,
 } from "lucide-react";
 import { SQL_COMPATIBLE_TYPES, type SchemaField, type FinalSchema, type SqlCompatibleType } from "@/lib/types";
+import { toast } from "sonner";
 
 interface FinalSchemaTableProps {
   schema: FinalSchema;
@@ -71,6 +72,17 @@ interface FinalSchemaTableProps {
 interface FlatField {
   field: SchemaField;
   path: string;
+}
+
+const SNAKE_CASE_FIELD_RE = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
+
+function toSnakeCase(value: string): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
 }
 
 function flattenWithPath(fields: SchemaField[], prefix = ""): FlatField[] {
@@ -409,6 +421,27 @@ export default function FinalSchemaTable({
 
   const handleSave = useCallback(() => {
     if (readOnly || !draftFlat) return;
+    for (const item of draftFlat) {
+      const name = String(item.field.name ?? "").trim();
+      if (!name) {
+        toast.error("Field names cannot be empty.");
+        return;
+      }
+      if (!SNAKE_CASE_FIELD_RE.test(name)) {
+        toast.error(`Field "${name}" must be lowercase snake_case.`);
+        return;
+      }
+    }
+
+    const pathSet = new Set<string>();
+    for (const item of draftFlat) {
+      if (pathSet.has(item.path)) {
+        toast.error(`Duplicate field path detected: ${item.path}`);
+        return;
+      }
+      pathSet.add(item.path);
+    }
+
     commitFields(draftFlat);
     setDraftFlat(null);
     setIsEditing(false);
@@ -431,12 +464,13 @@ export default function FinalSchemaTable({
 
   const handleRename = useCallback(
     (index: number, newName: string) => {
+      const normalizedName = toSnakeCase(newName);
       const next = flat.map((item, i) => {
         if (i !== index) return item;
         const basePath = item.path.split(".").slice(0, -1).join(".");
         return {
-          field: { ...item.field, name: newName },
-          path: basePath ? `${basePath}.${newName}` : newName,
+          field: { ...item.field, name: normalizedName },
+          path: basePath ? `${basePath}.${normalizedName}` : normalizedName,
         };
       });
       setDraftFlat(next);

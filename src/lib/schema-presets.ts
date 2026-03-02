@@ -4,6 +4,7 @@ export interface SchemaPreset {
   id: string;
   name: string;
   description: string;
+  defaultSchemaName?: string;
   fields: SchemaField[];
 }
 
@@ -37,33 +38,25 @@ const financialStatementFields: SchemaField[] = [
   makeField("Audited", 11, "BOOLEAN"),
 ];
 
-const corporateLoanFields: SchemaField[] = [
-  makeField("AssetLiability", 1),
-  makeField("BS Grouping", 2),
-  makeField("CorpLoan Category", 3),
-  makeField("CorpLoan Name", 4),
-  makeField("Facility", 5),
-  makeField("Lender", 6),
-  makeField("Borrower Group", 7),
-  makeField("Borrower Entity", 8),
-  makeField("Intermediary", 9),
-  makeField("Start Date", 10, "DATE"),
-  makeField("End Date", 11, "DATE"),
-  makeField("Currency", 12),
-  makeField("Initial Principal", 13, "NUMERIC"),
-  makeField("Remaining Principal", 14, "NUMERIC"),
-  makeField("Interest Rate", 15, "FLOAT"),
-  makeField("Interest Payment", 16, "NUMERIC"),
-  makeField("Penalty Rate", 17, "FLOAT"),
-  makeField("Penalty Rate Period", 18),
-  makeField("Penalty Calculated", 19, "NUMERIC"),
-  makeField("Intermediary Margin", 20, "NUMERIC"),
-  makeField("Installment", 21, "NUMERIC"),
-  makeField("Installment Frequency", 22),
-  makeField("Discounted Interest Rate", 23, "FLOAT"),
-  makeField("Discounted Interest Rate Start Date", 24, "DATE"),
-  makeField("Days in a Year", 25, "INTEGER"),
-  makeField("Days in a Month", 26, "INTEGER"),
+const fixedInstrumentFields: SchemaField[] = [
+  makeField("position_id", 1),
+  makeField("asset_liability", 2),
+  makeField("bs_grouping", 3),
+  makeField("account_description", 4),
+  makeField("counterparty", 5),
+  makeField("currency", 6),
+  makeField("start_date", 7, "DATE"),
+  makeField("end_date", 8, "DATE"),
+  makeField("principal_amount", 9, "NUMERIC"),
+  makeField("principal_outstanding", 10, "NUMERIC"),
+  makeField("installment_schedule", 11),
+  makeField("purchase_price", 12, "NUMERIC"),
+  makeField("coupon_rate", 13, "NUMERIC"),
+  makeField("type", 14),
+  makeField("coupon_payment_freq", 15),
+  makeField("coupon_next_payment_date", 16, "DATE"),
+  makeField("account_name_sub_entity", 17),
+  makeField("classification", 18),
 ];
 
 const repoShareFields: SchemaField[] = [
@@ -114,10 +107,11 @@ export const SCHEMA_PRESETS: SchemaPreset[] = [
     fields: financialStatementFields,
   },
   {
-    id: "corporate-loans",
-    name: "Corporate Loans",
-    description: "Loan portfolio tracking with borrower details, interest rates, installments, and penalty calculations.",
-    fields: corporateLoanFields,
+    id: "fis-fixed-instrument-schema",
+    name: "FIS Fixed Instrument Schema",
+    description: "Fixed instrument layout for position-level balances, coupon details, and maturity dates.",
+    defaultSchemaName: "fixed_instrument_test",
+    fields: fixedInstrumentFields,
   },
   {
     id: "repo-shares",

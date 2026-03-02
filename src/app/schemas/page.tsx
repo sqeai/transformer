@@ -76,6 +76,15 @@ function mapDbTypeToSchemaType(dbType: string): SqlCompatibleType {
   return "STRING";
 }
 
+function toSnakeCase(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+}
+
 type DialogMode = "initial" | "preset" | "datasource";
 
 interface DataSourceEntry {
@@ -579,10 +588,12 @@ export default function SchemasPage() {
       const fields: SchemaField[] = preset.fields.map((f) => ({
         ...f,
         id: crypto.randomUUID(),
+        name: toSnakeCase(f.name),
+        path: toSnakeCase(f.name),
       }));
       const schema: FinalSchema = {
         id: crypto.randomUUID(),
-        name: preset.name,
+        name: preset.defaultSchemaName ?? toSnakeCase(preset.name),
         fields,
         createdAt: new Date().toISOString(),
       };

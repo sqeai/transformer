@@ -9,6 +9,29 @@ function normalizeHeader(value: unknown): string {
     .trim();
 }
 
+function toSnakeCase(value: string): string {
+  return normalizeHeader(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+}
+
+function uniqueSnakeCaseValues(values: string[]): string[] {
+  const seen = new Set<string>();
+  return values.map((value, index) => {
+    const base = toSnakeCase(value) || `field_${index + 1}`;
+    let next = base;
+    let suffix = 2;
+    while (seen.has(next)) {
+      next = `${base}_${suffix}`;
+      suffix += 1;
+    }
+    seen.add(next);
+    return next;
+  });
+}
+
 function uniqueHeaderValues(values: string[]): string[] {
   const seen = new Set<string>();
   const unique: string[] = [];
@@ -41,21 +64,21 @@ export async function POST(request: NextRequest) {
       // (including multi-row headers merged into a single label per column).
       const headerValues = await detectHeaderRowValuesWithLLM(buffer, sheetIndex);
       const deduped = uniqueHeaderValues(headerValues);
+      const snakeCaseFields = uniqueSnakeCaseValues(deduped);
       let typeByPath: Record<string, string> = {};
       try {
-        typeByPath = await recommendFieldTypesWithLLM(deduped);
+        typeByPath = await recommendFieldTypesWithLLM(snakeCaseFields);
       } catch {
         typeByPath = {};
       }
-      const fields = deduped.map((name, order) => {
-        const base = normalizeHeader(name) || `Field_${order + 1}`;
+      const fields = snakeCaseFields.map((name, order) => {
         return {
           id: crypto.randomUUID(),
-          name: base,
-          path: base,
+          name,
+          path: name,
           level: 0,
           order,
-          dataType: typeByPath[base] ?? "STRING",
+          dataType: typeByPath[name] ?? "STRING",
           children: [],
         };
       });
@@ -68,19 +91,20 @@ export async function POST(request: NextRequest) {
 
     const columns = await parseExcelColumns(buffer, sheetIndex);
     const deduped = uniqueHeaderValues(columns);
+    const snakeCaseFields = uniqueSnakeCaseValues(deduped);
     let typeByPath: Record<string, string> = {};
     try {
-      typeByPath = await recommendFieldTypesWithLLM(deduped);
+      typeByPath = await recommendFieldTypesWithLLM(snakeCaseFields);
     } catch {
       typeByPath = {};
     }
-    const fields = deduped.map((name, order) => ({
+    const fields = snakeCaseFields.map((name, order) => ({
       id: crypto.randomUUID(),
-      name: normalizeHeader(name) || `Field_${order + 1}`,
-      path: normalizeHeader(name) || `Field_${order + 1}`,
+      name,
+      path: name,
       level: 0,
       order,
-      dataType: typeByPath[normalizeHeader(name) || `Field_${order + 1}`] ?? "STRING",
+      dataType: typeByPath[name] ?? "STRING",
       children: [],
     }));
     return NextResponse.json({ fields });
