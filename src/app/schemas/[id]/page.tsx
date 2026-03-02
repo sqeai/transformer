@@ -13,7 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { useSchemaStore, flattenFields } from "@/lib/schema-store";
+import { useSchemaStore, flattenFields, type UploadedFileEntry } from "@/lib/schema-store";
 import {
   ArrowLeft,
   Save,
@@ -38,6 +38,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import FinalSchemaTable from "@/components/FinalSchemaTable";
+import { UploadDatasetDialog } from "@/components/UploadDatasetDialog";
 import type { FinalSchema } from "@/lib/types";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -46,7 +47,7 @@ export default function SchemaDetailPage() {
   const router = useRouter();
   const id = params.id as string;
   const { user } = useAuth();
-  const { getSchema, updateSchema, deleteSchema, schemasLoading } = useSchemaStore();
+  const { getSchema, updateSchema, deleteSchema, schemasLoading, setDatasetWorkflow, resetDatasetWorkflow } = useSchemaStore();
   const schema = getSchema(id);
   const [name, setName] = useState(schema?.name ?? "");
   const [saved, setSaved] = useState(false);
@@ -59,6 +60,7 @@ export default function SchemaDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [tableHasUnsavedChanges, setTableHasUnsavedChanges] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
   const pendingLeaveActionRef = useRef<null | (() => void)>(null);
 
   const isOwner = !!user && !!schema?.creator && schema.creator.id === user.id;
@@ -193,10 +195,22 @@ export default function SchemaDetailPage() {
   };
 
   const handleUseSchema = () => {
-    requestLeave(() => {
-      router.push(`/datasets?newSchema=${id}`);
-    });
+    setShowUploadDialog(true);
   };
+
+  const handleUploadFromDialog = useCallback(
+    (schemaId: string, files: UploadedFileEntry[]) => {
+      resetDatasetWorkflow();
+      setDatasetWorkflow({
+        schemaId,
+        step: "upload",
+        files,
+        selectedSheets: [],
+      });
+      router.push(`/datasets/new?schemaId=${schemaId}`);
+    },
+    [resetDatasetWorkflow, setDatasetWorkflow, router],
+  );
 
   const handleGrant = async () => {
     const email = grantEmail.trim();
@@ -474,6 +488,13 @@ export default function SchemaDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <UploadDatasetDialog
+        open={showUploadDialog}
+        onOpenChange={setShowUploadDialog}
+        defaultSchemaId={id}
+        onUpload={handleUploadFromDialog}
+      />
     </DashboardLayout>
   );
 }

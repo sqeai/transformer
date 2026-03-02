@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { buildFieldTypeMap, normalizeRowsForStorage } from "@/lib/dataset-type-normalizer";
 
 export async function GET(
   _request: NextRequest,
@@ -160,8 +161,19 @@ export async function PATCH(
     updates.mapping_snapshot = body.mappingSnapshot;
   }
   if (Array.isArray(body.appendRows) && body.appendRows.length > 0) {
+    const { data: schemaFieldRows, error: schemaFieldError } = await supabase!
+      .from("schema_fields")
+      .select("path, data_type")
+      .eq("schema_id", existing.schema_id);
+    if (schemaFieldError) {
+      return NextResponse.json({ error: schemaFieldError.message }, { status: 500 });
+    }
+    const fieldTypeMap = buildFieldTypeMap(
+      ((schemaFieldRows ?? []) as Array<{ path: string; data_type: string | null }>)
+    );
+    const sanitizedAppendRows = normalizeRowsForStorage(body.appendRows, fieldTypeMap);
     const currentRows = Array.isArray(existing.rows) ? existing.rows : [];
-    const nextRows = [...currentRows, ...body.appendRows];
+    const nextRows = [...currentRows, ...sanitizedAppendRows];
     updates.rows = nextRows;
     updates.row_count = nextRows.length;
   }

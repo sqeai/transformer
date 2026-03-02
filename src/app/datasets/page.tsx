@@ -73,14 +73,14 @@ function DatasetsPageContent() {
   const [filterState, setFilterState] = useState<string>("all");
   const [assignedToMe, setAssignedToMe] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const newSchemaParam = searchParams.get("newSchema") ?? undefined;
   const limit = 20;
 
   useEffect(() => {
-    const newSchemaParam = searchParams.get("newSchema");
     if (newSchemaParam) {
       setDialogOpen(true);
     }
-  }, [searchParams]);
+  }, [newSchemaParam]);
 
   const fetchDatasets = useCallback(async (currentOffset: number) => {
     setLoading(true);
@@ -292,6 +292,7 @@ function DatasetsPageContent() {
       <UploadDatasetDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
+        initialSchemaId={newSchemaParam}
         onUpload={handleUploadFromDialog}
       />
     </DashboardLayout>

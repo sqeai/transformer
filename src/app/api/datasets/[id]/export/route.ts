@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createConnector, type DataSourceType } from "@/lib/connectors";
+import {
+  buildFieldTypeMap,
+  coerceForStorage,
+  normalizeRowsForStorage,
+  normalizeSqlType,
+} from "@/lib/dataset-type-normalizer";
 
 type BigQueryConfigShape = {
   projectId?: string;
@@ -120,6 +126,17 @@ export async function POST(
 
   const columns = Object.keys(rows[0]);
   const schemaName = targetSchema || "public";
+  const { data: schemaFieldRows, error: schemaFieldError } = await supabase!
+    .from("schema_fields")
+    .select("path, data_type")
+    .eq("schema_id", ds.schema_id as string);
+  if (schemaFieldError) {
+    return NextResponse.json({ error: schemaFieldError.message }, { status: 500 });
+  }
+  const fieldTypeMap = buildFieldTypeMap(
+    ((schemaFieldRows ?? []) as Array<{ path: string; data_type: string | null }>)
+  );
+  const normalizedRows = normalizeRowsForStorage(rows, fieldTypeMap);
 
   try {
     if (dsType === "bigquery") {
@@ -194,7 +211,7 @@ export async function POST(
       if (!tableExists && createTable) {
         const schema = columns.map((col) => ({
           name: col.replace(/[^a-zA-Z0-9_]/g, "_"),
-          type: "STRING",
+          type: normalizeSqlType(fieldTypeMap[col]),
           mode: "NULLABLE" as const,
         }));
         try {
@@ -218,10 +235,12 @@ export async function POST(
         }, { status: 400 });
       }
 
-      const sanitizedRows = rows.map((row) => {
+      const sanitizedRows = normalizedRows.map((row) => {
         const clean: Record<string, unknown> = {};
         for (const col of columns) {
-          clean[col.replace(/[^a-zA-Z0-9_]/g, "_")] = row[col] != null ? String(row[col]) : null;
+          const type = fieldTypeMap[col] ?? "STRING";
+          const value = coerceForStorage(row[col], type);
+          clean[col.replace(/[^a-zA-Z0-9_]/g, "_")] = value;
         }
         return clean;
       });
@@ -273,7 +292,7 @@ export async function POST(
 
         const BATCH_SIZE = 500;
         for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-          const batch = rows.slice(i, i + BATCH_SIZE);
+          const batch = normalizedRows.slice(i, i + BATCH_SIZE);
           const placeholders = batch.map((_, rowIdx) =>
             `(${columns.map((_, colIdx) => `$${rowIdx * columns.length + colIdx + 1}`).join(", ")})`
           ).join(", ");

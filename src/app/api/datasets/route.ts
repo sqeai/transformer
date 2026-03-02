@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { buildFieldTypeMap, normalizeRowsForStorage } from "@/lib/dataset-type-normalizer";
 
 export async function GET(request: NextRequest) {
   const auth = await getAuth();
@@ -130,13 +131,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: schemaError?.message ?? "Schema not found" }, { status: 404 });
   }
 
+  const { data: schemaFieldRows, error: schemaFieldError } = await supabase!
+    .from("schema_fields")
+    .select("path, data_type")
+    .eq("schema_id", schemaId);
+  if (schemaFieldError) {
+    return NextResponse.json({ error: schemaFieldError.message }, { status: 500 });
+  }
+  const fieldTypeMap = buildFieldTypeMap(
+    ((schemaFieldRows ?? []) as Array<{ path: string; data_type: string | null }>)
+  );
+  const normalizedRows = normalizeRowsForStorage(rows, fieldTypeMap);
+
   const { data, error } = await supabase!
     .from("datasets")
     .insert({
       schema_id: schemaId,
       name,
-      rows,
-      row_count: rows.length,
+      rows: normalizedRows,
+      row_count: normalizedRows.length,
       mapping_snapshot: mappingSnapshot,
     })
     .select("id, schema_id, name, row_count, state, created_at, updated_at")

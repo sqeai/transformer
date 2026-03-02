@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -25,6 +25,8 @@ export interface UploadDatasetDialogProps {
   onOpenChange: (open: boolean) => void;
   /** When set, schema is fixed and selector is hidden (e.g. "Add to this dataset") */
   defaultSchemaId?: string;
+  /** Optional schema preselection for "New Dataset" flow */
+  initialSchemaId?: string;
   /** Optional dataset name for "Add to dataset" title */
   datasetName?: string;
   onUpload: (schemaId: string, files: UploadedFileEntry[]) => void;
@@ -34,6 +36,7 @@ export function UploadDatasetDialog({
   open,
   onOpenChange,
   defaultSchemaId,
+  initialSchemaId,
   datasetName,
   onUpload,
 }: UploadDatasetDialogProps) {
@@ -47,6 +50,12 @@ export function UploadDatasetDialog({
 
   const schemaId = defaultSchemaId ?? selectedSchemaId;
   const isAddToDataset = Boolean(defaultSchemaId);
+
+  useEffect(() => {
+    if (open && !defaultSchemaId) {
+      setSelectedSchemaId(initialSchemaId ?? "");
+    }
+  }, [open, defaultSchemaId, initialSchemaId]);
 
   const processFiles = useCallback(async (files: File[]) => {
     setProcessingFiles(true);
@@ -100,14 +109,14 @@ export function UploadDatasetDialog({
     onUpload(schemaId, uploadedFiles);
     setUploading(false);
     setUploadedFiles([]);
-    if (!defaultSchemaId) setSelectedSchemaId("");
+    if (!defaultSchemaId) setSelectedSchemaId(initialSchemaId ?? "");
     onOpenChange(false);
   };
 
   const handleClose = (open: boolean) => {
     if (!open) {
       setUploadedFiles([]);
-      if (!defaultSchemaId) setSelectedSchemaId("");
+      if (!defaultSchemaId) setSelectedSchemaId(initialSchemaId ?? "");
       setUploading(false);
     }
     onOpenChange(open);
