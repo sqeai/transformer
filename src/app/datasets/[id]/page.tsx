@@ -132,7 +132,6 @@ export default function DatasetPage() {
   const [exportTablesError, setExportTablesError] = useState<string | null>(null);
   const [exportTargetSchema, setExportTargetSchema] = useState("public");
   const [exportTargetTable, setExportTargetTable] = useState("");
-  const [exportCreateTable, setExportCreateTable] = useState(true);
   const [showCreateTableForm, setShowCreateTableForm] = useState(false);
   const [exportingToDb, setExportingToDb] = useState(false);
 
@@ -160,6 +159,17 @@ export default function DatasetPage() {
     }
     return true;
   }, [dataset, allApproved]);
+
+  const createTargetAlreadyExists = useMemo(() => {
+    if (!showCreateTableForm) return false;
+    const schema = (exportTargetSchema.trim() || "public").toLowerCase();
+    const table = exportTargetTable.trim().toLowerCase();
+    if (!table) return false;
+    return exportTables.some((candidate) => (
+      candidate.schema.toLowerCase() === schema
+      && candidate.name.toLowerCase() === table
+    ));
+  }, [showCreateTableForm, exportTargetSchema, exportTargetTable, exportTables]);
 
   const handleAddToDatasetUpload = useCallback(
     (schemaId: string, files: UploadedFileEntry[]) => {
@@ -394,7 +404,7 @@ export default function DatasetPage() {
   };
 
   const exportToDatabase = async () => {
-    if (!dataset || !selectedDataSourceId || !exportTargetTable.trim()) return;
+    if (!dataset || !selectedDataSourceId || !exportTargetTable.trim() || createTargetAlreadyExists) return;
     setExportingToDb(true);
     try {
       const res = await fetch(`/api/datasets/${dataset.id}/export`, {
@@ -404,7 +414,7 @@ export default function DatasetPage() {
           dataSourceId: selectedDataSourceId,
           targetSchema: exportTargetSchema.trim() || "public",
           targetTable: exportTargetTable.trim(),
-          createTable: exportCreateTable,
+          createTable: showCreateTableForm,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -516,7 +526,6 @@ export default function DatasetPage() {
     setDataSources([]);
     setExportTargetTable("");
     setExportTargetSchema("public");
-    setExportCreateTable(true);
     setShowCreateTableForm(false);
     setExportTables([]);
     setExportTablesError(null);
@@ -1268,17 +1277,16 @@ export default function DatasetPage() {
                   </Button>
                   <Button
                     type="button"
-                    variant={showCreateTableForm ? "secondary" : "outline"}
+                    variant={showCreateTableForm ? "destructive" : "outline"}
                     size="icon"
                     disabled={!selectedDataSourceId}
                     onClick={() => {
                       setShowCreateTableForm((prev) => !prev);
-                      setExportCreateTable(true);
                     }}
-                    title="Create a new table"
-                    aria-label="Create a new table"
+                    title={showCreateTableForm ? "Cancel table creation" : "Create a new table"}
+                    aria-label={showCreateTableForm ? "Cancel table creation" : "Create a new table"}
                   >
-                    <Plus className="h-4 w-4" />
+                    {showCreateTableForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
                   </Button>
                 </div>
               </div>
@@ -1302,15 +1310,11 @@ export default function DatasetPage() {
                       />
                     </div>
                   </div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={exportCreateTable}
-                      onChange={(e) => setExportCreateTable(e.target.checked)}
-                      className="rounded border-gray-300"
-                    />
-                    Create table if it doesn&apos;t exist
-                  </label>
+                  {createTargetAlreadyExists ? (
+                    <p className="text-sm text-destructive">
+                      Table already exists in this schema. Choose a different table name.
+                    </p>
+                  ) : null}
                 </div>
               ) : (
                 <div className="max-h-44 overflow-auto rounded-md border">
@@ -1334,14 +1338,13 @@ export default function DatasetPage() {
                               ? "hover:bg-muted/50"
                               : "cursor-not-allowed text-muted-foreground opacity-80",
                             exportTargetSchema === table.schema && exportTargetTable === table.name
-                              ? "bg-muted"
+                              ? "bg-primary/10 ring-2 ring-primary/40"
                               : ""
                           )}
                           disabled={!table.compatible}
                           onClick={() => {
                             setExportTargetSchema(table.schema);
                             setExportTargetTable(table.name);
-                            setExportCreateTable(false);
                           }}
                         >
                           <span className="min-w-0 flex-1 truncate">{table.schema}.{table.name}</span>
@@ -1366,7 +1369,7 @@ export default function DatasetPage() {
             <Button variant="outline" onClick={() => setExportDialogOpen(false)}>Cancel</Button>
             <Button
               onClick={exportToDatabase}
-              disabled={exportingToDb || !selectedDataSourceId || !exportTargetTable.trim()}
+              disabled={exportingToDb || !selectedDataSourceId || !exportTargetTable.trim() || createTargetAlreadyExists}
             >
               {exportingToDb ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
               {exportingToDb ? "Exporting..." : "Export"}
