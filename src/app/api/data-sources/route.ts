@@ -1,15 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 
+function toThreeLinePreview(value: unknown): string {
+  if (value == null) return "***";
+
+  let normalized: unknown = value;
+  if (typeof value === "string") {
+    try {
+      normalized = JSON.parse(value);
+    } catch {
+      return value.split("\n").slice(0, 3).join("\n");
+    }
+  }
+
+  if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
+    return "***";
+  }
+
+  const redacted = { ...(normalized as Record<string, unknown>) };
+  if ("private_key" in redacted) {
+    redacted.private_key = "***";
+  }
+
+  return JSON.stringify(redacted, null, 2).split("\n").slice(0, 3).join("\n");
+}
+
+function redactSensitiveConfig(config: unknown) {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return config;
+  const base = { ...(config as Record<string, unknown>) };
+
+  if ("credentials" in base) {
+    base.credentials = toThreeLinePreview(base.credentials);
+  }
+  if ("service_account" in base) {
+    base.service_account = toThreeLinePreview(base.service_account);
+  }
+
+  return base;
+}
+
 export async function GET() {
   const auth = await getAuth();
   if (auth.response) return auth.response;
-  const { supabase, userId } = auth;
+  const { supabase } = auth;
 
   const { data, error } = await supabase!
     .from("data_sources")
     .select("id, name, type, config, created_at, updated_at")
-    .eq("user_id", userId!)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -21,7 +58,7 @@ export async function GET() {
       id: d.id,
       name: d.name,
       type: d.type,
-      config: d.config,
+      config: redactSensitiveConfig(d.config),
       createdAt: d.created_at,
       updatedAt: d.updated_at,
     })),
