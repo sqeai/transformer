@@ -143,6 +143,7 @@ async function askPlanner(
   fileSummaryText: string,
   history: TransformationStep[],
   userDirective?: string,
+  runId?: string,
 ): Promise<PlannerDecision> {
   const llm = new ChatAnthropic({
     model: "claude-sonnet-4-20250514",
@@ -173,9 +174,10 @@ async function askPlanner(
     lines.push("", `User directive (HIGHEST PRIORITY): ${userDirective}`);
   }
 
+  const runName = runId ? `planner-${runId}` : "planner";
   const result = await agent.invoke(
     { messages: [new HumanMessage(lines.join("\n"))] },
-    { recursionLimit: 50 },
+    { recursionLimit: 50, runName },
   );
 
   const messages = result.messages as Array<{ content: unknown }>;
@@ -271,6 +273,7 @@ async function askJudge(
   apiKey: string,
   targetPaths: string[],
   data: FileData,
+  runId?: string,
 ): Promise<JudgeVerdict> {
   const llm = new ChatAnthropic({
     model: "claude-sonnet-4-20250514",
@@ -304,9 +307,10 @@ async function askJudge(
     JSON.stringify(sampleRows, null, 2),
   ];
 
+  const runName = runId ? `judge-${runId}` : "judge";
   const result = await agent.invoke(
     { messages: [new HumanMessage(lines.join("\n"))] },
-    { recursionLimit: 50 },
+    { recursionLimit: 50, runName },
   );
 
   const messages = result.messages as Array<{ content: unknown }>;
@@ -339,6 +343,8 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
 
+  const runId = randomUUID().slice(0, 4);
+
   const rawTmpPath = await downloadS3FileToTmp(input.filePath);
   const rawBackupPath = path.join("/tmp", `raw-backup-${randomUUID()}.csv`);
   await fs.copyFile(rawTmpPath, rawBackupPath);
@@ -369,6 +375,7 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
         summary,
         history,
         combinedDirective || undefined,
+        runId,
       );
 
       if (decision.action === "done" || !decision.tool || !decision.params) break;
@@ -394,7 +401,7 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
 
     const normalizedData: FileData = { columns: schemaColumns, rows: normalizedRows };
 
-    const verdict = await askJudge(apiKey, input.targetPaths, normalizedData);
+    const verdict = await askJudge(apiKey, input.targetPaths, normalizedData, runId);
 
     if (verdict.verdict === "approve" || judgeAttempt === MAX_JUDGE_RETRIES) {
       const outputKey = `sheets/${randomUUID()}.csv`;
