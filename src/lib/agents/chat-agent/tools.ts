@@ -118,11 +118,6 @@ export const setEdgesTool = tool(
   },
 );
 
-/**
- * Tool: get_workspace_context
- *
- * Returns the full current workspace state (schema, mappings, pivot config, raw columns).
- */
 export function createGetWorkspaceContextTool(workspaceJson: string | null) {
   return tool(
     async () => {

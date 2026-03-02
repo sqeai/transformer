@@ -7,7 +7,7 @@ import {
   type JobRow,
 } from "@/lib/jobs-db";
 import { AI_DATA_CLEANSER_MAX_CONCURRENCY } from "@/lib/jobs-config";
-import { runDataCleanser } from "@/lib/agent/data-cleanser";
+import { runDataCleanser } from "@/lib/agents/data-cleanser";
 import { getS3ObjectVersionId } from "@/lib/s3-sheets";
 import { updateSheetVersionId } from "@/lib/sheets-db";
 

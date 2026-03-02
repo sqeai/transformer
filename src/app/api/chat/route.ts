@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAgentGraph, AIMessage } from "@/lib/agent";
-import { getDocsOnlyAgent } from "@/lib/agent/docs-agent";
+import { getAgentGraph, AIMessage } from "@/lib/agents/chat-agent";
+import { getDocsOnlyAgent } from "@/lib/agents/docs-agent";
 import { createClient } from "@/lib/supabase/server";
 import { type BaseMessage } from "@langchain/core/messages";
 import { toUIMessageStream, toBaseMessages } from "@ai-sdk/langchain";

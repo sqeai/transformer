@@ -59,6 +59,8 @@ export interface PipelineNode {
     | "handleBalanceSheet"
     | "handleUnstructuredData"
     | "filter"
+    | "trimColumns"
+    | "padColumns"
     | "unpivot"
     | "expand"
     | "aggregate"
