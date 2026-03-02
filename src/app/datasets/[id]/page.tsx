@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -89,6 +89,7 @@ export default function DatasetPage() {
   }, [dataset, visibleRowCount]);
 
   const canLoadMore = dataset ? visibleRowCount < dataset.rows.length : false;
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   const saveName = async () => {
     if (!dataset) return;
@@ -301,16 +302,18 @@ export default function DatasetPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="w-full rounded-md border max-h-[600px]">
+            <ScrollArea ref={scrollAreaRef} className="w-full rounded-md border">
               <Table>
                 <TableHeader className="sticky top-0 z-10 bg-background">
                   <TableRow>
+                    <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
                     {columns.map((c) => <TableHead key={c} className="whitespace-nowrap bg-background">{c}</TableHead>)}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {visibleRows.map((row, i) => (
                     <TableRow key={i}>
+                      <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                       {columns.map((c) => (
                         <TableCell key={c} className="whitespace-nowrap max-w-[200px] truncate">
                           {String((row as Record<string, unknown>)[c] ?? "")}
@@ -323,10 +326,20 @@ export default function DatasetPage() {
               <ScrollBar orientation="horizontal" />
             </ScrollArea>
             {canLoadMore && (
-              <div className="flex justify-center mt-4">
+              <div className="flex flex-col items-center gap-2 mt-4">
+                <p className="text-xs text-muted-foreground">
+                  Showing {visibleRows.length} of {dataset.rows.length} rows
+                </p>
                 <Button
                   variant="outline"
-                  onClick={() => setVisibleRowCount((prev) => prev + ROWS_PER_PAGE)}
+                  onClick={() => {
+                    const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]");
+                    const scrollTop = viewport?.scrollTop ?? 0;
+                    setVisibleRowCount((prev) => prev + ROWS_PER_PAGE);
+                    requestAnimationFrame(() => {
+                      if (viewport) viewport.scrollTop = scrollTop;
+                    });
+                  }}
                 >
                   Load More
                 </Button>

@@ -973,11 +973,11 @@ function NewDatasetPageContent() {
                     Loading preview...
                   </div>
                 ) : preview ? (
-                  <ScrollArea className="w-full rounded-md border max-h-[700px]">
+                  <ScrollArea className="w-full rounded-md border max-h-[700px] overflow-auto">
                     <Table>
                       <TableHeader className="sticky top-0 z-10 bg-background">
                         <TableRow>
-                          <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
+                          <TableHead className="w-14 whitespace-nowrap sticky bg-background">#</TableHead>
                           {preview.columns.map((col) => (
                             <TableHead key={col} className="whitespace-nowrap bg-background">{col}</TableHead>
                           ))}
