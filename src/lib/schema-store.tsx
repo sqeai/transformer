@@ -35,6 +35,17 @@ export interface SheetSelection {
   sheetName: string;
 }
 
+export interface TransformationMappingEntry {
+  step: number;
+  tool: string;
+  params: Record<string, unknown>;
+  phase: "cleansing" | "transformation";
+  inputColumns: string[];
+  outputColumns: string[];
+  rowCountBefore: number;
+  rowCountAfter: number;
+}
+
 export interface SheetJobResult {
   jobId: string;
   sheet: SheetSelection;
@@ -45,6 +56,7 @@ export interface SheetJobResult {
     toolsUsed: Array<{ tool: string; params: Record<string, unknown> }>;
     pipeline: PipelineDescriptor;
     outputFilePath?: string;
+    mapping?: TransformationMappingEntry[];
   };
   error?: string;
 }

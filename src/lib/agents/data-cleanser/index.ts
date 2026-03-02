@@ -18,7 +18,7 @@ import {
 } from "../../utils";
 import { readLocalCsv, writeLocalCsv } from "../../utils/csv-fs";
 
-const MAX_ITERATIONS = 20;
+const MAX_PLAN_STEPS = 30;
 const MAX_JUDGE_RETRIES = 2;
 const SAMPLE_ROWS_FOR_PLANNER = 8;
 const SAMPLE_ROWS_FOR_JUDGE = 10;
@@ -37,30 +37,40 @@ export interface DataCleanserInput {
   sheetId?: string;
 }
 
+export interface TransformationMapping {
+  step: number;
+  tool: string;
+  params: Record<string, unknown>;
+  phase: "cleansing" | "transformation";
+  inputColumns: string[];
+  outputColumns: string[];
+  rowCountBefore: number;
+  rowCountAfter: number;
+}
+
 export interface DataCleanserResult {
   transformedColumns: string[];
   transformedRows: Record<string, unknown>[];
   toolsUsed: TransformationStep[];
   pipeline: PipelineDescriptor;
   outputFilePath: string;
+  mapping: TransformationMapping[];
 }
 
 // ---------------------------------------------------------------------------
-// Planner sub-agent
+// Phase 1 — Planner: generates a full plan (Cleansing then Transformation)
 // ---------------------------------------------------------------------------
 
-const PLANNER_SYSTEM_PROMPT = `You are a data transformation planner. You decide the NEXT SINGLE transformation to apply to a CSV file, or declare the job done.
+const PLANNER_SYSTEM_PROMPT = `You are a data transformation planner. You generate a COMPLETE ordered plan of transformations to convert a CSV file from its uploaded schema to a target schema.
 
 You will receive:
 - The target schema field paths
 - The current file dimensions + a small sample of rows
-- The history of transformations already applied
+- An optional user directive
 
-You must call exactly ONE tool:
-- **nextTransformation** — emit the next transformation step
-- **done** — signal that no more transformations are needed
+You must generate the plan by calling **emitPlan** with the full ordered list of steps.
 
-## Available transformation types (use as the "tool" field in nextTransformation):
+## Available transformation types:
 
 1. **filter** — remove noise rows. Params: { removeEmptyRows: boolean, removeDuplicates: boolean, duplicateKeyColumns: string[], removeMatchingKeywords: string[] }
 2. **trimColumns** — drop irrelevant columns or keep only specific ones. Params: { keepColumns?: string[], dropColumns?: string[] }. Use keepColumns OR dropColumns (not both).
@@ -72,91 +82,82 @@ You must call exactly ONE tool:
 8. **aggregate** — group and aggregate. Params: { groupByColumns: string[], aggregations: Array<{ column: string, function: "sum"|"concat"|"count"|"min"|"max"|"first" }> }
 9. **map** — map columns to target schema paths (MUST be the final transformation). Params: { mappings: Array<{ sourceColumn: string, targetPath: string, defaultValue?: string }>, defaults?: Array<{ targetPath: string, value: string }> }
 
-## Transformation Priority (follow this order strictly)
+## Plan Structure — TWO PHASES (follow this order STRICTLY)
 
-**Phase 1 — Clean: remove noise so only real data remains**
-- If the CSV has title rows, metadata rows, summary/total rows, or empty rows that are NOT data, use **filter** to remove them.
-- If the CSV has columns that are entirely empty, contain only row numbers, or are irrelevant padding, use **trimColumns** to drop them.
+### PHASE 1: Cleansing (data preservation is paramount)
+Goal: Prepare and enrich the data WITHOUT losing any information.
+Priority order within this phase:
+1. **filter** — remove only obvious noise (empty rows, title/summary rows). Be conservative.
+2. **padColumns** — forward-fill empty cells. Check ALL columns for empty cells. ANY column with >0% empty cells that follows a group/category pattern MUST be padded. Include ALL such columns.
+3. **unpivot** — if wide columns represent repeating categories or time periods, melt them into rows. This ADDS rows and is safe.
+4. **expand** / **handleBalanceSheet** — flatten hierarchies. This restructures but preserves data.
 
-**Phase 2 — Fill: ensure every row is complete (HIGHEST PRIORITY after cleaning)**
-- Check the "emptyCellsPerColumn" field in the file state. ANY column with >0% empty cells MUST be addressed.
-- If a column has empty cells that follow a group/category pattern (value appears once, then blank for subsequent rows in the same group), use **padColumns** and list ALL such columns.
-- You MUST include EVERY column that has empty cells in the paddingColumns list — do not skip any.
-- After padColumns, re-examine the data. If any columns still have empty cells, apply padColumns again for those columns.
-- Do NOT proceed to Phase 3 until ALL columns have 0% empty cells (or the empty cells are genuinely missing data with no pattern to fill).
+### PHASE 2: Transformation (reshaping and finalizing)
+Goal: Reshape the cleansed data into the target schema.
+1. **trimColumns** — drop columns no longer needed (only AFTER cleansing is complete).
+2. **aggregate** — group and aggregate if needed.
+3. **map** — map to final schema (MUST be the last step).
 
-**Phase 3 — Flatten/Reshape: make the data flat and tabular**
-- If the data uses a star/indent hierarchy (balance sheets, trial balances), use **handleBalanceSheet** or **expand**.
-- If the data has wide columns that represent repeating categories or time periods, use **unpivot** to melt them into rows.
-- If the data has duplicate key rows that need consolidation, use **aggregate**.
+## CRITICAL Rules
 
-**Phase 4 — Consolidate: map to the final schema**
-- Once the data is clean, filled, and flat, use **map** to produce the final output matching the target schema paths.
-- After map is applied, call **done**.
-
-## Rules
-
-- Follow the phase order: Clean → Fill → Flatten → Consolidate.
-- Within each phase, you may apply multiple steps (e.g. filter then trimColumns).
-- Only move to the next phase when the current phase is complete.
-- Only reference columns that exist in the current file.
+- **Data preservation is the #1 priority.** The Cleansing phase must NOT lose any data. Prefer adding temporary columns and unpivoting over deleting.
+- **padColumns BEFORE trimColumns.** Never trim columns that still have empty cells that could be forward-filled.
+- **unpivot BEFORE aggregate/trim.** Unpivoting adds rows and new columns — do it in Cleansing.
+- **trimColumns and aggregate belong ONLY in the Transformation phase.**
+- The LAST step must always be **map**.
+- Only reference columns that exist in the current file (or that a prior step in the plan will create).
 - Only map to target paths from the provided schema.
-- The LAST transformation must always be **map**.
-- After map, call **done**.
 - Be conservative — don't remove data unless clearly noise.
-- When padding, identify columns where values repeat for groups of rows (e.g. a category label that appears once then is blank for the next N rows belonging to that category).
+- When padding, identify columns where values repeat for groups of rows.
+- In the map step, every sourceColumn MUST exactly match an existing column name.
+- Every target path must be mapped to a source column or given a default value.
 
-## CRITICAL — Data Integrity Rules (MUST follow)
-
-- **NEVER drop data rows.** The output must have the same number of data rows as the input (after noise removal). If a transformation would reduce the row count unexpectedly, do NOT apply it.
-- **ALL cells must contain data.** After the Fill phase, every cell in every row must have a value. If you see ANY column with empty cells that can be forward-filled, you MUST apply padColumns for those columns before moving to Phase 3.
-- **padColumns is mandatory** if ANY column has empty cells that follow a group/category pattern. Examine ALL columns in the sample data — if a column has some rows with values and some blank, it almost certainly needs padding.
-- **In the map step, every sourceColumn MUST exactly match an existing column name** in the current file. Double-check column names against the current file state before emitting the map transformation. A typo or wrong column name will produce empty output.
-- **Every target path must be mapped** to a source column or given a default value. Do not leave any target path unmapped unless there is genuinely no source data for it.`;
+Mark each step with its phase: "cleansing" or "transformation".`;
 
 function createPlannerTools() {
-  const nextTransformationTool = tool(
+  const emitPlanTool = tool(
     async (input) => {
-      return JSON.stringify({ action: "transform", tool: input.tool, params: input.params });
+      return JSON.stringify({ action: "plan", steps: input.steps });
     },
     {
-      name: "nextTransformation",
-      description: "Emit the next transformation step to apply.",
+      name: "emitPlan",
+      description: "Emit the complete transformation plan.",
       schema: z.object({
-        tool: z.string().describe("Transformation type name"),
-        params: z.record(z.string(), z.unknown()).describe("Parameters for the transformation"),
+        steps: z.array(
+          z.object({
+            tool: z.string().describe("Transformation type name"),
+            params: z.record(z.string(), z.unknown()).describe("Parameters for the transformation"),
+            phase: z.enum(["cleansing", "transformation"]).describe("Which phase this step belongs to"),
+            reasoning: z.string().describe("Brief explanation of why this step is needed"),
+          }),
+        ).describe("Ordered list of transformation steps"),
       }),
     },
   );
 
-  const doneTool = tool(
-    async () => {
-      return JSON.stringify({ action: "done" });
-    },
-    {
-      name: "done",
-      description: "Signal that all transformations are complete.",
-      schema: z.object({}),
-    },
-  );
-
-  return [nextTransformationTool, doneTool];
+  return [emitPlanTool];
 }
 
-interface PlannerDecision {
-  action: "transform" | "done";
-  tool?: string;
-  params?: Record<string, unknown>;
+interface PlannedStep {
+  tool: string;
+  params: Record<string, unknown>;
+  phase: "cleansing" | "transformation";
+  reasoning: string;
 }
 
-async function askPlanner(
+interface PlannerResult {
+  action: "plan";
+  steps: PlannedStep[];
+}
+
+async function generatePlan(
   apiKey: string,
   targetPaths: string[],
   fileSummaryText: string,
-  history: TransformationStep[],
   userDirective?: string,
+  judgeDirective?: string,
   runId?: string,
-): Promise<PlannerDecision> {
+): Promise<PlannerResult> {
   const llm = new ChatAnthropic({
     model: "claude-sonnet-4-20250514",
     anthropicApiKey: apiKey,
@@ -173,17 +174,12 @@ async function askPlanner(
     fileSummaryText,
   ];
 
-  if (history.length > 0) {
-    lines.push("", `Transformations applied so far (${history.length}):`);
-    for (let i = 0; i < history.length; i++) {
-      lines.push(`  ${i + 1}. ${history[i].tool}: ${JSON.stringify(history[i].params)}`);
-    }
-  } else {
-    lines.push("", "No transformations applied yet. Start with Phase 1 (Clean).");
-  }
-
   if (userDirective) {
     lines.push("", `User directive (HIGHEST PRIORITY): ${userDirective}`);
+  }
+
+  if (judgeDirective) {
+    lines.push("", judgeDirective);
   }
 
   const runName = runId ? `planner-${runId}` : "planner";
@@ -198,30 +194,90 @@ async function askPlanner(
     const text = typeof content === "string" ? content : JSON.stringify(content);
     try {
       const parsed = JSON.parse(text);
-      if (parsed?.action) return parsed as PlannerDecision;
+      if (parsed?.action === "plan" && Array.isArray(parsed.steps)) return parsed as PlannerResult;
     } catch {
-      const match = text.match(/\{[^{}]*"action"\s*:\s*"[^"]+"/);
+      const match = text.match(/\{[^{}]*"action"\s*:\s*"plan"/);
       if (match) {
         try {
-          const endIdx = text.indexOf("}", text.indexOf(match[0])) + 1;
-          const parsed = JSON.parse(text.slice(text.indexOf(match[0]), endIdx));
-          if (parsed?.action) return parsed as PlannerDecision;
+          const startIdx = text.indexOf(match[0]);
+          let depth = 0;
+          let endIdx = startIdx;
+          for (let j = startIdx; j < text.length; j++) {
+            if (text[j] === "{") depth++;
+            else if (text[j] === "}") { depth--; if (depth === 0) { endIdx = j + 1; break; } }
+          }
+          const parsed = JSON.parse(text.slice(startIdx, endIdx));
+          if (parsed?.action === "plan" && Array.isArray(parsed.steps)) return parsed as PlannerResult;
         } catch { /* continue */ }
       }
     }
   }
 
-  return { action: "done" };
+  return { action: "plan", steps: [] };
 }
 
 // ---------------------------------------------------------------------------
-// LLM-as-a-judge: validate output quality
+// Phase 2 — Executor subagent: runs steps one-by-one
+// ---------------------------------------------------------------------------
+
+async function executeStepByStep(
+  workingPath: string,
+  steps: PlannedStep[],
+  targetPaths: string[],
+): Promise<{
+  history: TransformationStep[];
+  mappings: TransformationMapping[];
+}> {
+  const history: TransformationStep[] = [];
+  const mappings: TransformationMapping[] = [];
+
+  for (let i = 0; i < Math.min(steps.length, MAX_PLAN_STEPS); i++) {
+    const planned = steps[i];
+    const data = await readLocalCsv(workingPath);
+    if (data.columns.length === 0 || data.rows.length === 0) break;
+
+    const inputColumns = [...data.columns];
+    const rowCountBefore = data.rows.length;
+
+    const step: TransformationStep = { tool: planned.tool, params: planned.params };
+    const transformed = executeTransformation(data, step, targetPaths);
+
+    if (transformed.rows.length === 0 && data.rows.length > 0) {
+      console.warn(
+        `[data-cleanser] Step ${i + 1} "${step.tool}" produced 0 rows from ${data.rows.length} — skipping.`,
+      );
+      continue;
+    }
+
+    await writeLocalCsv(workingPath, transformed.columns, transformed.rows);
+    history.push(step);
+
+    mappings.push({
+      step: mappings.length + 1,
+      tool: planned.tool,
+      params: planned.params,
+      phase: planned.phase,
+      inputColumns,
+      outputColumns: [...transformed.columns],
+      rowCountBefore,
+      rowCountAfter: transformed.rows.length,
+    });
+
+    if (planned.tool === "map") break;
+  }
+
+  return { history, mappings };
+}
+
+// ---------------------------------------------------------------------------
+// LLM-as-a-judge: validate output quality and suggest further plan
 // ---------------------------------------------------------------------------
 
 const JUDGE_SYSTEM_PROMPT = `You are a strict data quality judge. You receive:
 - The target schema field paths (the columns the output MUST have).
 - A sample of output rows after all transformations.
 - The total row count.
+- The list of transformations that were applied.
 
 Your job is to evaluate whether the output is production-ready. Check:
 
@@ -233,9 +289,10 @@ Your job is to evaluate whether the output is production-ready. Check:
 
 You must call exactly ONE tool:
 - **approve** — the output passes all checks. Params: { summary: string }
-- **reject** — the output has quality issues. Params: { issues: string[], correctionDirective: string }
+- **reject** — the output has quality issues. Params: { issues: string[], correctionDirective: string, additionalSteps: Array<{ tool: string, params: object, phase: "cleansing" | "transformation", reasoning: string }> }
   - issues: list of specific problems found
-  - correctionDirective: a concise instruction for the transformation planner to fix the problems (this will be prepended to the planner's next run)
+  - correctionDirective: a concise instruction for the transformation planner to fix the problems
+  - additionalSteps: optional further transformation steps to apply (if the fix is clear). These will be executed directly. Leave empty if a full re-plan is needed.
 
 Be strict but fair. Minor issues (a few empty cells in optional fields) are acceptable. Systemic issues (entire columns empty, wrong data in columns, missing padding) should be rejected.`;
 
@@ -259,6 +316,7 @@ function createJudgeTools() {
         verdict: "reject",
         issues: input.issues,
         correctionDirective: input.correctionDirective,
+        additionalSteps: input.additionalSteps,
       });
     },
     {
@@ -267,6 +325,14 @@ function createJudgeTools() {
       schema: z.object({
         issues: z.array(z.string()).describe("List of specific quality issues found"),
         correctionDirective: z.string().describe("Instruction for the planner to fix the issues"),
+        additionalSteps: z.array(
+          z.object({
+            tool: z.string(),
+            params: z.record(z.string(), z.unknown()),
+            phase: z.enum(["cleansing", "transformation"]),
+            reasoning: z.string(),
+          }),
+        ).optional().describe("Additional steps to apply directly if the fix is clear"),
       }),
     },
   );
@@ -279,12 +345,14 @@ interface JudgeVerdict {
   summary?: string;
   issues?: string[];
   correctionDirective?: string;
+  additionalSteps?: PlannedStep[];
 }
 
 async function askJudge(
   apiKey: string,
   targetPaths: string[],
   data: FileData,
+  appliedSteps: TransformationMapping[],
   runId?: string,
 ): Promise<JudgeVerdict> {
   const llm = new ChatAnthropic({
@@ -315,6 +383,11 @@ async function askJudge(
     `Empty-cell percentage per column:`,
     ...Object.entries(emptyColumnStats).map(([col, pct]) => `  "${col}": ${pct}% empty`),
     "",
+    `Transformations applied (${appliedSteps.length}):`,
+    ...appliedSteps.map((s, i) =>
+      `  ${i + 1}. [${s.phase}] ${s.tool}: ${JSON.stringify(s.params)} (rows: ${s.rowCountBefore} → ${s.rowCountAfter})`,
+    ),
+    "",
     `Sample output rows (first ${sampleRows.length}):`,
     JSON.stringify(sampleRows, null, 2),
   ];
@@ -336,8 +409,14 @@ async function askJudge(
       const match = text.match(/\{[^{}]*"verdict"\s*:\s*"[^"]+"/);
       if (match) {
         try {
-          const endIdx = text.indexOf("}", text.indexOf(match[0])) + 1;
-          const parsed = JSON.parse(text.slice(text.indexOf(match[0]), endIdx));
+          const startIdx = text.indexOf(match[0]);
+          let depth = 0;
+          let endIdx = startIdx;
+          for (let j = startIdx; j < text.length; j++) {
+            if (text[j] === "{") depth++;
+            else if (text[j] === "}") { depth--; if (depth === 0) { endIdx = j + 1; break; } }
+          }
+          const parsed = JSON.parse(text.slice(startIdx, endIdx));
           if (parsed?.verdict) return parsed as JudgeVerdict;
         } catch { /* continue */ }
       }
@@ -345,6 +424,37 @@ async function askJudge(
   }
 
   return { verdict: "approve", summary: "No explicit verdict returned; assuming acceptable." };
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline builder (extended with mapping data)
+// ---------------------------------------------------------------------------
+
+function buildPipelineWithMapping(
+  toolsUsed: TransformationStep[],
+  mappings: TransformationMapping[],
+): PipelineDescriptor {
+  const pipeline = buildPipeline(toolsUsed);
+
+  for (const node of pipeline.nodes) {
+    if (node.id === "source" || node.id === "target") continue;
+    const stepIndex = parseInt(node.id.split("_").pop() ?? "-1", 10);
+    const mapping = mappings[stepIndex];
+    if (mapping) {
+      node.data = {
+        ...node.data,
+        mapping: {
+          phase: mapping.phase,
+          inputColumns: mapping.inputColumns,
+          outputColumns: mapping.outputColumns,
+          rowCountBefore: mapping.rowCountBefore,
+          rowCountAfter: mapping.rowCountAfter,
+        },
+      };
+    }
+  }
+
+  return pipeline;
 }
 
 // ---------------------------------------------------------------------------
@@ -365,53 +475,61 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
   await fs.copyFile(rawTmpPath, workingPath);
   await fs.unlink(rawTmpPath).catch(() => {});
 
-  let history: TransformationStep[] = [];
+  let allMappings: TransformationMapping[] = [];
+  let allHistory: TransformationStep[] = [];
   let judgeDirective: string | undefined;
 
   for (let judgeAttempt = 0; judgeAttempt <= MAX_JUDGE_RETRIES; judgeAttempt++) {
     if (judgeAttempt > 0) {
       await fs.copyFile(rawBackupPath, workingPath);
-      history = [];
+      allMappings = [];
+      allHistory = [];
     }
 
-    const combinedDirective = [input.userDirective, judgeDirective].filter(Boolean).join("\n\n");
-
-    let preTransformRowCount = 0;
-
-    for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-      const data = await readLocalCsv(workingPath);
-      if (data.columns.length === 0 || data.rows.length === 0) break;
-
-      if (iteration === 0) preTransformRowCount = data.rows.length;
-
-      const summary = fileSummary(data, SAMPLE_ROWS_FOR_PLANNER);
-      const decision = await askPlanner(
-        apiKey,
-        input.targetPaths,
-        summary,
-        history,
-        combinedDirective || undefined,
-        runId,
-      );
-
-      if (decision.action === "done" || !decision.tool || !decision.params) break;
-
-      const step: TransformationStep = { tool: decision.tool, params: decision.params };
-      const transformed = executeTransformation(data, step, input.targetPaths);
-
-      if (transformed.rows.length === 0 && data.rows.length > 0) {
-        console.warn(
-          `[data-cleanser] Transformation "${step.tool}" produced 0 rows from ${data.rows.length} — skipping this step.`,
-        );
-        continue;
-      }
-
-      await writeLocalCsv(workingPath, transformed.columns, transformed.rows);
-      history.push(step);
-
-      if (decision.tool === "map") break;
+    // Step 1: Read current file state and generate a full plan
+    const data = await readLocalCsv(workingPath);
+    if (data.columns.length === 0 || data.rows.length === 0) {
+      throw new Error("Input file is empty or has no columns");
     }
 
+    const summary = fileSummary(data, SAMPLE_ROWS_FOR_PLANNER);
+    const plan = await generatePlan(
+      apiKey,
+      input.targetPaths,
+      summary,
+      input.userDirective,
+      judgeDirective,
+      runId,
+    );
+
+    if (plan.steps.length === 0) {
+      throw new Error("Planner generated an empty plan");
+    }
+
+    // Validate phase ordering: all cleansing steps before transformation steps
+    const firstTransformIdx = plan.steps.findIndex((s) => s.phase === "transformation");
+    const lastCleansingIdx = plan.steps.reduce(
+      (last, s, i) => (s.phase === "cleansing" ? i : last),
+      -1,
+    );
+    if (firstTransformIdx !== -1 && lastCleansingIdx > firstTransformIdx) {
+      console.warn("[data-cleanser] Plan has cleansing steps after transformation steps — reordering.");
+      const cleansing = plan.steps.filter((s) => s.phase === "cleansing");
+      const transformation = plan.steps.filter((s) => s.phase === "transformation");
+      plan.steps = [...cleansing, ...transformation];
+    }
+
+    // Step 2: Execute the plan step-by-step via the executor subagent
+    const { history, mappings } = await executeStepByStep(
+      workingPath,
+      plan.steps,
+      input.targetPaths,
+    );
+
+    allHistory = history;
+    allMappings = mappings;
+
+    // Step 3: Normalize output to target schema columns
     const finalData = await readLocalCsv(workingPath);
     const schemaColumns = input.targetPaths;
     const normalizedRows: Record<string, unknown>[] = finalData.rows.map((row) => {
@@ -424,27 +542,73 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
 
     const normalizedData: FileData = { columns: schemaColumns, rows: normalizedRows };
 
-    const verdict = await askJudge(apiKey, input.targetPaths, normalizedData, runId);
+    // Step 4: LLM-as-a-judge evaluates the output
+    const verdict = await askJudge(apiKey, input.targetPaths, normalizedData, allMappings, runId);
 
     if (verdict.verdict === "approve" || judgeAttempt === MAX_JUDGE_RETRIES) {
-      const outputKey = `sheets/${randomUUID()}.csv`;
-      const csvBuffer = Buffer.from(rowsToCsv(schemaColumns, normalizedRows), "utf8");
-      const outputFilePath = await uploadBufferToS3(outputKey, csvBuffer, "text/csv");
+      // If judge provided additional steps on the last retry, try to apply them
+      if (
+        verdict.verdict === "reject" &&
+        verdict.additionalSteps &&
+        verdict.additionalSteps.length > 0 &&
+        judgeAttempt === MAX_JUDGE_RETRIES
+      ) {
+        const { history: extraHistory, mappings: extraMappings } = await executeStepByStep(
+          workingPath,
+          verdict.additionalSteps,
+          input.targetPaths,
+        );
+        allHistory.push(...extraHistory);
+        allMappings.push(...extraMappings);
 
-      await fs.unlink(workingPath).catch(() => {});
-      await fs.unlink(rawBackupPath).catch(() => {});
+        const patchedData = await readLocalCsv(workingPath);
+        const patchedRows: Record<string, unknown>[] = patchedData.rows.map((row) => {
+          const out: Record<string, unknown> = {};
+          for (const tp of schemaColumns) {
+            out[tp] = tp in row ? row[tp] : "";
+          }
+          return out;
+        });
 
-      const pipeline = buildPipeline(history);
+        return buildFinalResult(schemaColumns, patchedRows, allHistory, allMappings, workingPath, rawBackupPath);
+      }
 
-      return {
-        transformedColumns: schemaColumns,
-        transformedRows: normalizedRows,
-        toolsUsed: history,
-        pipeline,
-        outputFilePath,
-      };
+      return buildFinalResult(schemaColumns, normalizedRows, allHistory, allMappings, workingPath, rawBackupPath);
     }
 
+    // Judge rejected — if it provided direct additional steps, apply them before re-planning
+    if (verdict.additionalSteps && verdict.additionalSteps.length > 0) {
+      const { history: extraHistory, mappings: extraMappings } = await executeStepByStep(
+        workingPath,
+        verdict.additionalSteps,
+        input.targetPaths,
+      );
+      allHistory.push(...extraHistory);
+      allMappings.push(...extraMappings);
+
+      const patchedData = await readLocalCsv(workingPath);
+      const patchedNormalized: Record<string, unknown>[] = patchedData.rows.map((row) => {
+        const out: Record<string, unknown> = {};
+        for (const tp of schemaColumns) {
+          out[tp] = tp in row ? row[tp] : "";
+        }
+        return out;
+      });
+
+      const reVerdict = await askJudge(
+        apiKey,
+        input.targetPaths,
+        { columns: schemaColumns, rows: patchedNormalized },
+        allMappings,
+        runId,
+      );
+
+      if (reVerdict.verdict === "approve") {
+        return buildFinalResult(schemaColumns, patchedNormalized, allHistory, allMappings, workingPath, rawBackupPath);
+      }
+    }
+
+    // Full re-plan needed
     judgeDirective = [
       "QUALITY JUDGE CORRECTION (previous attempt was rejected):",
       ...(verdict.issues ?? []).map((issue, i) => `  ${i + 1}. ${issue}`),
@@ -454,4 +618,31 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
   }
 
   throw new Error("Unexpected: judge retry loop exited without returning");
+}
+
+async function buildFinalResult(
+  schemaColumns: string[],
+  normalizedRows: Record<string, unknown>[],
+  history: TransformationStep[],
+  mappings: TransformationMapping[],
+  workingPath: string,
+  rawBackupPath: string,
+): Promise<DataCleanserResult> {
+  const outputKey = `sheets/${randomUUID()}.csv`;
+  const csvBuffer = Buffer.from(rowsToCsv(schemaColumns, normalizedRows), "utf8");
+  const outputFilePath = await uploadBufferToS3(outputKey, csvBuffer, "text/csv");
+
+  await fs.unlink(workingPath).catch(() => {});
+  await fs.unlink(rawBackupPath).catch(() => {});
+
+  const pipeline = buildPipelineWithMapping(history, mappings);
+
+  return {
+    transformedColumns: schemaColumns,
+    transformedRows: normalizedRows,
+    toolsUsed: history,
+    pipeline,
+    outputFilePath,
+    mapping: mappings,
+  };
 }
