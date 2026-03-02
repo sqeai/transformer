@@ -36,11 +36,40 @@ export interface FinalSchema {
   creator?: SchemaCreator;
 }
 
+export type DatasetState = "draft" | "pending_approval" | "approved" | "rejected" | "completed";
+
+export interface DatasetApprover {
+  id: string;
+  datasetId: string;
+  userId: string;
+  userEmail?: string;
+  userName?: string;
+  status: "pending" | "approved" | "rejected";
+  comment?: string | null;
+  decidedAt?: string | null;
+  createdAt: string;
+}
+
+export interface DatasetLog {
+  id: string;
+  datasetId: string;
+  userId: string;
+  userEmail?: string;
+  userName?: string;
+  action: string;
+  fromState?: string | null;
+  toState?: string | null;
+  comment?: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface DatasetSummary {
   id: string;
   schemaId: string;
   name: string;
   rowCount: number;
+  state: DatasetState;
   createdAt: string;
   updatedAt: string;
 }
@@ -49,6 +78,8 @@ export interface DatasetRecord extends DatasetSummary {
   schemaName?: string | null;
   mappingSnapshot: Record<string, unknown>;
   rows: Record<string, unknown>[];
+  approvers?: DatasetApprover[];
+  logs?: DatasetLog[];
 }
 
 /** Creator info returned from API (from users) */
@@ -121,7 +152,13 @@ export interface EdgeDefinition {
 }
 
 export interface ExportFormat {
-  id: "excel" | "csv" | "bigquery" | "google_sheets" | "fis";
+  id: "excel" | "csv" | "bigquery" | "postgres" | "google_sheets" | "fis";
   label: string;
   description: string;
+}
+
+export interface AppUser {
+  id: string;
+  email: string;
+  name: string;
 }

@@ -33,8 +33,19 @@ import {
   Loader2,
   Search,
   Database,
+  User,
 } from "lucide-react";
 import { UploadDatasetDialog } from "@/components/UploadDatasetDialog";
+import { Badge } from "@/components/ui/badge";
+import type { DatasetState } from "@/lib/types";
+
+const STATE_CONFIG: Record<DatasetState, { label: string; className: string }> = {
+  draft: { label: "Draft", className: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border-gray-200 dark:border-gray-700" },
+  pending_approval: { label: "Pending Approval", className: "bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800" },
+  approved: { label: "Approved", className: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300 border-green-200 dark:border-green-800" },
+  rejected: { label: "Rejected", className: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 border-red-200 dark:border-red-800" },
+  completed: { label: "Completed", className: "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border-purple-200 dark:border-purple-800" },
+};
 
 interface DatasetListItem {
   id: string;
@@ -42,8 +53,10 @@ interface DatasetListItem {
   schemaName: string | null;
   name: string;
   rowCount: number;
+  state: DatasetState;
   createdAt: string;
   updatedAt: string;
+  assignedToMe?: boolean;
 }
 
 function DatasetsPageContent() {
@@ -57,6 +70,8 @@ function DatasetsPageContent() {
   const [offset, setOffset] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterSchemaId, setFilterSchemaId] = useState<string>("all");
+  const [filterState, setFilterState] = useState<string>("all");
+  const [assignedToMe, setAssignedToMe] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const limit = 20;
 
@@ -79,6 +94,12 @@ function DatasetsPageContent() {
       if (searchQuery.trim()) {
         params.set("search", searchQuery.trim());
       }
+      if (filterState && filterState !== "all") {
+        params.set("state", filterState);
+      }
+      if (assignedToMe) {
+        params.set("assignedToMe", "true");
+      }
       const res = await fetch(`/api/datasets?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Failed to fetch");
@@ -89,7 +110,7 @@ function DatasetsPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [filterSchemaId, searchQuery]);
+  }, [filterSchemaId, filterState, assignedToMe, searchQuery]);
 
   useEffect(() => {
     setOffset(0);
@@ -160,6 +181,25 @@ function DatasetsPageContent() {
               ))}
             </SelectContent>
           </Select>
+          <Select value={filterState} onValueChange={setFilterState}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Filter by state" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All states</SelectItem>
+              {(Object.entries(STATE_CONFIG) as [DatasetState, { label: string }][]).map(([key, { label }]) => (
+                <SelectItem key={key} value={key}>{label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            variant={assignedToMe ? "default" : "outline"}
+            onClick={() => setAssignedToMe(!assignedToMe)}
+            className="gap-2"
+          >
+            <User className="h-4 w-4" />
+            Assigned to me
+          </Button>
         </div>
 
         <Card>
@@ -188,33 +228,51 @@ function DatasetsPageContent() {
                     <TableRow>
                       <TableHead>Name</TableHead>
                       <TableHead>Schema</TableHead>
+                      <TableHead>State</TableHead>
                       <TableHead>Rows</TableHead>
                       <TableHead>Created</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {datasets.map((d) => (
-                      <TableRow
-                        key={d.id}
-                        className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => router.push(`/datasets/${d.id}`)}
-                      >
-                        <TableCell className="font-medium">{d.name}</TableCell>
-                        <TableCell className="text-muted-foreground text-sm">
-                          {d.schemaName ?? "—"}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {d.rowCount} row{d.rowCount !== 1 ? "s" : ""}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground text-sm">
-                          {new Date(d.createdAt).toLocaleDateString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          })}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {datasets.map((d) => {
+                      const stateInfo = STATE_CONFIG[d.state] ?? STATE_CONFIG.draft;
+                      return (
+                        <TableRow
+                          key={d.id}
+                          className={`cursor-pointer hover:bg-muted/50 ${d.assignedToMe ? "bg-primary/5" : ""}`}
+                          onClick={() => router.push(`/datasets/${d.id}`)}
+                        >
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-2">
+                              {d.name}
+                              {d.assignedToMe && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-primary/30 text-primary">
+                                  Assigned to you
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-sm">
+                            {d.schemaName ?? "—"}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={stateInfo.className}>
+                              {stateInfo.label}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {d.rowCount} row{d.rowCount !== 1 ? "s" : ""}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-sm">
+                            {new Date(d.createdAt).toLocaleDateString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
                 {datasets.length < total && (

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(request: NextRequest) {
   const auth = await getAuth();
   if (auth.response) return auth.response;
-  const { supabase } = auth;
+  const { supabase, userId } = auth;
 
   const { searchParams } = new URL(request.url);
   const schemaId = searchParams.get("schemaId")?.trim() || null;
@@ -12,37 +13,84 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "20") || 20, 1), 100);
   const offset = Math.max(Number(searchParams.get("offset") ?? "0") || 0, 0);
 
+  const stateFilter = searchParams.get("state")?.trim() || null;
+  const assignedToMe = searchParams.get("assignedToMe") === "true";
+
+  const admin = createAdminClient();
+
+  // Get dataset IDs where the user is an approver
+  const { data: myApproverRows } = await admin
+    .from("dataset_approvers")
+    .select("dataset_id")
+    .eq("user_id", userId!);
+  const approverDatasetIds = new Set(
+    (myApproverRows ?? []).map((a: Record<string, unknown>) => a.dataset_id as string)
+  );
+
+  // Fetch datasets the user can see via schema RLS
   let query = supabase!
     .from("datasets")
-    .select("id, schema_id, name, row_count, created_at, updated_at, schemas!inner(name)", { count: "exact" })
+    .select("id, schema_id, name, row_count, state, created_at, updated_at, schemas(name)", { count: "exact" })
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);
 
-  if (schemaId) {
-    query = query.eq("schema_id", schemaId);
-  }
-
-  if (search) {
-    query = query.ilike("name", `%${search}%`);
-  }
+  if (schemaId) query = query.eq("schema_id", schemaId);
+  if (search) query = query.ilike("name", `%${search}%`);
+  if (stateFilter) query = query.eq("state", stateFilter);
 
   const { data: rows, error, count } = await query;
-
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  const rlsDatasetIds = new Set((rows ?? []).map((r: Record<string, unknown>) => r.id as string));
+
+  // Fetch additional datasets where user is approver but doesn't have schema access
+  const missingIds = [...approverDatasetIds].filter((id) => !rlsDatasetIds.has(id));
+  let approverRows: Record<string, unknown>[] = [];
+  if (missingIds.length > 0) {
+    let approverQuery = admin
+      .from("datasets")
+      .select("id, schema_id, name, row_count, state, created_at, updated_at, schemas(name)")
+      .in("id", missingIds)
+      .order("created_at", { ascending: false });
+
+    if (schemaId) approverQuery = approverQuery.eq("schema_id", schemaId);
+    if (search) approverQuery = approverQuery.ilike("name", `%${search}%`);
+    if (stateFilter) approverQuery = approverQuery.eq("state", stateFilter);
+
+    const { data: extraRows } = await approverQuery;
+    approverRows = (extraRows ?? []) as Record<string, unknown>[];
+  }
+
+  const mapRow = (r: Record<string, unknown>) => ({
+    id: r.id as string,
+    schemaId: r.schema_id,
+    schemaName: (r.schemas as Record<string, unknown>)?.name ?? null,
+    name: r.name,
+    rowCount: r.row_count ?? 0,
+    state: r.state ?? "draft",
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    assignedToMe: approverDatasetIds.has(r.id as string) || undefined,
+  });
+
+  const allDatasets = [
+    ...(rows ?? []).map((r: Record<string, unknown>) => mapRow(r)),
+    ...approverRows.map((r) => mapRow(r)),
+  ];
+
+  if (assignedToMe) {
+    allDatasets.sort((a, b) => {
+      const aAssigned = a.assignedToMe ? 0 : 1;
+      const bAssigned = b.assignedToMe ? 0 : 1;
+      return aAssigned - bAssigned;
+    });
+  }
+
   return NextResponse.json({
-    datasets: (rows ?? []).map((r: Record<string, unknown>) => ({
-      id: r.id,
-      schemaId: r.schema_id,
-      schemaName: (r.schemas as Record<string, unknown>)?.name ?? null,
-      name: r.name,
-      rowCount: r.row_count ?? 0,
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
-    })),
-    total: typeof count === "number" ? count : undefined,
+    datasets: allDatasets,
+    total: (typeof count === "number" ? count : 0) + approverRows.length,
     offset,
     limit,
   });
@@ -91,7 +139,7 @@ export async function POST(request: NextRequest) {
       row_count: rows.length,
       mapping_snapshot: mappingSnapshot,
     })
-    .select("id, schema_id, name, row_count, created_at, updated_at")
+    .select("id, schema_id, name, row_count, state, created_at, updated_at")
     .single();
 
   if (error) {
@@ -106,6 +154,7 @@ export async function POST(request: NextRequest) {
       schemaId: data.schema_id,
       name: data.name,
       rowCount: data.row_count ?? 0,
+      state: (data as Record<string, unknown>).state ?? "draft",
       createdAt: data.created_at,
       updatedAt: data.updated_at,
     },

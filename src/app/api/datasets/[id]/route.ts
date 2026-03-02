@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(
   _request: NextRequest,
@@ -7,30 +8,117 @@ export async function GET(
 ) {
   const auth = await getAuth();
   if (auth.response) return auth.response;
-  const { supabase } = auth;
+  const { supabase, userId } = auth;
   const { id } = await params;
 
-  const { data, error } = await supabase!
+  const admin = createAdminClient();
+
+  // Try via RLS first (schema owner / grantee)
+  let data: Record<string, unknown> | null = null;
+  const { data: rlsData, error } = await supabase!
     .from("datasets")
-    .select("id, schema_id, name, row_count, rows, mapping_snapshot, created_at, updated_at, schemas!inner(name)")
+    .select("id, schema_id, name, row_count, state, rows, mapping_snapshot, created_at, updated_at, schemas(name)")
     .eq("id", id)
     .single();
 
-  if (error || !data) {
+  if (rlsData) {
+    data = rlsData as Record<string, unknown>;
+  } else {
+    // Fallback: check if the user is an approver on this dataset
+    const { data: approverRow } = await admin
+      .from("dataset_approvers")
+      .select("id")
+      .eq("dataset_id", id)
+      .eq("user_id", userId!)
+      .maybeSingle();
+
+    if (approverRow) {
+      const { data: adminData } = await admin
+        .from("datasets")
+        .select("id, schema_id, name, row_count, state, rows, mapping_snapshot, created_at, updated_at, schemas(name)")
+        .eq("id", id)
+        .single();
+      data = adminData as Record<string, unknown> | null;
+    }
+  }
+
+  if (!data) {
     return NextResponse.json({ error: error?.message ?? "Not found" }, { status: 404 });
+  }
+
+  const { data: approvers } = await admin
+    .from("dataset_approvers")
+    .select("id, dataset_id, user_id, status, comment, decided_at, created_at")
+    .eq("dataset_id", id)
+    .order("created_at");
+
+  const { data: logs } = await admin
+    .from("dataset_logs")
+    .select("id, dataset_id, user_id, action, from_state, to_state, comment, metadata, created_at")
+    .eq("dataset_id", id)
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  // Collect all unique user IDs from approvers + logs and fetch profiles in one query
+  const userIds = [
+    ...new Set([
+      ...(approvers ?? []).map((a: Record<string, unknown>) => a.user_id as string),
+      ...(logs ?? []).map((l: Record<string, unknown>) => l.user_id as string),
+    ]),
+  ];
+  const userMap = new Map<string, { email: string; full_name: string | null }>();
+  if (userIds.length > 0) {
+    const { data: users } = await admin
+      .from("users")
+      .select("id, email, full_name")
+      .in("id", userIds);
+    for (const u of users ?? []) {
+      userMap.set(u.id, { email: u.email, full_name: u.full_name });
+    }
   }
 
   return NextResponse.json({
     dataset: {
       id: data.id,
       schemaId: data.schema_id,
-      schemaName: (data.schemas as unknown as Record<string, unknown>)?.name ?? null,
+      schemaName: (data.schemas as Record<string, unknown>)?.name ?? null,
       name: data.name,
       rowCount: data.row_count ?? 0,
+      state: data.state ?? "draft",
       rows: Array.isArray(data.rows) ? data.rows : [],
       mappingSnapshot: (data.mapping_snapshot ?? {}) as Record<string, unknown>,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
+      approvers: (approvers ?? []).map((a: Record<string, unknown>) => {
+        const user = userMap.get(a.user_id as string);
+        return {
+          id: a.id,
+          datasetId: a.dataset_id,
+          userId: a.user_id,
+          userEmail: user?.email ?? "",
+          userName: user?.full_name || user?.email || "",
+          status: a.status,
+          comment: a.comment,
+          decidedAt: a.decided_at,
+          createdAt: a.created_at,
+        };
+      }),
+      logs: (logs ?? []).map((l: Record<string, unknown>) => {
+        const user = userMap.get(l.user_id as string);
+        return {
+          id: l.id,
+          datasetId: l.dataset_id,
+          userId: l.user_id,
+          userEmail: user?.email ?? "",
+          userName: user?.full_name || user?.email || "",
+          action: l.action,
+          fromState: l.from_state,
+          toState: l.to_state,
+          comment: l.comment,
+          metadata: l.metadata ?? {},
+          createdAt: l.created_at,
+        };
+      }),
     },
   });
 }

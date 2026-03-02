@@ -6,10 +6,42 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import type { DatasetRecord } from "@/lib/types";
-import { ArrowLeft, ChevronDown, ChevronRight, Database, Download, ExternalLink, Layers, Loader2, Plus, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import type { DatasetRecord, DatasetState, AppUser } from "@/lib/types";
+import {
+  ArrowLeft,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Database,
+  Download,
+  ExternalLink,
+  History,
+  Layers,
+  Loader2,
+
+  Plus,
+  Send,
+  Trash2,
+  Upload,
+  UserPlus,
+  X,
+  XCircle,
+} from "lucide-react";
 import Link from "next/link";
 import ExcelJS from "exceljs";
 import { useSchemaStore, type UploadedFileEntry, type TransformationMappingEntry } from "@/lib/schema-store";
@@ -22,26 +54,89 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "sonner";
 
 const ROWS_PER_PAGE = 100;
+
+const STATE_CONFIG: Record<DatasetState, { label: string; className: string }> = {
+  draft: { label: "Draft", className: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border-gray-200 dark:border-gray-700" },
+  pending_approval: { label: "Pending Approval", className: "bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800" },
+  approved: { label: "Approved", className: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300 border-green-200 dark:border-green-800" },
+  rejected: { label: "Rejected", className: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 border-red-200 dark:border-red-800" },
+  completed: { label: "Completed", className: "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border-purple-200 dark:border-purple-800" },
+};
+
+interface DataSourceItem {
+  id: string;
+  name: string;
+  type: string;
+  config: Record<string, unknown>;
+}
 
 export default function DatasetPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const { user } = useAuth();
   const [dataset, setDataset] = useState<DatasetRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingName, setSavingName] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
-  const [exporting, setExporting] = useState<"csv" | "excel" | null>(null);
+  const [exporting, setExporting] = useState<string | null>(null);
   const [visibleRowCount, setVisibleRowCount] = useState(ROWS_PER_PAGE);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"data" | "transformations">("data");
+  const [activeTab, setActiveTab] = useState<"data" | "transformations" | "activity">("data");
   const [expandedTransformStep, setExpandedTransformStep] = useState<number | null>(null);
   const [transformPreviewMode, setTransformPreviewMode] = useState<"before" | "after">("after");
   const [activeSheetIdx, setActiveSheetIdx] = useState(0);
 
+  // Approval state
+  const [approverDialogOpen, setApproverDialogOpen] = useState(false);
+  const [allUsers, setAllUsers] = useState<AppUser[]>([]);
+  const [selectedApproverIds, setSelectedApproverIds] = useState<string[]>([]);
+  const [addingApprovers, setAddingApprovers] = useState(false);
+  const [changingState, setChangingState] = useState(false);
+
+  // Approver decision state
+  const [decisionDialogOpen, setDecisionDialogOpen] = useState(false);
+  const [decisionType, setDecisionType] = useState<"approved" | "rejected" | null>(null);
+  const [decisionComment, setDecisionComment] = useState("");
+  const [submittingDecision, setSubmittingDecision] = useState(false);
+
+  // Export dialog state
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [dataSources, setDataSources] = useState<DataSourceItem[]>([]);
+  const [selectedDataSourceId, setSelectedDataSourceId] = useState("");
+  const [exportTargetSchema, setExportTargetSchema] = useState("public");
+  const [exportTargetTable, setExportTargetTable] = useState("");
+  const [exportCreateTable, setExportCreateTable] = useState(true);
+  const [exportingToDb, setExportingToDb] = useState(false);
+
   const { setDatasetWorkflow, resetDatasetWorkflow } = useSchemaStore();
+
+  const isApprover = useMemo(() => {
+    if (!user || !dataset?.approvers) return false;
+    return dataset.approvers.some((a) => a.userId === user.id);
+  }, [user, dataset]);
+
+  const myApproverEntry = useMemo(() => {
+    if (!user || !dataset?.approvers) return null;
+    return dataset.approvers.find((a) => a.userId === user.id) ?? null;
+  }, [user, dataset]);
+
+  const allApproved = useMemo(() => {
+    if (!dataset?.approvers || dataset.approvers.length === 0) return true;
+    return dataset.approvers.every((a) => a.status === "approved");
+  }, [dataset]);
+
+  const canExportToDb = useMemo(() => {
+    if (!dataset) return false;
+    if (dataset.approvers && dataset.approvers.length > 0) {
+      return allApproved;
+    }
+    return true;
+  }, [dataset, allApproved]);
 
   const handleAddToDatasetUpload = useCallback(
     (schemaId: string, files: UploadedFileEntry[]) => {
@@ -59,25 +154,49 @@ export default function DatasetPage() {
     [dataset, resetDatasetWorkflow, setDatasetWorkflow, router],
   );
 
+  const fetchDataset = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/datasets/${id}`);
+      const data = await res.json().catch(() => ({}));
+      console.log("data", data);
+      if (!res.ok) throw new Error(data.error ?? "Failed to load dataset");
+      setDataset(data.dataset as DatasetRecord);
+      setNameDraft((data.dataset as DatasetRecord).name);
+    } catch {
+      setDataset(null);
+    }
+  }, [id]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      try {
-        const res = await fetch(`/api/datasets/${id}`);
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error ?? "Failed to load dataset");
-        if (cancelled) return;
-        setDataset(data.dataset as DatasetRecord);
-        setNameDraft((data.dataset as DatasetRecord).name);
-      } catch {
-        if (!cancelled) setDataset(null);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      await fetchDataset();
+      if (!cancelled) setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [id]);
+  }, [fetchDataset]);
+
+  const fetchUsers = useCallback(async () => {
+    try {
+      const res = await fetch("/api/users");
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setAllUsers(data.users ?? []);
+    } catch { /* ignore */ }
+  }, []);
+
+  const fetchDataSources = useCallback(async () => {
+    try {
+      const res = await fetch("/api/data-sources");
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const sources = (data.dataSources ?? []).filter(
+          (ds: DataSourceItem) => ds.type === "bigquery" || ds.type === "postgres"
+        );
+        setDataSources(sources);
+      }
+    } catch { /* ignore */ }
+  }, []);
 
   const columns = useMemo(() => {
     if (!dataset) return [];
@@ -124,6 +243,77 @@ export default function DatasetPage() {
     }
   };
 
+  const changeState = async (newState: DatasetState) => {
+    if (!dataset) return;
+    setChangingState(true);
+    try {
+      const res = await fetch(`/api/datasets/${dataset.id}/state`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state: newState }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error ?? "Failed to change state");
+        return;
+      }
+      toast.success(`State changed to ${STATE_CONFIG[newState]?.label ?? newState}`);
+      await fetchDataset();
+    } finally {
+      setChangingState(false);
+    }
+  };
+
+  const submitForApproval = async () => {
+    if (!dataset || selectedApproverIds.length === 0) return;
+    setAddingApprovers(true);
+    try {
+      const res = await fetch(`/api/datasets/${dataset.id}/state`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          state: "pending_approval",
+          approverIds: selectedApproverIds,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error ?? "Failed to submit for approval");
+        return;
+      }
+      toast.success("Submitted for approval");
+      setApproverDialogOpen(false);
+      setSelectedApproverIds([]);
+      await fetchDataset();
+    } finally {
+      setAddingApprovers(false);
+    }
+  };
+
+  const submitDecision = async () => {
+    if (!dataset || !decisionType) return;
+    setSubmittingDecision(true);
+    try {
+      const res = await fetch(`/api/datasets/${dataset.id}/approvers/decide`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision: decisionType, comment: decisionComment }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error ?? "Failed to submit decision");
+        return;
+      }
+      toast.success(decisionType === "approved" ? "Dataset approved" : "Dataset rejected");
+      setDecisionDialogOpen(false);
+      setDecisionComment("");
+      setDecisionType(null);
+      await fetchDataset();
+    } finally {
+      setSubmittingDecision(false);
+    }
+  };
+
   const exportRows = async (format: "csv" | "excel") => {
     if (!dataset) return;
     setExporting(format);
@@ -163,6 +353,33 @@ export default function DatasetPage() {
     }
   };
 
+  const exportToDatabase = async () => {
+    if (!dataset || !selectedDataSourceId || !exportTargetTable.trim()) return;
+    setExportingToDb(true);
+    try {
+      const res = await fetch(`/api/datasets/${dataset.id}/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dataSourceId: selectedDataSourceId,
+          targetSchema: exportTargetSchema.trim() || "public",
+          targetTable: exportTargetTable.trim(),
+          createTable: exportCreateTable,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error ?? "Export failed");
+        return;
+      }
+      toast.success(`Exported ${data.exported} rows to ${data.target}`);
+      setExportDialogOpen(false);
+      await fetchDataset();
+    } finally {
+      setExportingToDb(false);
+    }
+  };
+
   const deleteDataset = async () => {
     if (!dataset) return;
     if (!confirm(`Delete dataset "${dataset.name}"?`)) return;
@@ -174,6 +391,12 @@ export default function DatasetPage() {
     } finally {
       setDeleting(false);
     }
+  };
+
+  const openExportDialog = () => {
+    fetchDataSources();
+    setExportTargetTable(dataset?.name?.replace(/[^a-zA-Z0-9_]/g, "_").toLowerCase() ?? "");
+    setExportDialogOpen(true);
   };
 
   if (loading) {
@@ -195,100 +418,137 @@ export default function DatasetPage() {
     );
   }
 
+  const stateInfo = STATE_CONFIG[dataset.state] ?? STATE_CONFIG.draft;
+  const isReadOnlyApprover = isApprover && !myApproverEntry?.decidedAt && dataset.state === "pending_approval";
+
   return (
     <DashboardLayout>
       <div className="space-y-6 animate-fade-in">
+        {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" onClick={() => router.push("/datasets")}>
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">{dataset.name}</h1>
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-bold tracking-tight">{dataset.name}</h1>
+                <Badge variant="outline" className={stateInfo.className}>
+                  {stateInfo.label}
+                </Badge>
+              </div>
               <p className="text-muted-foreground text-sm">{dataset.rowCount} rows &bull; Created {new Date(dataset.createdAt).toLocaleString()}</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() => setAddDialogOpen(true)}
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add To This Dataset
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" disabled={!!exporting}>
-                  {exporting ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Download className="mr-2 h-4 w-4" />
-                  )}
-                  {exporting ? "Exporting..." : "Export"}
-                  <ChevronDown className="ml-2 h-4 w-4" />
+            {/* State transition buttons */}
+            {dataset.state === "draft" && (
+              <Button onClick={() => { fetchUsers(); setApproverDialogOpen(true); }} disabled={changingState}>
+                {changingState ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                Submit for Approval
+              </Button>
+            )}
+            {dataset.state === "pending_approval" && !isReadOnlyApprover && (
+              <Button variant="outline" onClick={() => changeState("draft")} disabled={changingState}>
+                {changingState ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowLeft className="mr-2 h-4 w-4" />}
+                Set back to Draft
+              </Button>
+            )}
+            {dataset.state === "rejected" && (
+              <Button variant="outline" onClick={() => changeState("draft")} disabled={changingState}>
+                {changingState ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Clock className="mr-2 h-4 w-4" />}
+                Revise
+              </Button>
+            )}
+
+            {/* Approver decision button */}
+            {isApprover && myApproverEntry?.status === "pending" && dataset.state === "pending_approval" && (
+              <Button
+                onClick={() => { setDecisionType(null); setDecisionComment(""); setDecisionDialogOpen(true); }}
+              >
+                <Send className="mr-2 h-4 w-4" />
+                Submit Approval
+              </Button>
+            )}
+
+            {!isReadOnlyApprover && (
+              <>
+                <Button onClick={() => setAddDialogOpen(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add To This Dataset
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
-                <DropdownMenuItem onClick={() => exportRows("excel")}>
-                  <svg className="mr-2 h-4 w-4 shrink-0 text-green-600" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M14 2v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M8 13l3 3 3-3M8 17l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                  Excel (.xlsx)
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => exportRows("csv")}>
-                  <svg className="mr-2 h-4 w-4 shrink-0 text-blue-600" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M14 2v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M8 13h8M8 17h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                  </svg>
-                  CSV (.csv)
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem disabled>
-                  <svg className="mr-2 h-4 w-4 shrink-0 text-orange-500 opacity-50" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="2"/>
-                    <path d="M7 8h10M7 12h10M7 16h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                  </svg>
-                  <span>FIS</span>
-                  <span className="ml-auto text-xs text-muted-foreground">Soon</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled>
-                  <Database className="mr-2 h-4 w-4 shrink-0 text-blue-500 opacity-50" />
-                  <span>BigQuery</span>
-                  <span className="ml-auto text-xs text-muted-foreground">Soon</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled>
-                  <Database className="mr-2 h-4 w-4 shrink-0 text-red-500 opacity-50" />
-                  <span>Redshift</span>
-                  <span className="ml-auto text-xs text-muted-foreground">Soon</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled>
-                  <svg className="mr-2 h-4 w-4 shrink-0 text-sky-700 opacity-50" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <ellipse cx="12" cy="6" rx="8" ry="3" stroke="currentColor" strokeWidth="2"/>
-                    <path d="M4 6v6c0 1.657 3.582 3 8 3s8-1.343 8-3V6" stroke="currentColor" strokeWidth="2"/>
-                    <path d="M4 12v6c0 1.657 3.582 3 8 3s8-1.343 8-3v-6" stroke="currentColor" strokeWidth="2"/>
-                  </svg>
-                  <span>Postgres</span>
-                  <span className="ml-auto text-xs text-muted-foreground">Soon</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button variant="destructive" onClick={deleteDataset} disabled={deleting}>
-              <Trash2 className="mr-2 h-4 w-4" />
-              Delete
-            </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" disabled={!!exporting}>
+                      {exporting ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Download className="mr-2 h-4 w-4" />
+                      )}
+                      {exporting ? "Exporting..." : "Export"}
+                      <ChevronDown className="ml-2 h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem onClick={() => exportRows("excel")}>
+                      <svg className="mr-2 h-4 w-4 shrink-0 text-green-600" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M14 2v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M8 13l3 3 3-3M8 17l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      Excel (.xlsx)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => exportRows("csv")}>
+                      <svg className="mr-2 h-4 w-4 shrink-0 text-blue-600" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M14 2v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M8 13h8M8 17h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                      </svg>
+                      CSV (.csv)
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      disabled={!canExportToDb}
+                      onClick={canExportToDb ? openExportDialog : undefined}
+                    >
+                      <Database className="mr-2 h-4 w-4 shrink-0 text-blue-500" />
+                      <span>BigQuery</span>
+                      {!canExportToDb && <span className="ml-auto text-xs text-muted-foreground">Needs approval</span>}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={!canExportToDb}
+                      onClick={canExportToDb ? openExportDialog : undefined}
+                    >
+                      <svg className="mr-2 h-4 w-4 shrink-0 text-sky-700" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <ellipse cx="12" cy="6" rx="8" ry="3" stroke="currentColor" strokeWidth="2"/>
+                        <path d="M4 6v6c0 1.657 3.582 3 8 3s8-1.343 8-3V6" stroke="currentColor" strokeWidth="2"/>
+                        <path d="M4 12v6c0 1.657 3.582 3 8 3s8-1.343 8-3v-6" stroke="currentColor" strokeWidth="2"/>
+                      </svg>
+                      <span>Postgres</span>
+                      {!canExportToDb && <span className="ml-auto text-xs text-muted-foreground">Needs approval</span>}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button variant="destructive" onClick={deleteDataset} disabled={deleting}>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        {/* Info cards */}
+        <div className={cn("grid gap-4", dataset.state === "draft" ? "sm:grid-cols-2" : "sm:grid-cols-2 lg:grid-cols-3")}>
           <Card>
             <CardHeader>
               <CardTitle>Dataset Name</CardTitle>
             </CardHeader>
             <CardContent className="flex gap-2">
-              <Input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} />
-              <Button onClick={saveName} disabled={savingName}>{savingName ? "Saving..." : "Save"}</Button>
+              <Input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} disabled={isReadOnlyApprover} />
+              {!isReadOnlyApprover && (
+                <Button onClick={saveName} disabled={savingName}>{savingName ? "Saving..." : "Save"}</Button>
+              )}
             </CardContent>
           </Card>
 
@@ -307,28 +567,87 @@ export default function DatasetPage() {
               </CardContent>
             </Card>
           </Link>
+
+          {dataset.state !== "draft" && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <UserPlus className="h-4 w-4 text-muted-foreground" />
+                  Approvers
+                </CardTitle>
+                <CardDescription>
+                  {dataset.approvers && dataset.approvers.length > 0
+                    ? (() => {
+                        const approved = dataset.approvers.filter((a) => a.status === "approved").length;
+                        const rejected = dataset.approvers.filter((a) => a.status === "rejected").length;
+                        const pending = dataset.approvers.filter((a) => a.status === "pending").length;
+                        const parts: string[] = [];
+                        if (approved > 0) parts.push(`${approved} approved`);
+                        if (rejected > 0) parts.push(`${rejected} rejected`);
+                        if (pending > 0) parts.push(`${pending} pending`);
+                        return `${dataset.approvers.length} approver${dataset.approvers.length !== 1 ? "s" : ""} — ${parts.join(", ")}`;
+                      })()
+                    : "No approvers assigned"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {dataset.approvers && dataset.approvers.length > 0 ? (
+                    dataset.approvers.map((a) => (
+                      <div key={a.id} className="flex items-start gap-3">
+                        <div className={cn(
+                          "h-8 w-8 rounded-full flex items-center justify-center text-sm font-medium shrink-0",
+                          a.status === "approved" ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" :
+                          a.status === "rejected" ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300" :
+                          "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+                        )}>
+                          {(a.userName || a.userEmail || "?").charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium truncate">{a.userName || a.userEmail || "?"}</span>
+                            <Badge variant="outline" className={cn(
+                              "text-[10px] px-1.5 py-0",
+                              a.status === "approved" ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800" :
+                              a.status === "rejected" ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800" :
+                              "bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-950 dark:text-yellow-300 dark:border-yellow-800",
+                            )}>
+                              {a.status === "approved" ? "Approved" : a.status === "rejected" ? "Rejected" : "Pending"}
+                            </Badge>
+                          </div>
+                          {a.comment && (
+                            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">&ldquo;{a.comment}&rdquo;</p>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  ) : null}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
-        {hasTransformations && (
-          <div className="flex gap-1 border-b pb-2">
-            {(["data", "transformations"] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                className={cn(
-                  "px-4 py-2 text-sm rounded-md transition-colors",
-                  activeTab === tab
-                    ? "bg-muted font-medium"
-                    : "text-muted-foreground hover:bg-muted/50",
-                )}
-                onClick={() => setActiveTab(tab)}
-              >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* Tabs */}
+        <div className="flex gap-1 border-b pb-2">
+          {(["data", ...(hasTransformations ? ["transformations"] : []), "activity"] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              className={cn(
+                "px-4 py-2 text-sm rounded-md transition-colors",
+                activeTab === tab
+                  ? "bg-muted font-medium"
+                  : "text-muted-foreground hover:bg-muted/50",
+              )}
+              onClick={() => setActiveTab(tab as typeof activeTab)}
+            >
+              {tab === "data" ? "Data" : tab === "transformations" ? "Transformations" : "Activity Log"}
+            </button>
+          ))}
+        </div>
 
+        {/* Data tab */}
         {activeTab === "data" && (
           <Card>
             <CardHeader>
@@ -385,6 +704,7 @@ export default function DatasetPage() {
           </Card>
         )}
 
+        {/* Transformations tab */}
         {activeTab === "transformations" && (
           <Card>
             <CardHeader>
@@ -570,8 +890,74 @@ export default function DatasetPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Activity log tab */}
+        {activeTab === "activity" && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <History className="h-4 w-4 text-muted-foreground" />
+                Activity Log
+              </CardTitle>
+              <CardDescription>
+                Audit trail of all state changes and actions on this dataset.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!dataset.logs || dataset.logs.length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">No activity recorded yet.</p>
+              ) : (
+                <div className="space-y-0">
+                  {dataset.logs.map((log, idx) => (
+                    <div key={log.id} className="flex gap-3 pb-4">
+                      <div className="flex flex-col items-center">
+                        <div className={cn(
+                          "h-8 w-8 rounded-full flex items-center justify-center shrink-0",
+                          log.action === "state_change" ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300" :
+                          log.action === "approval_approved" ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" :
+                          log.action === "approval_rejected" ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300" :
+                          log.action === "export" ? "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300" :
+                          "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+                        )}>
+                          {log.action === "state_change" ? <Clock className="h-3.5 w-3.5" /> :
+                           log.action === "approval_approved" ? <CheckCircle2 className="h-3.5 w-3.5" /> :
+                           log.action === "approval_rejected" ? <XCircle className="h-3.5 w-3.5" /> :
+                           log.action === "export" ? <Upload className="h-3.5 w-3.5" /> :
+                           <History className="h-3.5 w-3.5" />}
+                        </div>
+                        {idx < dataset.logs!.length - 1 && (
+                          <div className="w-px flex-1 bg-border mt-1" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0 pt-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium">{log.userName || log.userEmail}</span>
+                          <span className="text-sm text-muted-foreground">
+                            {log.action === "state_change" && log.fromState && log.toState
+                              ? `changed state from ${STATE_CONFIG[log.fromState as DatasetState]?.label ?? log.fromState} to ${STATE_CONFIG[log.toState as DatasetState]?.label ?? log.toState}`
+                              : log.action === "approval_approved" ? "approved the dataset"
+                              : log.action === "approval_rejected" ? "rejected the dataset"
+                              : log.action === "export" ? "exported the dataset"
+                              : log.action}
+                          </span>
+                        </div>
+                        {log.comment && (
+                          <p className="text-xs text-muted-foreground mt-0.5">{log.comment}</p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {new Date(log.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
 
+      {/* Add to dataset dialog */}
       <UploadDatasetDialog
         open={addDialogOpen}
         onOpenChange={setAddDialogOpen}
@@ -579,6 +965,206 @@ export default function DatasetPage() {
         datasetName={dataset.name}
         onUpload={handleAddToDatasetUpload}
       />
+
+      {/* Submit for approval dialog */}
+      <Dialog open={approverDialogOpen} onOpenChange={setApproverDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Submit for Approval</DialogTitle>
+            <DialogDescription>
+              Select the users who need to approve this dataset. Once confirmed, the dataset will be submitted for their review.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 max-h-[300px] overflow-y-auto">
+            {allUsers.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">No other users found.</p>
+            ) : (
+              allUsers.map((u) => {
+                const selected = selectedApproverIds.includes(u.id);
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    className={cn(
+                      "flex items-center gap-3 w-full p-3 rounded-lg border transition-colors text-left",
+                      selected ? "border-primary bg-primary/5" : "hover:bg-muted/50",
+                    )}
+                    onClick={() => {
+                      setSelectedApproverIds((prev) =>
+                        selected ? prev.filter((id) => id !== u.id) : [...prev, u.id]
+                      );
+                    }}
+                  >
+                    <div className={cn(
+                      "h-8 w-8 rounded-full flex items-center justify-center text-sm font-medium",
+                      selected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+                    )}>
+                      {(u.name || u.email).charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{u.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                    </div>
+                    {selected && <Check className="h-4 w-4 text-primary shrink-0" />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setApproverDialogOpen(false); setSelectedApproverIds([]); }}>Cancel</Button>
+            <Button onClick={submitForApproval} disabled={selectedApproverIds.length === 0 || addingApprovers}>
+              {addingApprovers ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+              Submit {selectedApproverIds.length > 0 ? `(${selectedApproverIds.length} approver${selectedApproverIds.length !== 1 ? "s" : ""})` : ""}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Submit approval dialog */}
+      <Dialog open={decisionDialogOpen} onOpenChange={setDecisionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Submit Approval</DialogTitle>
+            <DialogDescription>
+              Review this dataset and submit your decision. You can leave a comment for the dataset owner.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Decision</label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  className={cn(
+                    "flex items-center justify-center gap-2 rounded-lg border-2 p-3 text-sm font-medium transition-colors",
+                    decisionType === "approved"
+                      ? "border-green-500 bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300 dark:border-green-600"
+                      : "border-border hover:border-green-300 hover:bg-green-50/50 dark:hover:bg-green-950/30",
+                  )}
+                  onClick={() => setDecisionType("approved")}
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "flex items-center justify-center gap-2 rounded-lg border-2 p-3 text-sm font-medium transition-colors",
+                    decisionType === "rejected"
+                      ? "border-red-500 bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300 dark:border-red-600"
+                      : "border-border hover:border-red-300 hover:bg-red-50/50 dark:hover:bg-red-950/30",
+                  )}
+                  onClick={() => setDecisionType("rejected")}
+                >
+                  <XCircle className="h-4 w-4" />
+                  Reject
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Comment {decisionType === "rejected" ? <span className="text-destructive">*</span> : <span className="text-muted-foreground font-normal">(optional)</span>}
+              </label>
+              <Textarea
+                placeholder={decisionType === "rejected" ? "Explain why you are rejecting this dataset..." : "Add a comment..."}
+                value={decisionComment}
+                onChange={(e) => setDecisionComment(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDecisionDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={submitDecision}
+              disabled={submittingDecision || !decisionType || (decisionType === "rejected" && !decisionComment.trim())}
+              className={decisionType === "approved" ? "bg-green-600 hover:bg-green-700 text-white" : ""}
+              variant={decisionType === "rejected" ? "destructive" : "default"}
+            >
+              {submittingDecision && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {decisionType === "approved" ? "Approve" : decisionType === "rejected" ? "Reject" : "Submit"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Export to database dialog */}
+      <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5" />
+              Export to Database
+            </DialogTitle>
+            <DialogDescription>
+              Export {dataset.rowCount} rows to a BigQuery or Postgres data source.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Data Source</label>
+              <Select value={selectedDataSourceId} onValueChange={setSelectedDataSourceId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a data source..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {dataSources.length === 0 ? (
+                    <SelectItem value="_none" disabled>No BigQuery or Postgres data sources configured</SelectItem>
+                  ) : (
+                    dataSources.map((ds) => (
+                      <SelectItem key={ds.id} value={ds.id}>
+                        <div className="flex items-center gap-2">
+                          <Database className="h-3 w-3" />
+                          {ds.name}
+                          <span className="text-xs text-muted-foreground">({ds.type})</span>
+                        </div>
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Schema / Dataset</label>
+                <Input
+                  value={exportTargetSchema}
+                  onChange={(e) => setExportTargetSchema(e.target.value)}
+                  placeholder="public"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Table Name</label>
+                <Input
+                  value={exportTargetTable}
+                  onChange={(e) => setExportTargetTable(e.target.value)}
+                  placeholder="my_table"
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={exportCreateTable}
+                onChange={(e) => setExportCreateTable(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              Create table if it doesn&apos;t exist
+            </label>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExportDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={exportToDatabase}
+              disabled={exportingToDb || !selectedDataSourceId || !exportTargetTable.trim()}
+            >
+              {exportingToDb ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+              {exportingToDb ? "Exporting..." : "Export"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }
