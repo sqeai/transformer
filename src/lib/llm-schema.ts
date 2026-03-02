@@ -2,41 +2,11 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { HumanMessage, type BaseMessage } from "@langchain/core/messages";
 import { createAgent } from "langchain";
 import { SQL_COMPATIBLE_TYPES, type SqlCompatibleType } from "./types";
-import type { SchemaField, ColumnMapping, DefaultValues, PivotConfig, AggregationFunction, VerticalPivotConfig, VerticalPivotColumn } from "./types";
+import type { ColumnMapping, DefaultValues, PivotConfig, AggregationFunction, VerticalPivotConfig, VerticalPivotColumn } from "./types";
 import {
   extractWorkbookPreview,
-  formatPreviewAsText,
   extractExcelGrid,
 } from "./parse-excel-preview";
-
-const SYSTEM_PROMPT = `You are a data-schema analyst. Given a preview of an Excel workbook (headers + sample rows), produce the best possible target schema.
-
-Rules:
-1. Identify which columns are meaningful data fields vs noise (row numbers, empty padding, internal IDs that are clearly auto-generated).
-2. Group related columns under a common parent when it makes semantic sense (e.g. "First Name" and "Last Name" → parent "name" with children "first" and "last"; or "Address Line 1", "City", "State", "Zip" → parent "address").
-3. Normalise field names to clean camelCase (e.g. "CUST_EMAIL" → "customerEmail", "Addr Line 1" → "addressLine1"). For bilingual headers (Vietnamese/English), prefer the English portion for the camelCase name (e.g. "Tên Công Ty\nCompany Name" → "companyName", "Đơn Giá\nUnit Price" → "unitPrice", "Thuế GTGT\nVAT" → "vat", "Tổng Cộng\nTotal Amount" → "totalAmount").
-4. Assign a nesting level: 1 for top-level, 2 for first level of nesting, 3 for second, and so on. Use as many levels as the structure needs (e.g. 1–4 or more for deeply nested data).
-5. Preserve a logical ordering that groups related fields together.
-6. Keep the schema practical — nest where it adds clarity, but avoid unnecessary depth.
-
-Use only these SQL/BigQuery-compatible data types:
-- STRING, INTEGER, FLOAT, NUMERIC, BOOLEAN, DATE, DATETIME, TIMESTAMP
-
-Respond ONLY with a JSON array (no markdown fences, no commentary). Each element must have:
-- "name": string (clean display name)
-- "path": string (dot-separated path, e.g. "address.city")
-- "level": number (nesting level: 1 = topmost, 2 = first nesting, 3 = second, etc.)
-- "originalColumn": string (the raw header this maps to, or "" for group parents)
-- "dataType": string (one of: STRING, INTEGER, FLOAT, NUMERIC, BOOLEAN, DATE, DATETIME, TIMESTAMP)
-
-Example output:
-[
-  {"name":"id","path":"id","level":1,"originalColumn":"Customer ID","dataType":"STRING"},
-  {"name":"name","path":"name","level":1,"originalColumn":"","dataType":"STRING"},
-  {"name":"first","path":"name.first","level":2,"originalColumn":"First Name","dataType":"STRING"},
-  {"name":"last","path":"name.last","level":2,"originalColumn":"Last Name","dataType":"STRING"},
-  {"name":"email","path":"email","level":1,"originalColumn":"Email Address","dataType":"STRING"}
-]`;
 
 const RAW_DATA_ANALYSIS_PROMPT = `You are the "Header detection agent", a data analyst specialising in messy spreadsheet data. You will receive a raw preview of an Excel/CSV file that may contain:
 - Title rows, disclaimers, or metadata rows above the actual data
@@ -195,14 +165,6 @@ Respond ONLY JSON:
   "hierarchyValueColumn": string
 }`;
 
-interface LlmSchemaField {
-  name: string;
-  path: string;
-  level: number;
-  originalColumn: string;
-  dataType?: string;
-}
-
 export interface RawDataAnalysis {
   headerRowIndex: number;
   dataStartRowIndex: number;
@@ -257,44 +219,6 @@ function stringifyForHeader(value: unknown): string {
   return String(value);
 }
 
-function buildFieldTree(flat: LlmSchemaField[]): SchemaField[] {
-  const result: SchemaField[] = [];
-  const parentStack: SchemaField[] = [];
-
-  for (let i = 0; i < flat.length; i++) {
-    const f = flat[i];
-    const field: SchemaField = {
-      id: crypto.randomUUID(),
-      name: f.name,
-      path: f.path,
-      level: f.level,
-      order: i,
-      dataType: f.dataType ? normalizeSqlCompatibleType(f.dataType) : inferSqlTypeFromPath(f.path),
-      children: [],
-    };
-
-    if (f.level === 1) {
-      result.push(field);
-      parentStack.length = 0;
-      parentStack.push(field);
-    } else {
-      while (parentStack.length >= f.level) {
-        parentStack.pop();
-      }
-      const parent = parentStack[parentStack.length - 1];
-      if (parent) {
-        if (!parent.children) parent.children = [];
-        parent.children.push(field);
-      } else {
-        result.push(field);
-      }
-      parentStack.push(field);
-    }
-  }
-
-  return result;
-}
-
 async function callLlm(systemPrompt: string, userMessage: string): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -329,37 +253,6 @@ function cleanJsonResponse(text: string): string {
     .replace(/```json\s*/g, "")
     .replace(/```\s*/g, "")
     .trim();
-}
-
-export async function detectSchemaWithLLM(
-  buffer: ArrayBuffer,
-  sheetIndex = 0,
-): Promise<SchemaField[]> {
-  const preview = await extractWorkbookPreview(buffer, { sheetIndex });
-  if (preview.headers.length === 0) {
-    throw new Error("Workbook has no headers to analyse");
-  }
-
-  const previewText = formatPreviewAsText(preview);
-  const text = await callLlm(
-    SYSTEM_PROMPT,
-    `Analyse this workbook preview and produce the target schema:\n\n${previewText}`,
-  );
-
-  let parsed: LlmSchemaField[];
-  try {
-    parsed = JSON.parse(cleanJsonResponse(text));
-  } catch {
-    throw new Error(
-      `LLM returned invalid JSON. Raw response:\n${text.slice(0, 500)}`,
-    );
-  }
-
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    throw new Error("LLM returned an empty or non-array schema");
-  }
-
-  return buildFieldTree(parsed);
 }
 
 /**
@@ -726,84 +619,3 @@ export async function buildDataCleansingPlanWithLLM(
   };
 }
 
-const EXTRACT_UNSTRUCTURED_PROMPT = `You are an AI Data Cleanser agent. You will receive a raw dump of an entire Excel sheet (all rows and columns) and a list of target schema field paths. Your job is to extract exactly ONE record from this sheet that matches the target schema.
-
-The sheet may contain:
-- Title rows, disclaimers, or metadata rows
-- Multiple tables or sections
-- Merged cells
-- Empty padding rows/columns
-- Unstructured data (not in a clean table format)
-
-Your task:
-1. Analyze the entire sheet content to understand what data is present
-2. Extract values that correspond to each target schema field path
-3. Return a single record (object) where keys are the target schema paths and values are the extracted data
-4. Also provide a mapping showing where each value came from (e.g. "Cell B3", "Row 5, column 'Company Name'", "Found in title section")
-
-Rules:
-- Extract exactly ONE record per sheet (not multiple rows)
-- If a field cannot be found, use null or an empty string
-- For numeric fields, extract as numbers
-- For text fields, extract as strings
-- Try to be smart about finding data even if it's not in a standard table format
-- Cite the source location for each field in the mapping
-
-Respond ONLY with a JSON object (no markdown fences, no commentary):
-{
-  "record": {
-    "fieldPath1": value1,
-    "fieldPath2": value2,
-    ...
-  },
-  "mapping": [
-    {
-      "targetPath": "fieldPath1",
-      "source": "description of where this value came from (e.g. 'Cell B3', 'Row 5, column Company Name')"
-    },
-    ...
-  ]
-}`;
-
-export interface UnstructuredExtractionResult {
-  record: Record<string, unknown>;
-  mapping: Array<{ targetPath: string; source: string }>;
-}
-
-/**
- * Extracts a single record from an unstructured Excel sheet dump.
- * Takes the entire sheet as text and target schema paths, returns one record
- * with values mapped to those paths, plus a mapping showing where each value came from.
- */
-export async function extractUnstructuredRecordWithLLM(
-  sheetText: string,
-  targetPaths: string[],
-): Promise<UnstructuredExtractionResult> {
-  if (!sheetText || !targetPaths || targetPaths.length === 0) {
-    throw new Error("sheetText and targetPaths are required");
-  }
-
-  const prompt = `Extract a single record from this unstructured Excel sheet that matches the target schema fields.\n\nSheet content:\n${sheetText}\n\nTarget schema paths:\n${targetPaths.map((p, i) => `${i + 1}. "${p}"`).join("\n")}\n\nExtract one record with values for each target path, and provide a mapping showing where each value came from in the sheet.`;
-
-  const text = await callLlm(EXTRACT_UNSTRUCTURED_PROMPT, prompt);
-
-  let parsed: { record?: Record<string, unknown>; mapping?: Array<{ targetPath: string; source: string }> };
-  try {
-    parsed = JSON.parse(cleanJsonResponse(text));
-  } catch {
-    throw new Error(
-      `LLM returned invalid JSON for unstructured extraction. Raw response:\n${text.slice(0, 500)}`,
-    );
-  }
-
-  if (!parsed.record || typeof parsed.record !== "object") {
-    throw new Error("LLM did not return a valid record object");
-  }
-
-  const mapping = Array.isArray(parsed.mapping) ? parsed.mapping : [];
-
-  return {
-    record: parsed.record,
-    mapping,
-  };
-}

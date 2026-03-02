@@ -161,8 +161,4 @@ export function getAgentGraph(): AgentGraph | null {
   }
 }
 
-export function resetAgent(): void {
-  agentGraph = null;
-}
-
 export { HumanMessage, AIMessage };

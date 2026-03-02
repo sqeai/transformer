@@ -5,3 +5,7 @@ node_modules
 .env.local
 *.tsbuildinfo
 **/*.temp
+# Terraform
+.terraform/
+*terraform.tfstate.backup
+.terraform.lock.hcl
