@@ -11,13 +11,12 @@ import { downloadS3FileToTmp, uploadBufferToS3 } from "../../s3-sheets";
 import {
   type FileData,
   type TransformationStep,
-  readLocalCsv,
-  writeLocalCsv,
   fileSummary,
   rowsToCsv,
   executeTransformation,
   buildPipeline,
 } from "../../utils";
+import { readLocalCsv, writeLocalCsv } from "../../utils/csv-fs";
 
 const MAX_ITERATIONS = 20;
 const MAX_JUDGE_RETRIES = 2;
