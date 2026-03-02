@@ -2,13 +2,13 @@
 variable "s3_bucket_arn" {
   description = "ARN of the S3 bucket to grant access to"
   type        = string
-  default     = "arn:aws:s3:::adc-files"
+  default     = "arn:aws:s3:::ai-data-cleanser-files"
 }
 
 # IAM Policy for S3 Read/Write Access
 resource "aws_iam_policy" "adc_files_s3_policy" {
   name        = "adc-files-s3-policy"
-  description = "Policy to read and write to the adc-files S3 bucket"
+  description = "Policy to read and write to the ai-data-cleanser-files S3 bucket"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -48,7 +48,7 @@ resource "aws_iam_policy" "adc_files_s3_policy" {
 # IAM Role for S3 Access (can be assumed by EC2, Lambda, etc.)
 resource "aws_iam_role" "adc_files_role" {
   name        = "adc-files-role"
-  description = "Role for accessing adc-files S3 bucket"
+  description = "Role for accessing ai-data-cleanser-files S3 bucket"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
