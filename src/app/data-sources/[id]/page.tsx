@@ -278,7 +278,7 @@ export default function DataSourceDetailPage({
     }
   };
 
-  const handleLoadTables = async () => {
+  const handleLoadTables = useCallback(async () => {
     setTablesLoading(true);
     try {
       const res = await fetch(`/api/data-sources/${id}/tables`);
@@ -295,7 +295,12 @@ export default function DataSourceDetailPage({
     } finally {
       setTablesLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    if (!ds || tablesLoaded) return;
+    void handleLoadTables();
+  }, [ds, tablesLoaded, handleLoadTables]);
 
   const toggleTable = (schema: string, table: string) => {
     const key = `${schema}.${table}`;

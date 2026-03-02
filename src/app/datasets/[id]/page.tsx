@@ -74,6 +74,24 @@ interface DataSourceItem {
   config: Record<string, unknown>;
 }
 
+interface DataSourceTableInfo {
+  schema: string;
+  name: string;
+}
+
+interface DataSourceColumnInfo {
+  name: string;
+}
+
+interface ExportTableCandidate {
+  schema: string;
+  name: string;
+  matchedColumns: number;
+  requiredColumns: number;
+  matchPercent: number;
+  compatible: boolean;
+}
+
 export default function DatasetPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -108,6 +126,9 @@ export default function DatasetPage() {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [dataSources, setDataSources] = useState<DataSourceItem[]>([]);
   const [selectedDataSourceId, setSelectedDataSourceId] = useState("");
+  const [exportTables, setExportTables] = useState<ExportTableCandidate[]>([]);
+  const [loadingExportTables, setLoadingExportTables] = useState(false);
+  const [exportTablesError, setExportTablesError] = useState<string | null>(null);
   const [exportTargetSchema, setExportTargetSchema] = useState("public");
   const [exportTargetTable, setExportTargetTable] = useState("");
   const [exportCreateTable, setExportCreateTable] = useState(true);
@@ -185,15 +206,28 @@ export default function DatasetPage() {
     } catch { /* ignore */ }
   }, []);
 
+  const normalizeColumnKey = useCallback((value: string) => {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  }, []);
+
   const fetchDataSources = useCallback(async () => {
     try {
       const res = await fetch("/api/data-sources");
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        const sources = (data.dataSources ?? []).filter(
+        const sources: DataSourceItem[] = ((data.dataSources ?? []) as DataSourceItem[]).filter(
           (ds: DataSourceItem) => ds.type === "bigquery" || ds.type === "postgres"
         );
         setDataSources(sources);
+        setSelectedDataSourceId((prev) => {
+          if (prev && sources.some((ds: DataSourceItem) => ds.id === prev)) return prev;
+          return sources[0]?.id ?? "";
+        });
       }
     } catch { /* ignore */ }
   }, []);
@@ -380,6 +414,82 @@ export default function DatasetPage() {
     }
   };
 
+  const loadExportTables = useCallback(async () => {
+    if (!selectedDataSourceId) {
+      setExportTables([]);
+      return;
+    }
+    setLoadingExportTables(true);
+    setExportTablesError(null);
+    try {
+      const tablesRes = await fetch(`/api/data-sources/${selectedDataSourceId}/tables`);
+      const tablesData = await tablesRes.json().catch(() => ({}));
+      if (!tablesRes.ok) throw new Error(tablesData.error ?? "Failed to load tables");
+      const tables = (tablesData.tables ?? []) as DataSourceTableInfo[];
+
+      const requiredColumns = columns.map((col) => normalizeColumnKey(col)).filter(Boolean);
+      const requiredColumnSet = new Set(requiredColumns);
+      const requiredColumnCount = requiredColumnSet.size;
+
+      const candidates = await Promise.all(
+        tables.map(async (table: DataSourceTableInfo) => {
+          try {
+            const colsRes = await fetch(
+              `/api/data-sources/${selectedDataSourceId}/tables/${encodeURIComponent(table.schema)}/${encodeURIComponent(table.name)}/columns`,
+            );
+            const colsData = await colsRes.json().catch(() => ({}));
+            if (!colsRes.ok) throw new Error(colsData.error ?? "Failed to load table columns");
+            const tableColumns = new Set(
+              ((colsData.columns ?? []) as DataSourceColumnInfo[])
+                .map((column) => normalizeColumnKey(column.name))
+                .filter(Boolean)
+            );
+            const matchedColumns = [...requiredColumnSet].filter((column) => tableColumns.has(column)).length;
+            const matchPercent = requiredColumnCount === 0
+              ? 0
+              : Math.round((matchedColumns / requiredColumnCount) * 100);
+            return {
+              schema: table.schema,
+              name: table.name,
+              matchedColumns,
+              requiredColumns: requiredColumnCount,
+              matchPercent,
+              compatible: matchPercent === 100,
+            } as ExportTableCandidate;
+          } catch {
+            return {
+              schema: table.schema,
+              name: table.name,
+              matchedColumns: 0,
+              requiredColumns: requiredColumnCount,
+              matchPercent: 0,
+              compatible: false,
+            } as ExportTableCandidate;
+          }
+        })
+      );
+
+      candidates.sort((a, b) => {
+        if (a.compatible !== b.compatible) return a.compatible ? -1 : 1;
+        if (b.matchPercent !== a.matchPercent) return b.matchPercent - a.matchPercent;
+        const bySchema = a.schema.localeCompare(b.schema);
+        if (bySchema !== 0) return bySchema;
+        return a.name.localeCompare(b.name);
+      });
+      setExportTables(candidates);
+    } catch (err: unknown) {
+      setExportTables([]);
+      setExportTablesError((err as Error).message);
+    } finally {
+      setLoadingExportTables(false);
+    }
+  }, [selectedDataSourceId, columns, normalizeColumnKey]);
+
+  useEffect(() => {
+    if (!exportDialogOpen || !selectedDataSourceId) return;
+    void loadExportTables();
+  }, [exportDialogOpen, selectedDataSourceId, loadExportTables]);
+
   const deleteDataset = async () => {
     if (!dataset) return;
     if (!confirm(`Delete dataset "${dataset.name}"?`)) return;
@@ -396,6 +506,9 @@ export default function DatasetPage() {
   const openExportDialog = () => {
     fetchDataSources();
     setExportTargetTable(dataset?.name?.replace(/[^a-zA-Z0-9_]/g, "_").toLowerCase() ?? "");
+    setExportTargetSchema("public");
+    setExportTables([]);
+    setExportTablesError(null);
     setExportDialogOpen(true);
   };
 
@@ -477,64 +590,52 @@ export default function DatasetPage() {
                   <Plus className="mr-2 h-4 w-4" />
                   Add To This Dataset
                 </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" disabled={!!exporting}>
-                      {exporting ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Download className="mr-2 h-4 w-4" />
-                      )}
-                      {exporting ? "Exporting..." : "Export"}
-                      <ChevronDown className="ml-2 h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-52">
-                    <DropdownMenuItem onClick={() => exportRows("excel")}>
-                      <svg className="mr-2 h-4 w-4 shrink-0 text-green-600" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        <path d="M14 2v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        <path d="M8 13l3 3 3-3M8 17l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                      Excel (.xlsx)
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => exportRows("csv")}>
-                      <svg className="mr-2 h-4 w-4 shrink-0 text-blue-600" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        <path d="M14 2v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        <path d="M8 13h8M8 17h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                      </svg>
-                      CSV (.csv)
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      disabled={!canExportToDb}
-                      onClick={canExportToDb ? openExportDialog : undefined}
-                    >
-                      <Database className="mr-2 h-4 w-4 shrink-0 text-blue-500" />
-                      <span>BigQuery</span>
-                      {!canExportToDb && <span className="ml-auto text-xs text-muted-foreground">Needs approval</span>}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      disabled={!canExportToDb}
-                      onClick={canExportToDb ? openExportDialog : undefined}
-                    >
-                      <svg className="mr-2 h-4 w-4 shrink-0 text-sky-700" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <ellipse cx="12" cy="6" rx="8" ry="3" stroke="currentColor" strokeWidth="2"/>
-                        <path d="M4 6v6c0 1.657 3.582 3 8 3s8-1.343 8-3V6" stroke="currentColor" strokeWidth="2"/>
-                        <path d="M4 12v6c0 1.657 3.582 3 8 3s8-1.343 8-3v-6" stroke="currentColor" strokeWidth="2"/>
-                      </svg>
-                      <span>Postgres</span>
-                      {!canExportToDb && <span className="ml-auto text-xs text-muted-foreground">Needs approval</span>}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
                 <Button variant="destructive" onClick={deleteDataset} disabled={deleting}>
                   <Trash2 className="mr-2 h-4 w-4" />
                   Delete
                 </Button>
               </>
             )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={!!exporting}>
+                  {exporting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-2 h-4 w-4" />
+                  )}
+                  {exporting ? "Exporting..." : "Export"}
+                  <ChevronDown className="ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-60">
+                <DropdownMenuItem onClick={() => exportRows("excel")}>
+                  <svg className="mr-2 h-4 w-4 shrink-0 text-green-600" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M14 2v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M8 13l3 3 3-3M8 17l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  Excel (.xlsx)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => exportRows("csv")}>
+                  <svg className="mr-2 h-4 w-4 shrink-0 text-blue-600" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M14 2v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M8 13h8M8 17h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                  CSV (.csv)
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={!canExportToDb}
+                  onClick={canExportToDb ? openExportDialog : undefined}
+                >
+                  <Database className="mr-2 h-4 w-4 shrink-0 text-blue-500" />
+                  <span>Export to External Database</span>
+                  {!canExportToDb && <span className="ml-auto text-xs text-muted-foreground">Needs approval</span>}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
@@ -1091,14 +1192,14 @@ export default function DatasetPage() {
 
       {/* Export to database dialog */}
       <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[640px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Database className="h-5 w-5" />
               Export to Database
             </DialogTitle>
             <DialogDescription>
-              Export {dataset.rowCount} rows to a BigQuery or Postgres data source.
+              Export {dataset.rowCount} rows to an external database data source.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -1110,11 +1211,11 @@ export default function DatasetPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {dataSources.length === 0 ? (
-                    <SelectItem value="_none" disabled>No BigQuery or Postgres data sources configured</SelectItem>
+                    <SelectItem value="_none" disabled>No external database data sources configured</SelectItem>
                   ) : (
                     dataSources.map((ds) => (
                       <SelectItem key={ds.id} value={ds.id}>
-                        <div className="flex items-center gap-2">
+                        <div className="flex w-full items-center gap-2">
                           <Database className="h-3 w-3" />
                           {ds.name}
                           <span className="text-xs text-muted-foreground">({ds.type})</span>
@@ -1124,6 +1225,66 @@ export default function DatasetPage() {
                   )}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">Available Tables</label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!selectedDataSourceId || loadingExportTables}
+                  onClick={() => { void loadExportTables(); }}
+                >
+                  {loadingExportTables ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
+                  {loadingExportTables ? "Loading Tables..." : "Load Tables"}
+                </Button>
+              </div>
+              <div className="max-h-44 overflow-auto rounded-md border">
+                {!selectedDataSourceId ? (
+                  <div className="p-3 text-sm text-muted-foreground">Select a data source first.</div>
+                ) : loadingExportTables && exportTables.length === 0 ? (
+                  <div className="p-3 text-sm text-muted-foreground">Checking table schemas...</div>
+                ) : exportTablesError ? (
+                  <div className="p-3 text-sm text-destructive">{exportTablesError}</div>
+                ) : exportTables.length === 0 ? (
+                  <div className="p-3 text-sm text-muted-foreground">No tables found in this data source.</div>
+                ) : (
+                  <div className="divide-y">
+                    {exportTables.map((table) => (
+                      <button
+                        key={`${table.schema}.${table.name}`}
+                        type="button"
+                        className={cn(
+                          "flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors",
+                          table.compatible
+                            ? "hover:bg-muted/50"
+                            : "cursor-not-allowed text-muted-foreground opacity-80",
+                          exportTargetSchema === table.schema && exportTargetTable === table.name
+                            ? "bg-muted"
+                            : ""
+                        )}
+                        disabled={!table.compatible}
+                        onClick={() => {
+                          setExportTargetSchema(table.schema);
+                          setExportTargetTable(table.name);
+                        }}
+                      >
+                        <span className="min-w-0 flex-1 truncate">{table.schema}.{table.name}</span>
+                        <span className="shrink-0 text-xs">
+                          {table.compatible ? (
+                            <Badge variant="outline" className="border-green-300 text-green-700 dark:border-green-800 dark:text-green-300">
+                              100% Match
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline">Schema Incompatible</Badge>
+                          )}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
