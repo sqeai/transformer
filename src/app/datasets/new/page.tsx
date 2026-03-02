@@ -74,6 +74,28 @@ interface PreviewState {
   visibleRows: number;
 }
 
+interface UploadedSheetRef {
+  sheetId: string;
+  filePath: string;
+}
+
+function escapeCsvCell(value: unknown): string {
+  const text = String(value ?? "");
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replace(/"/g, "\"\"")}"`;
+  }
+  return text;
+}
+
+function rowsToCsv(columns: string[], rows: Record<string, unknown>[]): string {
+  const lines: string[] = [];
+  lines.push(columns.map((col) => escapeCsvCell(col)).join(","));
+  for (const row of rows) {
+    lines.push(columns.map((col) => escapeCsvCell(row[col])).join(","));
+  }
+  return lines.join("\n");
+}
+
 function StepIndicator({ currentStep }: { currentStep: Step }) {
   const currentIndex = STEPS.findIndex((s) => s.key === currentStep);
   return (
@@ -121,6 +143,7 @@ function NewDatasetPageContent() {
   } = useSchemaStore();
 
   const schemaId = searchParams.get("schemaId") ?? datasetWorkflow.schemaId;
+  const datasetIdParam = searchParams.get("datasetId");
   const schema = schemaId ? getSchema(schemaId) : null;
   const targetPaths = useMemo(() => {
     if (!schema) return [];
@@ -141,6 +164,7 @@ function NewDatasetPageContent() {
 
   // Processing state
   const [jobResults, setJobResults] = useState<SheetJobResult[]>(datasetWorkflow.jobResults);
+  const [uploadedSheetRefs, setUploadedSheetRefs] = useState<Record<string, UploadedSheetRef>>({});
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Review state
@@ -158,13 +182,56 @@ function NewDatasetPageContent() {
 
   // Export state
   const [exportTargetDatasetId, setExportTargetDatasetId] = useState<string>(
-    datasetWorkflow.exportTargetDatasetId ?? "__new",
+    datasetIdParam ?? datasetWorkflow.exportTargetDatasetId ?? "__new",
   );
   const [newDatasetName, setNewDatasetName] = useState("");
   const [existingDatasets, setExistingDatasets] = useState<Array<{ id: string; name: string }>>([]);
   const [exporting, setExporting] = useState(false);
 
   const files = datasetWorkflow.files;
+
+  const uploadSheetCsv = useCallback(async (
+    args: {
+      sheetName: string;
+      columns: string[];
+      rows: Record<string, unknown>[];
+      type: "raw" | "processed" | "intermediary";
+    },
+  ): Promise<UploadedSheetRef> => {
+    const presignRes = await fetch("/api/sheets/presign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: args.sheetName,
+        type: args.type,
+        dimensions: {
+          rowCount: args.rows.length,
+          columnCount: args.columns.length,
+        },
+      }),
+    });
+    const presignData = await presignRes.json();
+    if (!presignRes.ok) {
+      throw new Error(presignData.error ?? "Failed to request sheet upload URL");
+    }
+
+    const csvPayload = rowsToCsv(args.columns, args.rows);
+    const uploadRes = await fetch(String(presignData.uploadUrl), {
+      method: "PUT",
+      headers: {
+        "Content-Type": "text/csv",
+      },
+      body: csvPayload,
+    });
+    if (!uploadRes.ok) {
+      throw new Error("Failed to upload sheet CSV to S3");
+    }
+
+    return {
+      sheetId: String(presignData.sheetId),
+      filePath: String(presignData.filePath),
+    };
+  }, []);
 
   // Auto-expand files
   useEffect(() => {
@@ -289,6 +356,7 @@ function NewDatasetPageContent() {
 
     setStep("processing");
     const results: SheetJobResult[] = [];
+    const nextUploadedRefs: Record<string, UploadedSheetRef> = {};
 
     for (const sheet of selectedSheets) {
       const file = files.find((f) => f.fileId === sheet.fileId);
@@ -300,6 +368,13 @@ function NewDatasetPageContent() {
           dataStartRowIndex: 1,
           sheetIndex: sheet.sheetIndex,
         });
+        const uploaded = await uploadSheetCsv({
+          sheetName: sheet.sheetName,
+          columns: parsed.columns,
+          rows: parsed.rows,
+          type: "raw",
+        });
+        nextUploadedRefs[`${sheet.fileId}:${sheet.sheetIndex}`] = uploaded;
 
         const res = await fetch("/api/jobs", {
           method: "POST",
@@ -307,8 +382,8 @@ function NewDatasetPageContent() {
           body: JSON.stringify({
             type: "data_cleanse",
             payload: {
-              columns: parsed.columns,
-              rows: parsed.rows,
+              sheetId: uploaded.sheetId,
+              filePath: uploaded.filePath,
               targetPaths,
               sheetName: sheet.sheetName,
             },
@@ -333,6 +408,7 @@ function NewDatasetPageContent() {
       }
     }
 
+    setUploadedSheetRefs((prev) => ({ ...prev, ...nextUploadedRefs }));
     setJobResults(results);
 
     // Trigger job processing
@@ -340,7 +416,7 @@ function NewDatasetPageContent() {
 
     // Start polling
     startPolling(results);
-  }, [schemaId, selectedSheets, files, targetPaths]);
+  }, [schemaId, selectedSheets, files, targetPaths, uploadSheetCsv]);
 
   const startPolling = (initialResults: SheetJobResult[]) => {
     if (pollingRef.current) clearInterval(pollingRef.current);
@@ -524,17 +600,17 @@ function NewDatasetPageContent() {
     setModifySubmittingSheetKey(currentSheetKey);
 
     try {
-      const file = files.find((f) => f.fileId === sheetResult.sheet.fileId);
-      if (!file) throw new Error("File not found");
       if (!sheetResult.result) throw new Error("No modified sheet is available yet for this tab.");
 
-      const parsed = await parseExcelToRows(file.buffer, {
-        headerRowIndex: 0,
-        dataStartRowIndex: 1,
-        sheetIndex: sheetResult.sheet.sheetIndex,
-      });
       const modifiedColumns = sheetResult.result.transformedColumns;
       const modifiedRows = sheetResult.result.transformedRows;
+      const originalRef = uploadedSheetRefs[currentSheetKey];
+      const uploadedModified = await uploadSheetCsv({
+        sheetName: `${sheetResult.sheet.sheetName} (modified)`,
+        columns: modifiedColumns,
+        rows: modifiedRows,
+        type: "intermediary",
+      });
 
       const res = await fetch("/api/jobs", {
         method: "POST",
@@ -542,15 +618,13 @@ function NewDatasetPageContent() {
         body: JSON.stringify({
           type: "data_cleanse",
           payload: {
-            columns: modifiedColumns,
-            rows: modifiedRows,
+            sheetId: uploadedModified.sheetId,
+            filePath: uploadedModified.filePath,
             targetPaths,
             sheetName: sheetResult.sheet.sheetName,
             userDirective: modifyPrompt.trim(),
-            originalColumns: parsed.columns,
-            originalRows: parsed.rows,
-            modifiedColumns,
-            modifiedRows,
+            originalFilePath: originalRef?.filePath,
+            modifiedFilePath: uploadedModified.filePath,
           },
         }),
       });
@@ -568,6 +642,10 @@ function NewDatasetPageContent() {
 
       setModifyPrompt("");
       setModifySubmittingSheetKey(null);
+      setUploadedSheetRefs((prev) => ({
+        ...prev,
+        [currentSheetKey]: uploadedModified,
+      }));
 
       fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
       startModifyPolling(data.jobId);
@@ -575,7 +653,7 @@ function NewDatasetPageContent() {
       setModifySubmittingSheetKey(null);
       alert(err instanceof Error ? err.message : "Failed to modify");
     }
-  }, [modifyPrompt, schemaId, files, targetPaths, startModifyPolling]);
+  }, [modifyPrompt, schemaId, targetPaths, startModifyPolling, uploadedSheetRefs, uploadSheetCsv]);
 
   const toggleConfirmSheet = (sheetResult: SheetJobResult) => {
     const key = `${sheetResult.sheet.fileId}:${sheetResult.sheet.sheetIndex}`;
@@ -827,11 +905,11 @@ function NewDatasetPageContent() {
                 ) : preview ? (
                   <ScrollArea className="w-full rounded-md border max-h-[700px]">
                     <Table>
-                      <TableHeader>
+                      <TableHeader className="sticky top-0 z-10 bg-background">
                         <TableRow>
-                          <TableHead className="w-14 whitespace-nowrap">#</TableHead>
+                          <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
                           {preview.columns.map((col) => (
-                            <TableHead key={col} className="whitespace-nowrap">{col}</TableHead>
+                            <TableHead key={col} className="whitespace-nowrap bg-background">{col}</TableHead>
                           ))}
                         </TableRow>
                       </TableHeader>
@@ -1044,11 +1122,11 @@ function NewDatasetPageContent() {
                         ) : originalPreview ? (
                           <ScrollArea className="w-full rounded-md border max-h-[700px] overflow-auto">
                             <Table>
-                              <TableHeader>
+                              <TableHeader className="sticky top-0 z-10 bg-background">
                                 <TableRow>
-                                  <TableHead className="w-14 whitespace-nowrap">#</TableHead>
+                                  <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
                                   {originalPreview.columns.map((col) => (
-                                    <TableHead key={col} className="whitespace-nowrap">{col}</TableHead>
+                                    <TableHead key={col} className="whitespace-nowrap bg-background">{col}</TableHead>
                                   ))}
                                 </TableRow>
                               </TableHeader>
@@ -1077,11 +1155,11 @@ function NewDatasetPageContent() {
                       <div className="space-y-4">
                         <ScrollArea className="w-full rounded-md border max-h-[700px] overflow-auto">
                           <Table>
-                            <TableHeader>
+                            <TableHeader className="sticky top-0 z-10 bg-background">
                               <TableRow>
-                                <TableHead className="w-14 whitespace-nowrap">#</TableHead>
+                                <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
                                 {transformedCols.map((col) => (
-                                  <TableHead key={col} className="whitespace-nowrap">{col}</TableHead>
+                                  <TableHead key={col} className="whitespace-nowrap bg-background">{col}</TableHead>
                                 ))}
                               </TableRow>
                             </TableHeader>

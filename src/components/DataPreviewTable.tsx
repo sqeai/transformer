@@ -449,12 +449,12 @@ export default function DataPreviewTable({
         {slotAfterWarning != null && <div className="mb-3">{slotAfterWarning}</div>}
         <div
           ref={scrollContainerRef}
-          className="rounded-md border overflow-x-auto overflow-y-visible max-w-full"
+          className="rounded-md border overflow-auto max-w-full max-h-[400px]"
         >
           <div className="w-fit min-w-full">
           <div
             role="row"
-            className="grid w-full bg-background border-b border-border"
+            className="sticky top-0 z-10 grid w-full bg-background border-b border-border"
             style={{ gridTemplateColumns: `48px repeat(${colCount}, minmax(80px, 1fr))` }}
           >
               <div

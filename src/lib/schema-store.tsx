@@ -44,13 +44,26 @@ export interface SheetJobResult {
     transformedRows: Record<string, unknown>[];
     toolsUsed: Array<{ tool: string; params: Record<string, unknown> }>;
     pipeline: PipelineDescriptor;
+    outputFilePath?: string;
   };
   error?: string;
 }
 
 export interface PipelineNode {
   id: string;
-  type: "source" | "filter" | "unpivot" | "expand" | "aggregate" | "map" | "target";
+  type:
+    | "source"
+    | "seeDataDimensions"
+    | "determineFormattingType"
+    | "handleStructuredData"
+    | "handleBalanceSheet"
+    | "handleUnstructuredData"
+    | "filter"
+    | "unpivot"
+    | "expand"
+    | "aggregate"
+    | "map"
+    | "target";
   label: string;
   data: Record<string, unknown>;
 }

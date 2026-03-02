@@ -8,6 +8,8 @@ import {
 } from "@/lib/jobs-db";
 import { AI_DATA_CLEANSER_MAX_CONCURRENCY } from "@/lib/jobs-config";
 import { runDataCleanser } from "@/lib/agent/data-cleanser";
+import { getS3ObjectVersionId } from "@/lib/s3-sheets";
+import { updateSheetVersionId } from "@/lib/sheets-db";
 
 export async function POST(_request: NextRequest) {
   return processJobs();
@@ -36,32 +38,32 @@ async function processJobs() {
           }
 
           const payload = job.payload as {
-            columns?: string[];
-            rows?: Record<string, unknown>[];
+            filePath?: string;
             targetPaths?: string[];
             sheetName?: string;
+            sheetId?: string;
             userDirective?: string;
-            originalColumns?: string[];
-            originalRows?: Record<string, unknown>[];
-            modifiedColumns?: string[];
-            modifiedRows?: Record<string, unknown>[];
+            originalFilePath?: string;
+            modifiedFilePath?: string;
           };
 
-          if (!Array.isArray(payload?.columns) || !Array.isArray(payload?.rows) || !Array.isArray(payload?.targetPaths)) {
-            throw new Error("Invalid payload: missing columns, rows, or targetPaths");
+          if (typeof payload?.filePath !== "string" || !Array.isArray(payload?.targetPaths)) {
+            throw new Error("Invalid payload: missing filePath or targetPaths");
           }
 
           const result = await runDataCleanser({
-            columns: payload.columns,
-            rows: payload.rows,
+            filePath: payload.filePath,
             targetPaths: payload.targetPaths,
             sheetName: payload.sheetName ?? "Sheet",
             userDirective: payload.userDirective,
-            originalColumns: payload.originalColumns,
-            originalRows: payload.originalRows,
-            modifiedColumns: payload.modifiedColumns,
-            modifiedRows: payload.modifiedRows,
+            originalFilePath: payload.originalFilePath,
+            modifiedFilePath: payload.modifiedFilePath,
           });
+
+          if (typeof payload.sheetId === "string" && payload.sheetId) {
+            const versionId = await getS3ObjectVersionId(payload.filePath);
+            await updateSheetVersionId(supabase, payload.sheetId, versionId);
+          }
 
           await updateJobResult(supabase, job.id, result);
           return { jobId: job.id, status: "completed" };

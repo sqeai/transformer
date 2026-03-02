@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,10 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import type { DatasetRecord } from "@/lib/types";
-import { ArrowLeft, Download, Loader2, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Plus, Trash2 } from "lucide-react";
 import ExcelJS from "exceljs";
+import { useSchemaStore, type UploadedFileEntry } from "@/lib/schema-store";
+import { UploadDatasetDialog } from "@/components/UploadDatasetDialog";
 
 const ROWS_PER_PAGE = 100;
 
@@ -24,6 +26,25 @@ export default function DatasetPage() {
   const [nameDraft, setNameDraft] = useState("");
   const [exporting, setExporting] = useState<"csv" | "excel" | null>(null);
   const [visibleRowCount, setVisibleRowCount] = useState(ROWS_PER_PAGE);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+
+  const { setDatasetWorkflow, resetDatasetWorkflow } = useSchemaStore();
+
+  const handleAddToDatasetUpload = useCallback(
+    (schemaId: string, files: UploadedFileEntry[]) => {
+      if (!dataset) return;
+      resetDatasetWorkflow();
+      setDatasetWorkflow({
+        schemaId,
+        step: "upload",
+        files,
+        selectedSheets: [],
+        exportTargetDatasetId: dataset.id,
+      });
+      router.push(`/datasets/new?schemaId=${schemaId}&datasetId=${dataset.id}`);
+    },
+    [dataset, resetDatasetWorkflow, setDatasetWorkflow, router],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -164,6 +185,12 @@ export default function DatasetPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={() => setAddDialogOpen(true)}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add To This Dataset
+            </Button>
             <Button variant="outline" onClick={() => exportRows("csv")} disabled={!!exporting}>
               <Download className="mr-2 h-4 w-4" />
               {exporting === "csv" ? "Exporting..." : "Export CSV"}
@@ -197,11 +224,11 @@ export default function DatasetPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="w-full rounded-md border">
+            <ScrollArea className="w-full rounded-md border max-h-[600px]">
               <Table>
-                <TableHeader>
+                <TableHeader className="sticky top-0 z-10 bg-background">
                   <TableRow>
-                    {columns.map((c) => <TableHead key={c} className="whitespace-nowrap">{c}</TableHead>)}
+                    {columns.map((c) => <TableHead key={c} className="whitespace-nowrap bg-background">{c}</TableHead>)}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -231,6 +258,14 @@ export default function DatasetPage() {
           </CardContent>
         </Card>
       </div>
+
+      <UploadDatasetDialog
+        open={addDialogOpen}
+        onOpenChange={setAddDialogOpen}
+        defaultSchemaId={dataset.schemaId}
+        datasetName={dataset.name}
+        onUpload={handleAddToDatasetUpload}
+      />
     </DashboardLayout>
   );
 }
