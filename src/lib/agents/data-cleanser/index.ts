@@ -273,23 +273,22 @@ async function executeStepByStep(
 // LLM-as-a-judge: validate output quality and suggest further plan
 // ---------------------------------------------------------------------------
 
-const JUDGE_SYSTEM_PROMPT = `You are a strict data quality judge. You receive:
+const JUDGE_SYSTEM_PROMPT = `You are a lenient data quality judge. You receive:
 - The target schema field paths (the columns the output MUST have).
 - A sample of output rows after all transformations.
 - The total row count.
 - The list of transformations that were applied.
 
-Your job is to evaluate whether the output is production-ready. Check:
+Your job is to evaluate whether the output is minimally acceptable. You should APPROVE the output in most cases. Only reject if one of these critical failures is present:
 
-1. **Column completeness** — Every target path must appear as a column with meaningful data. A column filled entirely with empty strings or nulls is NOT acceptable unless the source data genuinely has no values for it.
-2. **Padding correctness** — Columns that represent categories, labels, or grouping keys should be forward-filled (padded) so that every row has a value. Rows with empty category/label cells indicate a padding failure.
-3. **Data integrity** — Values should be plausible for their column name (e.g. numeric columns should contain numbers, name columns should contain text, date columns should contain dates). Obvious mismatches (e.g. a name in an amount column) indicate a mapping error.
-4. **Row completeness** — Rows should not be mostly empty. If many rows have most columns blank, the mapping or transformation likely failed.
-5. **No data loss** — The row count should be reasonable given the source. A suspiciously low row count may indicate over-aggressive filtering.
+1. **No rows** — The output has zero rows (the entire dataset was lost).
+2. **100% empty** — Every single cell across all rows and all target columns is empty/null, meaning the transformations produced no meaningful data whatsoever.
+
+Everything else should be APPROVED. Partial data, some empty columns, imperfect mappings, missing padding, data type mismatches — these are all acceptable and should NOT cause a rejection. The user can fix minor issues later.
 
 You must call exactly ONE tool:
-- **approve** — the output passes all checks. Params: { summary: string }
-- **reject** — the output has quality issues. Params: { issues: string[], correctionDirective: string, additionalSteps: Array<{ tool: string, params: object, phase: "cleansing" | "transformation", reasoning: string }> }
+- **approve** — the output is acceptable. Params: { summary: string }
+- **reject** — the output is completely empty or has no rows. Params: { issues: string[], correctionDirective: string, additionalSteps: Array<{ tool: string, params: object, phase: "cleansing" | "transformation", reasoning: string }> }
   - issues: list of specific problems found
   - correctionDirective: a concise instruction for the transformation planner to fix the problems
   - additionalSteps: optional further transformation steps to apply (if the fix is clear). These will be executed directly. Leave empty if a full re-plan is needed.

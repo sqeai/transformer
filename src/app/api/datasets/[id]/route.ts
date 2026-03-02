@@ -24,7 +24,7 @@ export async function GET(
     dataset: {
       id: data.id,
       schemaId: data.schema_id,
-      schemaName: (data.schemas as Record<string, unknown>)?.name ?? null,
+      schemaName: (data.schemas as unknown as Record<string, unknown>)?.name ?? null,
       name: data.name,
       rowCount: data.row_count ?? 0,
       rows: Array.isArray(data.rows) ? data.rows : [],
