@@ -35,15 +35,24 @@ export interface SheetSelection {
   sheetName: string;
 }
 
+export interface TransformationSnapshot {
+  columns: string[];
+  sampleRows: Record<string, unknown>[];
+  totalRows: number;
+}
+
 export interface TransformationMappingEntry {
   step: number;
   tool: string;
   params: Record<string, unknown>;
   phase: "cleansing" | "transformation";
+  reasoning?: string;
   inputColumns: string[];
   outputColumns: string[];
   rowCountBefore: number;
   rowCountAfter: number;
+  before: TransformationSnapshot;
+  after: TransformationSnapshot;
 }
 
 export interface SheetJobResult {

@@ -35,6 +35,7 @@ import {
   flattenFields,
   type SheetSelection,
   type SheetJobResult,
+  type TransformationMappingEntry,
 } from "@/lib/schema-store";
 import { extractExcelGridTopBottom } from "@/lib/parse-excel-preview";
 import { parseExcelToRows } from "@/lib/parse-excel";
@@ -180,7 +181,9 @@ function NewDatasetPageContent() {
 
   // Review state
   const [reviewSheetIndex, setReviewSheetIndex] = useState(0);
-  const [reviewSubTab, setReviewSubTab] = useState<"original" | "modified" | "mapping">("modified");
+  const [reviewSubTab, setReviewSubTab] = useState<"original" | "modified" | "transformations" | "mapping">("modified");
+  const [expandedTransformStep, setExpandedTransformStep] = useState<number | null>(null);
+  const [transformPreviewMode, setTransformPreviewMode] = useState<"before" | "after">("after");
   const [confirmedSheets, setConfirmedSheets] = useState<Set<string>>(
     new Set(datasetWorkflow.confirmedSheetIds),
   );
@@ -737,6 +740,7 @@ function NewDatasetPageContent() {
             rows: allRows,
             mappingSnapshot: {
               toolsUsed: confirmedResults.map((r) => r.result?.toolsUsed ?? []),
+              transformations: confirmedResults.map((r) => r.result?.mapping ?? []),
             },
           }),
         });
@@ -1110,6 +1114,7 @@ function NewDatasetPageContent() {
                       setOriginalVisibleCount(PREVIEW_ROWS);
                       setModifiedVisibleCount(PREVIEW_ROWS);
                       setOriginalPreview(null);
+                      setExpandedTransformStep(null);
                     }}
                   >
                     {isConfirmed && <Check className="h-3 w-3" />}
@@ -1162,7 +1167,7 @@ function NewDatasetPageContent() {
 
                     {/* Sub-tabs */}
                     <div className="flex gap-1 mt-3">
-                      {(["original", "modified", "mapping"] as const).map((tab) => (
+                      {(["original", "modified", "transformations", "mapping"] as const).map((tab) => (
                         <button
                           key={tab}
                           type="button"
@@ -1323,6 +1328,169 @@ function NewDatasetPageContent() {
                         </div>
                       </div>
                     )}
+
+                    {reviewSubTab === "transformations" && (() => {
+                      const mapping = currentResult.result?.mapping ?? [];
+                      if (mapping.length === 0) {
+                        return (
+                          <p className="text-muted-foreground text-center py-4">
+                            No transformation data available.
+                          </p>
+                        );
+                      }
+
+                      return (
+                        <div className="space-y-3">
+                          <p className="text-sm text-muted-foreground">
+                            The AI agent applied {mapping.length} transformation{mapping.length !== 1 ? "s" : ""} to cleanse and reshape the data.
+                          </p>
+                          <div className="space-y-2">
+                            {mapping.map((entry: TransformationMappingEntry, idx: number) => {
+                              const isExpanded = expandedTransformStep === idx;
+                              const snapshot = transformPreviewMode === "before" ? entry.before : entry.after;
+                              const rowDelta = entry.rowCountAfter - entry.rowCountBefore;
+                              const colDelta = entry.outputColumns.length - entry.inputColumns.length;
+
+                              return (
+                                <div
+                                  key={idx}
+                                  className="rounded-lg border overflow-hidden"
+                                >
+                                  <button
+                                    type="button"
+                                    className="flex items-center gap-3 w-full px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+                                    onClick={() => {
+                                      setExpandedTransformStep(isExpanded ? null : idx);
+                                      setTransformPreviewMode("after");
+                                    }}
+                                  >
+                                    <div className={cn(
+                                      "flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium shrink-0",
+                                      entry.phase === "cleansing"
+                                        ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                                        : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
+                                    )}>
+                                      {entry.step}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm font-medium">
+                                          {entry.tool.charAt(0).toUpperCase() + entry.tool.slice(1)}
+                                        </span>
+                                        <span className={cn(
+                                          "text-[10px] font-medium px-1.5 py-0.5 rounded-full uppercase tracking-wider",
+                                          entry.phase === "cleansing"
+                                            ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                                            : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
+                                        )}>
+                                          {entry.phase}
+                                        </span>
+                                      </div>
+                                      {entry.reasoning && (
+                                        <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                                          {entry.reasoning}
+                                        </p>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
+                                      <span className={cn(
+                                        rowDelta > 0 ? "text-green-600" : rowDelta < 0 ? "text-orange-600" : "",
+                                      )}>
+                                        {entry.rowCountBefore} → {entry.rowCountAfter} rows
+                                      </span>
+                                      {colDelta !== 0 && (
+                                        <span className={cn(
+                                          colDelta > 0 ? "text-green-600" : "text-orange-600",
+                                        )}>
+                                          {colDelta > 0 ? "+" : ""}{colDelta} col{Math.abs(colDelta) !== 1 ? "s" : ""}
+                                        </span>
+                                      )}
+                                      {isExpanded ? (
+                                        <ChevronDown className="h-4 w-4" />
+                                      ) : (
+                                        <ChevronRight className="h-4 w-4" />
+                                      )}
+                                    </div>
+                                  </button>
+
+                                  {isExpanded && (
+                                    <div className="border-t px-4 py-3 space-y-3">
+                                      <div className="flex items-center gap-2">
+                                        <div className="flex gap-1 rounded-md border p-0.5">
+                                          <button
+                                            type="button"
+                                            className={cn(
+                                              "px-3 py-1 text-xs rounded transition-colors",
+                                              transformPreviewMode === "before"
+                                                ? "bg-muted font-medium"
+                                                : "text-muted-foreground hover:bg-muted/50",
+                                            )}
+                                            onClick={() => setTransformPreviewMode("before")}
+                                          >
+                                            Before
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className={cn(
+                                              "px-3 py-1 text-xs rounded transition-colors",
+                                              transformPreviewMode === "after"
+                                                ? "bg-muted font-medium"
+                                                : "text-muted-foreground hover:bg-muted/50",
+                                            )}
+                                            onClick={() => setTransformPreviewMode("after")}
+                                          >
+                                            After
+                                          </button>
+                                        </div>
+                                        <span className="text-xs text-muted-foreground">
+                                          {snapshot
+                                            ? `${snapshot.sampleRows.length} of ${snapshot.totalRows} rows (${snapshot.columns.length} columns)`
+                                            : "No preview available"}
+                                        </span>
+                                      </div>
+
+                                      {snapshot && snapshot.sampleRows.length > 0 && (
+                                        <ScrollArea className="w-full rounded-md border max-h-[400px] overflow-auto">
+                                          <Table>
+                                            <TableHeader className="sticky top-0 z-10 bg-background">
+                                              <TableRow>
+                                                <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
+                                                {snapshot.columns.map((col) => (
+                                                  <TableHead key={col} className="whitespace-nowrap bg-background text-xs">{col}</TableHead>
+                                                ))}
+                                              </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                              {snapshot.sampleRows.map((row, ri) => (
+                                                <TableRow key={ri}>
+                                                  <TableCell className="text-muted-foreground text-xs">{ri + 1}</TableCell>
+                                                  {snapshot.columns.map((col) => (
+                                                    <TableCell key={col} className="whitespace-nowrap max-w-[180px] truncate text-xs">
+                                                      {String((row as Record<string, unknown>)[col] ?? "")}
+                                                    </TableCell>
+                                                  ))}
+                                                </TableRow>
+                                              ))}
+                                            </TableBody>
+                                          </Table>
+                                          <ScrollBar orientation="horizontal" />
+                                        </ScrollArea>
+                                      )}
+
+                                      {snapshot && snapshot.totalRows > snapshot.sampleRows.length && (
+                                        <p className="text-xs text-muted-foreground text-center">
+                                          Showing {snapshot.sampleRows.length} of {snapshot.totalRows} rows
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {reviewSubTab === "mapping" && pipeline && (
                       <div className="overflow-auto">

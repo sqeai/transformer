@@ -9,10 +9,10 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import type { DatasetRecord } from "@/lib/types";
-import { ArrowLeft, ChevronDown, Database, Download, ExternalLink, Layers, Loader2, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Database, Download, ExternalLink, Layers, Loader2, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import ExcelJS from "exceljs";
-import { useSchemaStore, type UploadedFileEntry } from "@/lib/schema-store";
+import { useSchemaStore, type UploadedFileEntry, type TransformationMappingEntry } from "@/lib/schema-store";
 import { UploadDatasetDialog } from "@/components/UploadDatasetDialog";
 import {
   DropdownMenu,
@@ -21,6 +21,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 
 const ROWS_PER_PAGE = 100;
 
@@ -35,6 +36,10 @@ export default function DatasetPage() {
   const [exporting, setExporting] = useState<"csv" | "excel" | null>(null);
   const [visibleRowCount, setVisibleRowCount] = useState(ROWS_PER_PAGE);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"data" | "transformations">("data");
+  const [expandedTransformStep, setExpandedTransformStep] = useState<number | null>(null);
+  const [transformPreviewMode, setTransformPreviewMode] = useState<"before" | "after">("after");
+  const [activeSheetIdx, setActiveSheetIdx] = useState(0);
 
   const { setDatasetWorkflow, resetDatasetWorkflow } = useSchemaStore();
 
@@ -90,6 +95,16 @@ export default function DatasetPage() {
 
   const canLoadMore = dataset ? visibleRowCount < dataset.rows.length : false;
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  const allTransformations = useMemo(() => {
+    if (!dataset?.mappingSnapshot) return [];
+    const t = (dataset.mappingSnapshot as Record<string, unknown>).transformations;
+    if (!Array.isArray(t)) return [];
+    return t as TransformationMappingEntry[][];
+  }, [dataset]);
+
+  const hasTransformations = allTransformations.some((arr) => arr.length > 0);
+  const currentSheetTransformations = allTransformations[activeSheetIdx] ?? [];
 
   const saveName = async () => {
     if (!dataset) return;
@@ -294,59 +309,267 @@ export default function DatasetPage() {
           </Link>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Data</CardTitle>
-            <CardDescription>
-              Showing {visibleRows.length} of {dataset.rows.length} rows
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea ref={scrollAreaRef} className="w-full rounded-md border">
-              <Table>
-                <TableHeader className="sticky top-0 z-10 bg-background">
-                  <TableRow>
-                    <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
-                    {columns.map((c) => <TableHead key={c} className="whitespace-nowrap bg-background">{c}</TableHead>)}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visibleRows.map((row, i) => (
-                    <TableRow key={i}>
-                      <TableCell className="text-muted-foreground">{i + 1}</TableCell>
-                      {columns.map((c) => (
-                        <TableCell key={c} className="whitespace-nowrap max-w-[200px] truncate">
-                          {String((row as Record<string, unknown>)[c] ?? "")}
-                        </TableCell>
-                      ))}
+        {hasTransformations && (
+          <div className="flex gap-1 border-b pb-2">
+            {(["data", "transformations"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={cn(
+                  "px-4 py-2 text-sm rounded-md transition-colors",
+                  activeTab === tab
+                    ? "bg-muted font-medium"
+                    : "text-muted-foreground hover:bg-muted/50",
+                )}
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {activeTab === "data" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Data</CardTitle>
+              <CardDescription>
+                Showing {visibleRows.length} of {dataset.rows.length} rows
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea ref={scrollAreaRef} className="w-full rounded-md border">
+                <Table>
+                  <TableHeader className="sticky top-0 z-10 bg-background">
+                    <TableRow>
+                      <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
+                      {columns.map((c) => <TableHead key={c} className="whitespace-nowrap bg-background">{c}</TableHead>)}
                     </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {visibleRows.map((row, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="text-muted-foreground">{i + 1}</TableCell>
+                        {columns.map((c) => (
+                          <TableCell key={c} className="whitespace-nowrap max-w-[200px] truncate">
+                            {String((row as Record<string, unknown>)[c] ?? "")}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                <ScrollBar orientation="horizontal" />
+              </ScrollArea>
+              {canLoadMore && (
+                <div className="flex flex-col items-center gap-2 mt-4">
+                  <p className="text-xs text-muted-foreground">
+                    Showing {visibleRows.length} of {dataset.rows.length} rows
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]");
+                      const scrollTop = viewport?.scrollTop ?? 0;
+                      setVisibleRowCount((prev) => prev + ROWS_PER_PAGE);
+                      requestAnimationFrame(() => {
+                        if (viewport) viewport.scrollTop = scrollTop;
+                      });
+                    }}
+                  >
+                    Load More
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {activeTab === "transformations" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Transformations</CardTitle>
+              <CardDescription>
+                The AI agent&apos;s thought process and transformations applied to create this dataset.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {allTransformations.length > 1 && (
+                <div className="flex flex-wrap gap-2 border-b pb-3">
+                  {allTransformations.map((_, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      className={cn(
+                        "px-3 py-1.5 text-sm rounded-md border transition-colors",
+                        activeSheetIdx === idx
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "border-border text-muted-foreground hover:bg-muted",
+                      )}
+                      onClick={() => {
+                        setActiveSheetIdx(idx);
+                        setExpandedTransformStep(null);
+                      }}
+                    >
+                      Sheet {idx + 1}
+                    </button>
                   ))}
-                </TableBody>
-              </Table>
-              <ScrollBar orientation="horizontal" />
-            </ScrollArea>
-            {canLoadMore && (
-              <div className="flex flex-col items-center gap-2 mt-4">
-                <p className="text-xs text-muted-foreground">
-                  Showing {visibleRows.length} of {dataset.rows.length} rows
+                </div>
+              )}
+
+              {currentSheetTransformations.length === 0 ? (
+                <p className="text-muted-foreground text-center py-4">
+                  No transformation data available for this sheet.
                 </p>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]");
-                    const scrollTop = viewport?.scrollTop ?? 0;
-                    setVisibleRowCount((prev) => prev + ROWS_PER_PAGE);
-                    requestAnimationFrame(() => {
-                      if (viewport) viewport.scrollTop = scrollTop;
-                    });
-                  }}
-                >
-                  Load More
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">
+                    {currentSheetTransformations.length} transformation{currentSheetTransformations.length !== 1 ? "s" : ""} applied
+                  </p>
+                  {currentSheetTransformations.map((entry, idx) => {
+                    const isExpanded = expandedTransformStep === idx;
+                    const snapshot = transformPreviewMode === "before" ? entry.before : entry.after;
+                    const rowDelta = entry.rowCountAfter - entry.rowCountBefore;
+                    const colDelta = entry.outputColumns.length - entry.inputColumns.length;
+
+                    return (
+                      <div key={idx} className="rounded-lg border overflow-hidden">
+                        <button
+                          type="button"
+                          className="flex items-center gap-3 w-full px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+                          onClick={() => {
+                            setExpandedTransformStep(isExpanded ? null : idx);
+                            setTransformPreviewMode("after");
+                          }}
+                        >
+                          <div className={cn(
+                            "flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium shrink-0",
+                            entry.phase === "cleansing"
+                              ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                              : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
+                          )}>
+                            {entry.step}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">
+                                {entry.tool.charAt(0).toUpperCase() + entry.tool.slice(1)}
+                              </span>
+                              <span className={cn(
+                                "text-[10px] font-medium px-1.5 py-0.5 rounded-full uppercase tracking-wider",
+                                entry.phase === "cleansing"
+                                  ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                                  : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
+                              )}>
+                                {entry.phase}
+                              </span>
+                            </div>
+                            {entry.reasoning && (
+                              <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                                {entry.reasoning}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
+                            <span className={cn(
+                              rowDelta > 0 ? "text-green-600" : rowDelta < 0 ? "text-orange-600" : "",
+                            )}>
+                              {entry.rowCountBefore} → {entry.rowCountAfter} rows
+                            </span>
+                            {colDelta !== 0 && (
+                              <span className={cn(
+                                colDelta > 0 ? "text-green-600" : "text-orange-600",
+                              )}>
+                                {colDelta > 0 ? "+" : ""}{colDelta} col{Math.abs(colDelta) !== 1 ? "s" : ""}
+                              </span>
+                            )}
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </div>
+                        </button>
+
+                        {isExpanded && (
+                          <div className="border-t px-4 py-3 space-y-3">
+                            <div className="flex items-center gap-2">
+                              <div className="flex gap-1 rounded-md border p-0.5">
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    "px-3 py-1 text-xs rounded transition-colors",
+                                    transformPreviewMode === "before"
+                                      ? "bg-muted font-medium"
+                                      : "text-muted-foreground hover:bg-muted/50",
+                                  )}
+                                  onClick={() => setTransformPreviewMode("before")}
+                                >
+                                  Before
+                                </button>
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    "px-3 py-1 text-xs rounded transition-colors",
+                                    transformPreviewMode === "after"
+                                      ? "bg-muted font-medium"
+                                      : "text-muted-foreground hover:bg-muted/50",
+                                  )}
+                                  onClick={() => setTransformPreviewMode("after")}
+                                >
+                                  After
+                                </button>
+                              </div>
+                              <span className="text-xs text-muted-foreground">
+                                {snapshot
+                                  ? `${snapshot.sampleRows.length} of ${snapshot.totalRows} rows (${snapshot.columns.length} columns)`
+                                  : "No preview available"}
+                              </span>
+                            </div>
+
+                            {snapshot && snapshot.sampleRows.length > 0 && (
+                              <ScrollArea className="w-full rounded-md border max-h-[400px] overflow-auto">
+                                <Table>
+                                  <TableHeader className="sticky top-0 z-10 bg-background">
+                                    <TableRow>
+                                      <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
+                                      {snapshot.columns.map((col) => (
+                                        <TableHead key={col} className="whitespace-nowrap bg-background text-xs">{col}</TableHead>
+                                      ))}
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {snapshot.sampleRows.map((row, ri) => (
+                                      <TableRow key={ri}>
+                                        <TableCell className="text-muted-foreground text-xs">{ri + 1}</TableCell>
+                                        {snapshot.columns.map((col) => (
+                                          <TableCell key={col} className="whitespace-nowrap max-w-[180px] truncate text-xs">
+                                            {String((row as Record<string, unknown>)[col] ?? "")}
+                                          </TableCell>
+                                        ))}
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                                <ScrollBar orientation="horizontal" />
+                              </ScrollArea>
+                            )}
+
+                            {snapshot && snapshot.totalRows > snapshot.sampleRows.length && (
+                              <p className="text-xs text-muted-foreground text-center">
+                                Showing {snapshot.sampleRows.length} of {snapshot.totalRows} rows
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <UploadDatasetDialog

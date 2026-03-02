@@ -37,15 +37,26 @@ export interface DataCleanserInput {
   sheetId?: string;
 }
 
+const SNAPSHOT_SAMPLE_ROWS = 20;
+
+export interface TransformationSnapshot {
+  columns: string[];
+  sampleRows: Record<string, unknown>[];
+  totalRows: number;
+}
+
 export interface TransformationMapping {
   step: number;
   tool: string;
   params: Record<string, unknown>;
   phase: "cleansing" | "transformation";
+  reasoning?: string;
   inputColumns: string[];
   outputColumns: string[];
   rowCountBefore: number;
   rowCountAfter: number;
+  before: TransformationSnapshot;
+  after: TransformationSnapshot;
 }
 
 export interface DataCleanserResult {
@@ -220,6 +231,14 @@ async function generatePlan(
 // Phase 2 — Executor subagent: runs steps one-by-one
 // ---------------------------------------------------------------------------
 
+function takeSnapshot(data: FileData): TransformationSnapshot {
+  return {
+    columns: [...data.columns],
+    sampleRows: data.rows.slice(0, SNAPSHOT_SAMPLE_ROWS),
+    totalRows: data.rows.length,
+  };
+}
+
 async function executeStepByStep(
   workingPath: string,
   steps: PlannedStep[],
@@ -236,6 +255,7 @@ async function executeStepByStep(
     const data = await readLocalCsv(workingPath);
     if (data.columns.length === 0 || data.rows.length === 0) break;
 
+    const beforeSnapshot = takeSnapshot(data);
     const inputColumns = [...data.columns];
     const rowCountBefore = data.rows.length;
 
@@ -249,6 +269,8 @@ async function executeStepByStep(
       continue;
     }
 
+    const afterSnapshot = takeSnapshot(transformed);
+
     await writeLocalCsv(workingPath, transformed.columns, transformed.rows);
     history.push(step);
 
@@ -257,10 +279,13 @@ async function executeStepByStep(
       tool: planned.tool,
       params: planned.params,
       phase: planned.phase,
+      reasoning: planned.reasoning,
       inputColumns,
       outputColumns: [...transformed.columns],
       rowCountBefore,
       rowCountAfter: transformed.rows.length,
+      before: beforeSnapshot,
+      after: afterSnapshot,
     });
 
     if (planned.tool === "map") break;
