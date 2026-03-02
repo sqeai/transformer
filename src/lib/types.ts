@@ -46,6 +46,7 @@ export interface DatasetSummary {
 }
 
 export interface DatasetRecord extends DatasetSummary {
+  schemaName?: string | null;
   mappingSnapshot: Record<string, unknown>;
   rows: Record<string, unknown>[];
 }

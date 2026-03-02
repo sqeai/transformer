@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createSheetUploadUrl } from "@/lib/s3-sheets";
-import { createSheetRecord, type SheetType } from "@/lib/sheets-db";
+import { createSheetRecord, generateSheetId, type SheetType } from "@/lib/sheets-db";
 
 interface PresignBody {
   name?: unknown;
   dimensions?: unknown;
   type?: unknown;
+  sheetId?: unknown;
 }
 
 export async function POST(request: NextRequest) {
@@ -23,6 +24,7 @@ export async function POST(request: NextRequest) {
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const dimensions = body.dimensions as { rowCount?: unknown; columnCount?: unknown } | undefined;
   const type = body.type as SheetType | undefined;
+  const sheetId = typeof body.sheetId === "string" && body.sheetId.trim() ? body.sheetId.trim() : generateSheetId();
 
   if (!name) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
@@ -42,6 +44,7 @@ export async function POST(request: NextRequest) {
     const upload = await createSheetUploadUrl("text/csv");
     const sheet = await createSheetRecord(auth.supabase!, {
       userId: auth.userId!,
+      sheetId,
       name,
       storageUrl: upload.filePath,
       dimensions: { rowCount, columnCount },
@@ -49,7 +52,8 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({
-      sheetId: sheet.id,
+      sheetId: sheet.sheet_id,
+      recordId: sheet.id,
       filePath: sheet.storage_url,
       uploadUrl: upload.uploadUrl,
     });

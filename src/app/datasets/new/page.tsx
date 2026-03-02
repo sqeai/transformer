@@ -258,6 +258,18 @@ function NewDatasetPageContent() {
     }
   }, [files, selectedSheets.length]);
 
+  // Default preview to the first sheet
+  useEffect(() => {
+    if (!previewSheet && files.length > 0 && files[0].sheetNames.length > 0) {
+      setPreviewSheet({
+        fileId: files[0].fileId,
+        fileName: files[0].fileName,
+        sheetIndex: 0,
+        sheetName: files[0].sheetNames[0],
+      });
+    }
+  }, [files, previewSheet]);
+
   // Load preview for selected sheet
   useEffect(() => {
     setPreviewTopRows(PREVIEW_ROWS);
@@ -381,8 +393,8 @@ function NewDatasetPageContent() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             type: "data_cleanse",
+            sheetId: uploaded.sheetId,
             payload: {
-              sheetId: uploaded.sheetId,
               filePath: uploaded.filePath,
               targetPaths,
               sheetName: sheet.sheetName,
@@ -617,8 +629,8 @@ function NewDatasetPageContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "data_cleanse",
+          sheetId: originalRef?.sheetId,
           payload: {
-            sheetId: uploadedModified.sheetId,
             filePath: uploadedModified.filePath,
             targetPaths,
             sheetName: sheetResult.sheet.sheetName,

@@ -101,13 +101,14 @@ export function applyPadColumns(data: FileData, params: Record<string, unknown>)
   const carryForward = new Map<string, unknown>();
   const rows = data.rows.map((row) => {
     const out = { ...row };
-    for (const col of data.columns) {
+    for (const col of paddingSet) {
       const val = out[col];
-      if (paddingSet.has(col) && (val == null || String(val).trim() === "") && carryForward.has(col)) {
+      if ((val == null || String(val).trim() === "") && carryForward.has(col)) {
         out[col] = carryForward.get(col);
       }
-      if (val != null && String(val).trim() !== "") {
-        carryForward.set(col, val);
+      const current = out[col];
+      if (current != null && String(current).trim() !== "") {
+        carryForward.set(col, current);
       }
     }
     return out;
@@ -230,11 +231,30 @@ export function applyAggregate(data: FileData, params: Record<string, unknown>):
 export function applyMap(data: FileData, params: Record<string, unknown>, targetPaths: string[]): FileData {
   const mappings = params.mappings as Array<{ sourceColumn: string; targetPath: string; defaultValue?: string }>;
   const defaults = (params.defaults ?? []) as Array<{ targetPath: string; value: string }>;
-  const result: Record<string, unknown>[] = [];
 
+  const colLookup = new Map<string, string>();
+  for (const col of data.columns) {
+    colLookup.set(col, col);
+    colLookup.set(col.trim().toLowerCase(), col);
+  }
+
+  const resolvedMappings = mappings.map((m) => {
+    const exact = colLookup.get(m.sourceColumn);
+    const resolved = exact ?? colLookup.get(m.sourceColumn.trim().toLowerCase());
+    return { ...m, resolvedSource: resolved };
+  });
+
+  const result: Record<string, unknown>[] = [];
   for (const row of data.rows) {
     const out: Record<string, unknown> = {};
-    for (const m of mappings) out[m.targetPath] = row[m.sourceColumn] ?? m.defaultValue ?? "";
+    for (const m of resolvedMappings) {
+      if (m.resolvedSource) {
+        const val = row[m.resolvedSource];
+        out[m.targetPath] = (val != null && String(val).trim() !== "") ? val : (m.defaultValue ?? "");
+      } else {
+        out[m.targetPath] = m.defaultValue ?? "";
+      }
+    }
     for (const tp of targetPaths) {
       if (!(tp in out)) {
         const def = defaults.find((d) => d.targetPath === tp);

@@ -34,6 +34,7 @@ export interface DataCleanserInput {
   userDirective?: string;
   originalFilePath?: string;
   modifiedFilePath?: string;
+  sheetId?: string;
 }
 
 export interface DataCleanserResult {
@@ -77,9 +78,12 @@ You must call exactly ONE tool:
 - If the CSV has title rows, metadata rows, summary/total rows, or empty rows that are NOT data, use **filter** to remove them.
 - If the CSV has columns that are entirely empty, contain only row numbers, or are irrelevant padding, use **trimColumns** to drop them.
 
-**Phase 2 — Fill: ensure every row is complete**
-- If any column has empty cells that should be forward-filled from the previous non-empty value (common for category/label/group columns in financial data), use **padColumns**.
-- This is the HIGHEST PRIORITY after cleaning. All rows must have complete data before any restructuring.
+**Phase 2 — Fill: ensure every row is complete (HIGHEST PRIORITY after cleaning)**
+- Check the "emptyCellsPerColumn" field in the file state. ANY column with >0% empty cells MUST be addressed.
+- If a column has empty cells that follow a group/category pattern (value appears once, then blank for subsequent rows in the same group), use **padColumns** and list ALL such columns.
+- You MUST include EVERY column that has empty cells in the paddingColumns list — do not skip any.
+- After padColumns, re-examine the data. If any columns still have empty cells, apply padColumns again for those columns.
+- Do NOT proceed to Phase 3 until ALL columns have 0% empty cells (or the empty cells are genuinely missing data with no pattern to fill).
 
 **Phase 3 — Flatten/Reshape: make the data flat and tabular**
 - If the data uses a star/indent hierarchy (balance sheets, trial balances), use **handleBalanceSheet** or **expand**.
@@ -100,7 +104,15 @@ You must call exactly ONE tool:
 - The LAST transformation must always be **map**.
 - After map, call **done**.
 - Be conservative — don't remove data unless clearly noise.
-- When padding, identify columns where values repeat for groups of rows (e.g. a category label that appears once then is blank for the next N rows belonging to that category).`;
+- When padding, identify columns where values repeat for groups of rows (e.g. a category label that appears once then is blank for the next N rows belonging to that category).
+
+## CRITICAL — Data Integrity Rules (MUST follow)
+
+- **NEVER drop data rows.** The output must have the same number of data rows as the input (after noise removal). If a transformation would reduce the row count unexpectedly, do NOT apply it.
+- **ALL cells must contain data.** After the Fill phase, every cell in every row must have a value. If you see ANY column with empty cells that can be forward-filled, you MUST apply padColumns for those columns before moving to Phase 3.
+- **padColumns is mandatory** if ANY column has empty cells that follow a group/category pattern. Examine ALL columns in the sample data — if a column has some rows with values and some blank, it almost certainly needs padding.
+- **In the map step, every sourceColumn MUST exactly match an existing column name** in the current file. Double-check column names against the current file state before emitting the map transformation. A typo or wrong column name will produce empty output.
+- **Every target path must be mapped** to a source column or given a default value. Do not leave any target path unmapped unless there is genuinely no source data for it.`;
 
 function createPlannerTools() {
   const nextTransformationTool = tool(
@@ -343,7 +355,7 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
 
-  const runId = randomUUID().slice(0, 4);
+  const runId = input.sheetId ? input.sheetId.slice(0, 8) : randomUUID().slice(0, 8);
 
   const rawTmpPath = await downloadS3FileToTmp(input.filePath);
   const rawBackupPath = path.join("/tmp", `raw-backup-${randomUUID()}.csv`);
@@ -364,9 +376,13 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
 
     const combinedDirective = [input.userDirective, judgeDirective].filter(Boolean).join("\n\n");
 
+    let preTransformRowCount = 0;
+
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
       const data = await readLocalCsv(workingPath);
       if (data.columns.length === 0 || data.rows.length === 0) break;
+
+      if (iteration === 0) preTransformRowCount = data.rows.length;
 
       const summary = fileSummary(data, SAMPLE_ROWS_FOR_PLANNER);
       const decision = await askPlanner(
@@ -382,6 +398,13 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
 
       const step: TransformationStep = { tool: decision.tool, params: decision.params };
       const transformed = executeTransformation(data, step, input.targetPaths);
+
+      if (transformed.rows.length === 0 && data.rows.length > 0) {
+        console.warn(
+          `[data-cleanser] Transformation "${step.tool}" produced 0 rows from ${data.rows.length} — skipping this step.`,
+        );
+        continue;
+      }
 
       await writeLocalCsv(workingPath, transformed.columns, transformed.rows);
       history.push(step);

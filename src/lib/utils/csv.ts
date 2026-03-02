@@ -67,10 +67,23 @@ export function rowsToCsv(columns: string[], rows: Record<string, unknown>[]): s
 
 export function fileSummary(data: FileData, sampleCount: number): string {
   const sample = data.rows.slice(0, sampleCount);
+
+  const emptyCellStats: Record<string, string> = {};
+  for (const col of data.columns) {
+    let emptyCount = 0;
+    for (const row of data.rows) {
+      if (row[col] == null || String(row[col]).trim() === "") emptyCount++;
+    }
+    if (emptyCount > 0) {
+      emptyCellStats[col] = `${emptyCount}/${data.rows.length} empty (${Math.round((emptyCount / Math.max(data.rows.length, 1)) * 100)}%)`;
+    }
+  }
+
   return JSON.stringify({
     columns: data.columns,
     rowCount: data.rows.length,
     columnCount: data.columns.length,
+    emptyCellsPerColumn: emptyCellStats,
     sampleRows: sample,
   });
 }

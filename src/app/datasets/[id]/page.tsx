@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import type { DatasetRecord } from "@/lib/types";
-import { ArrowLeft, Download, Loader2, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, Layers, Loader2, Plus, Trash2 } from "lucide-react";
+import Link from "next/link";
 import ExcelJS from "exceljs";
 import { useSchemaStore, type UploadedFileEntry } from "@/lib/schema-store";
 import { UploadDatasetDialog } from "@/components/UploadDatasetDialog";
@@ -206,15 +207,33 @@ export default function DatasetPage() {
           </div>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Dataset Name</CardTitle>
-          </CardHeader>
-          <CardContent className="flex gap-2">
-            <Input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} />
-            <Button onClick={saveName} disabled={savingName}>{savingName ? "Saving..." : "Save"}</Button>
-          </CardContent>
-        </Card>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Dataset Name</CardTitle>
+            </CardHeader>
+            <CardContent className="flex gap-2">
+              <Input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} />
+              <Button onClick={saveName} disabled={savingName}>{savingName ? "Saving..." : "Save"}</Button>
+            </CardContent>
+          </Card>
+
+          <Link href={`/schemas/${dataset.schemaId}`} className="block">
+            <Card className="h-full transition-colors hover:border-primary/50 hover:bg-muted/40">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-muted-foreground" />
+                  Schema
+                </CardTitle>
+                <CardDescription>The schema used by this dataset.</CardDescription>
+              </CardHeader>
+              <CardContent className="flex items-center justify-between">
+                <span className="text-sm font-medium truncate">{dataset.schemaName ?? "Unnamed schema"}</span>
+                <ExternalLink className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </CardContent>
+            </Card>
+          </Link>
+        </div>
 
         <Card>
           <CardHeader>

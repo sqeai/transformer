@@ -12,7 +12,7 @@ export async function GET(
 
   const { data, error } = await supabase!
     .from("datasets")
-    .select("id, schema_id, name, row_count, rows, mapping_snapshot, created_at, updated_at")
+    .select("id, schema_id, name, row_count, rows, mapping_snapshot, created_at, updated_at, schemas!inner(name)")
     .eq("id", id)
     .single();
 
@@ -24,6 +24,7 @@ export async function GET(
     dataset: {
       id: data.id,
       schemaId: data.schema_id,
+      schemaName: (data.schemas as Record<string, unknown>)?.name ?? null,
       name: data.name,
       rowCount: data.row_count ?? 0,
       rows: Array.isArray(data.rows) ? data.rows : [],

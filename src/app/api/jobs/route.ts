@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
   if (auth.response) return auth.response;
   const { supabase, userId } = auth;
 
-  let body: { type?: string; payload?: unknown };
+  let body: { type?: string; payload?: unknown; sheetId?: string };
   try {
     body = await request.json();
   } catch {
@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
 
   const type = typeof body?.type === "string" ? body.type.trim() : "";
   const payload = body?.payload;
+  const sheetId = typeof body?.sheetId === "string" ? body.sheetId.trim() : undefined;
 
   if (!type) {
     return NextResponse.json({ error: "type is required" }, { status: 400 });
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const jobId = await createJob(supabase!, userId!, { type, payload });
+    const jobId = await createJob(supabase!, userId!, { type, payload, sheetId });
     return NextResponse.json({ jobId });
   } catch (e) {
     console.error("Job creation error:", e);

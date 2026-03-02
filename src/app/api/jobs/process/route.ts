@@ -8,8 +8,7 @@ import {
 } from "@/lib/jobs-db";
 import { AI_DATA_CLEANSER_MAX_CONCURRENCY } from "@/lib/jobs-config";
 import { runDataCleanser } from "@/lib/agents/data-cleanser";
-import { getS3ObjectVersionId } from "@/lib/s3-sheets";
-import { updateSheetVersionId } from "@/lib/sheets-db";
+import { createSheetRecord } from "@/lib/sheets-db";
 
 export async function POST(_request: NextRequest) {
   return processJobs();
@@ -41,7 +40,6 @@ async function processJobs() {
             filePath?: string;
             targetPaths?: string[];
             sheetName?: string;
-            sheetId?: string;
             userDirective?: string;
             originalFilePath?: string;
             modifiedFilePath?: string;
@@ -58,11 +56,21 @@ async function processJobs() {
             userDirective: payload.userDirective,
             originalFilePath: payload.originalFilePath,
             modifiedFilePath: payload.modifiedFilePath,
+            sheetId: job.sheet_id ?? undefined,
           });
 
-          if (typeof payload.sheetId === "string" && payload.sheetId) {
-            const versionId = await getS3ObjectVersionId(payload.filePath);
-            await updateSheetVersionId(supabase, payload.sheetId, versionId);
+          if (typeof job.sheet_id === "string" && job.sheet_id) {
+            await createSheetRecord(supabase, {
+              userId: job.user_id,
+              sheetId: job.sheet_id,
+              storageUrl: result.outputFilePath,
+              name: payload.sheetName ?? "Sheet",
+              dimensions: {
+                rowCount: result.transformedRows.length,
+                columnCount: result.transformedColumns.length,
+              },
+              type: "final",
+            });
           }
 
           await updateJobResult(supabase, job.id, result);
