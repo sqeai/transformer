@@ -9,11 +9,18 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import type { DatasetRecord } from "@/lib/types";
-import { ArrowLeft, Download, ExternalLink, Layers, Loader2, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, Database, Download, ExternalLink, Layers, Loader2, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import ExcelJS from "exceljs";
 import { useSchemaStore, type UploadedFileEntry } from "@/lib/schema-store";
 import { UploadDatasetDialog } from "@/components/UploadDatasetDialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const ROWS_PER_PAGE = 100;
 
@@ -192,14 +199,65 @@ export default function DatasetPage() {
               <Plus className="mr-2 h-4 w-4" />
               Add To This Dataset
             </Button>
-            <Button variant="outline" onClick={() => exportRows("csv")} disabled={!!exporting}>
-              <Download className="mr-2 h-4 w-4" />
-              {exporting === "csv" ? "Exporting..." : "Export CSV"}
-            </Button>
-            <Button variant="outline" onClick={() => exportRows("excel")} disabled={!!exporting}>
-              <Download className="mr-2 h-4 w-4" />
-              {exporting === "excel" ? "Exporting..." : "Export Excel"}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={!!exporting}>
+                  {exporting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-2 h-4 w-4" />
+                  )}
+                  {exporting ? "Exporting..." : "Export"}
+                  <ChevronDown className="ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuItem onClick={() => exportRows("excel")}>
+                  <svg className="mr-2 h-4 w-4 shrink-0 text-green-600" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M14 2v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M8 13l3 3 3-3M8 17l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  Excel (.xlsx)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => exportRows("csv")}>
+                  <svg className="mr-2 h-4 w-4 shrink-0 text-blue-600" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M14 2v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M8 13h8M8 17h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                  CSV (.csv)
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem disabled>
+                  <svg className="mr-2 h-4 w-4 shrink-0 text-orange-500 opacity-50" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="2"/>
+                    <path d="M7 8h10M7 12h10M7 16h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                  <span>FIS</span>
+                  <span className="ml-auto text-xs text-muted-foreground">Soon</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled>
+                  <Database className="mr-2 h-4 w-4 shrink-0 text-blue-500 opacity-50" />
+                  <span>BigQuery</span>
+                  <span className="ml-auto text-xs text-muted-foreground">Soon</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled>
+                  <Database className="mr-2 h-4 w-4 shrink-0 text-red-500 opacity-50" />
+                  <span>Redshift</span>
+                  <span className="ml-auto text-xs text-muted-foreground">Soon</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled>
+                  <svg className="mr-2 h-4 w-4 shrink-0 text-sky-700 opacity-50" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <ellipse cx="12" cy="6" rx="8" ry="3" stroke="currentColor" strokeWidth="2"/>
+                    <path d="M4 6v6c0 1.657 3.582 3 8 3s8-1.343 8-3V6" stroke="currentColor" strokeWidth="2"/>
+                    <path d="M4 12v6c0 1.657 3.582 3 8 3s8-1.343 8-3v-6" stroke="currentColor" strokeWidth="2"/>
+                  </svg>
+                  <span>Postgres</span>
+                  <span className="ml-auto text-xs text-muted-foreground">Soon</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button variant="destructive" onClick={deleteDataset} disabled={deleting}>
               <Trash2 className="mr-2 h-4 w-4" />
               Delete

@@ -45,6 +45,8 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Database,
+  Download,
   FileSpreadsheet,
   Loader2,
   Sparkles,
@@ -52,6 +54,14 @@ import {
   XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import ExcelJS from "exceljs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const MappingFlow = dynamic(() => import("@/components/MappingFlow"), { ssr: false });
 
@@ -179,6 +189,10 @@ function NewDatasetPageContent() {
   const [modifySubmittingSheetKey, setModifySubmittingSheetKey] = useState<string | null>(null);
   const [originalPreview, setOriginalPreview] = useState<PreviewState | null>(null);
   const [originalPreviewLoading, setOriginalPreviewLoading] = useState(false);
+  const allOriginalRowsRef = useRef<Record<string, unknown>[]>([]);
+  const [originalVisibleCount, setOriginalVisibleCount] = useState(PREVIEW_ROWS);
+  const [modifiedVisibleCount, setModifiedVisibleCount] = useState(PREVIEW_ROWS);
+  const [downloadingExcel, setDownloadingExcel] = useState(false);
 
   // Export state
   const [exportTargetDatasetId, setExportTargetDatasetId] = useState<string>(
@@ -516,11 +530,13 @@ function NewDatasetPageContent() {
         dataStartRowIndex: 1,
         sheetIndex: sheetResult.sheet.sheetIndex,
       });
+      allOriginalRowsRef.current = parsed.rows;
+      setOriginalVisibleCount(PREVIEW_ROWS);
       setOriginalPreview({
         columns: parsed.columns,
-        rows: parsed.rows.slice(0, PREVIEW_ROWS),
+        rows: parsed.rows,
         totalRows: parsed.rows.length,
-        visibleRows: Math.min(parsed.rows.length, PREVIEW_ROWS),
+        visibleRows: parsed.rows.length,
       });
     } catch {
       setOriginalPreview(null);
@@ -744,6 +760,45 @@ function NewDatasetPageContent() {
       setExporting(false);
     }
   }, [schemaId, jobResults, confirmedSheets, exportTargetDatasetId, newDatasetName, resetDatasetWorkflow, router]);
+
+  const handleDownloadExcel = useCallback(async () => {
+    setDownloadingExcel(true);
+    try {
+      const confirmedResults = jobResults.filter((r) => {
+        const key = `${r.sheet.fileId}:${r.sheet.sheetIndex}`;
+        return confirmedSheets.has(key) && r.status === "completed" && r.result;
+      });
+
+      const allCols = confirmedResults[0]?.result?.transformedColumns ?? [];
+      const allRows: Record<string, unknown>[] = [];
+      for (const r of confirmedResults) {
+        if (r.result?.transformedRows) {
+          allRows.push(...r.result.transformedRows);
+        }
+      }
+
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet("Data");
+      sheet.addRow(allCols);
+      for (const row of allRows) {
+        sheet.addRow(allCols.map((c) => row[c] ?? ""));
+      }
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${newDatasetName.trim() || `Dataset ${new Date().toLocaleDateString()}`}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setDownloadingExcel(false);
+    }
+  }, [jobResults, confirmedSheets, newDatasetName]);
 
   if (!schemaId || !schema) {
     return (
@@ -1049,6 +1104,9 @@ function NewDatasetPageContent() {
                     onClick={() => {
                       setReviewSheetIndex(i);
                       setReviewSubTab("modified");
+                      setOriginalVisibleCount(PREVIEW_ROWS);
+                      setModifiedVisibleCount(PREVIEW_ROWS);
+                      setOriginalPreview(null);
                     }}
                   >
                     {isConfirmed && <Check className="h-3 w-3" />}
@@ -1132,31 +1190,47 @@ function NewDatasetPageContent() {
                             Loading original data...
                           </div>
                         ) : originalPreview ? (
-                          <ScrollArea className="w-full rounded-md border max-h-[700px] overflow-auto">
-                            <Table>
-                              <TableHeader className="sticky top-0 z-10 bg-background">
-                                <TableRow>
-                                  <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
-                                  {originalPreview.columns.map((col) => (
-                                    <TableHead key={col} className="whitespace-nowrap bg-background">{col}</TableHead>
-                                  ))}
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {originalPreview.rows.map((row, i) => (
-                                  <TableRow key={i}>
-                                    <TableCell className="text-muted-foreground">{i + 1}</TableCell>
+                          <div className="space-y-3">
+                            <ScrollArea className="w-full rounded-md border max-h-[700px] overflow-auto">
+                              <Table>
+                                <TableHeader className="sticky top-0 z-10 bg-background">
+                                  <TableRow>
+                                    <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
                                     {originalPreview.columns.map((col) => (
-                                      <TableCell key={col} className="whitespace-nowrap max-w-[200px] truncate">
-                                        {String(row[col] ?? "")}
-                                      </TableCell>
+                                      <TableHead key={col} className="whitespace-nowrap bg-background">{col}</TableHead>
                                     ))}
                                   </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                            <ScrollBar orientation="horizontal" />
-                          </ScrollArea>
+                                </TableHeader>
+                                <TableBody>
+                                  {originalPreview.rows.slice(0, originalVisibleCount).map((row, i) => (
+                                    <TableRow key={i}>
+                                      <TableCell className="text-muted-foreground">{i + 1}</TableCell>
+                                      {originalPreview.columns.map((col) => (
+                                        <TableCell key={col} className="whitespace-nowrap max-w-[200px] truncate">
+                                          {String(row[col] ?? "")}
+                                        </TableCell>
+                                      ))}
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                              <ScrollBar orientation="horizontal" />
+                            </ScrollArea>
+                            {originalPreview.totalRows > originalVisibleCount && (
+                              <div className="flex flex-col items-center gap-2">
+                                <p className="text-xs text-muted-foreground">
+                                  Showing {Math.min(originalVisibleCount, originalPreview.totalRows)} of {originalPreview.totalRows} rows
+                                </p>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setOriginalVisibleCount((prev) => prev + PREVIEW_ROWS)}
+                                >
+                                  Load more
+                                </Button>
+                              </div>
+                            )}
+                          </div>
                         ) : (
                           <p className="text-muted-foreground text-center py-4">No preview available.</p>
                         )}
@@ -1176,7 +1250,7 @@ function NewDatasetPageContent() {
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {transformedRows.slice(0, PREVIEW_ROWS).map((row, i) => (
+                              {transformedRows.slice(0, modifiedVisibleCount).map((row, i) => (
                                 <TableRow key={i}>
                                   <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                                   {transformedCols.map((col) => (
@@ -1190,10 +1264,19 @@ function NewDatasetPageContent() {
                           </Table>
                           <ScrollBar orientation="horizontal" />
                         </ScrollArea>
-                        {transformedRows.length > PREVIEW_ROWS && (
-                          <p className="text-xs text-muted-foreground text-center">
-                            Showing {PREVIEW_ROWS} of {transformedRows.length} rows
-                          </p>
+                        {transformedRows.length > modifiedVisibleCount && (
+                          <div className="flex flex-col items-center gap-2">
+                            <p className="text-xs text-muted-foreground text-center">
+                              Showing {Math.min(modifiedVisibleCount, transformedRows.length)} of {transformedRows.length} rows
+                            </p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setModifiedVisibleCount((prev) => prev + PREVIEW_ROWS)}
+                            >
+                              Load more
+                            </Button>
+                          </div>
                         )}
 
                         {currentSheetProcessing && (
@@ -1327,12 +1410,26 @@ function NewDatasetPageContent() {
                   <ArrowLeft className="mr-2 h-4 w-4" />
                   Back
                 </Button>
-                <Button onClick={handleExport} disabled={exporting}>
-                  {exporting ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : null}
-                  {exportTargetDatasetId === "__new" ? "Create Dataset" : "Add to Dataset"}
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleDownloadExcel}
+                    disabled={downloadingExcel || confirmedCount === 0}
+                  >
+                    {downloadingExcel ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="mr-2 h-4 w-4" />
+                    )}
+                    Download Excel
+                  </Button>
+                  <Button onClick={handleExport} disabled={exporting}>
+                    {exporting ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : null}
+                    {exportTargetDatasetId === "__new" ? "Create Dataset" : "Add to Dataset"}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
