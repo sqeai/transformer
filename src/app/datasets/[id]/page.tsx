@@ -133,6 +133,7 @@ export default function DatasetPage() {
   const [exportTargetSchema, setExportTargetSchema] = useState("public");
   const [exportTargetTable, setExportTargetTable] = useState("");
   const [exportCreateTable, setExportCreateTable] = useState(true);
+  const [showCreateTableForm, setShowCreateTableForm] = useState(false);
   const [exportingToDb, setExportingToDb] = useState(false);
 
   const { setDatasetWorkflow, resetDatasetWorkflow } = useSchemaStore();
@@ -513,10 +514,13 @@ export default function DatasetPage() {
   const openExportDialog = () => {
     setSelectedDataSourceId("");
     setDataSources([]);
-    setExportTargetTable(dataset?.name?.replace(/[^a-zA-Z0-9_]/g, "_").toLowerCase() ?? "");
+    setExportTargetTable("");
     setExportTargetSchema("public");
+    setExportCreateTable(true);
+    setShowCreateTableForm(false);
     setExportTables([]);
     setExportTablesError(null);
+    void fetchDataSources();
     setExportDialogOpen(true);
   };
 
@@ -1251,90 +1255,112 @@ export default function DatasetPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">Available Tables</label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={!selectedDataSourceId || loadingExportTables}
-                  onClick={() => { void loadExportTables(); }}
-                >
-                  {loadingExportTables ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
-                  {loadingExportTables ? "Loading Tables..." : "Load Tables"}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!selectedDataSourceId || loadingExportTables}
+                    onClick={() => { void loadExportTables(); }}
+                  >
+                    {loadingExportTables ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
+                    {loadingExportTables ? "Loading Tables..." : "Load Tables"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={showCreateTableForm ? "secondary" : "outline"}
+                    size="icon"
+                    disabled={!selectedDataSourceId}
+                    onClick={() => {
+                      setShowCreateTableForm((prev) => !prev);
+                      setExportCreateTable(true);
+                    }}
+                    title="Create a new table"
+                    aria-label="Create a new table"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
-              <div className="max-h-44 overflow-auto rounded-md border">
-                {!selectedDataSourceId ? (
-                  <div className="p-3 text-sm text-muted-foreground">Select a data source first.</div>
-                ) : loadingExportTables && exportTables.length === 0 ? (
-                  <div className="p-3 text-sm text-muted-foreground">Checking table schemas...</div>
-                ) : exportTablesError ? (
-                  <div className="p-3 text-sm text-destructive">{exportTablesError}</div>
-                ) : exportTables.length === 0 ? (
-                  <div className="p-3 text-sm text-muted-foreground">No tables found in this data source.</div>
-                ) : (
-                  <div className="divide-y">
-                    {exportTables.map((table) => (
-                      <button
-                        key={`${table.schema}.${table.name}`}
-                        type="button"
-                        className={cn(
-                          "flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors",
-                          table.compatible
-                            ? "hover:bg-muted/50"
-                            : "cursor-not-allowed text-muted-foreground opacity-80",
-                          exportTargetSchema === table.schema && exportTargetTable === table.name
-                            ? "bg-muted"
-                            : ""
-                        )}
-                        disabled={!table.compatible}
-                        onClick={() => {
-                          setExportTargetSchema(table.schema);
-                          setExportTargetTable(table.name);
-                        }}
-                      >
-                        <span className="min-w-0 flex-1 truncate">{table.schema}.{table.name}</span>
-                        <span className="shrink-0 text-xs">
-                          {table.compatible ? (
-                            <Badge variant="outline" className="border-green-300 text-green-700 dark:border-green-800 dark:text-green-300">
-                              {table.matchPercent === 100 ? "100% Match" : `Compatible (${table.matchPercent}% Match)`}
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline">Schema Incompatible</Badge>
-                          )}
-                        </span>
-                      </button>
-                    ))}
+              {showCreateTableForm ? (
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Schema / Dataset</label>
+                      <Input
+                        value={exportTargetSchema}
+                        onChange={(e) => setExportTargetSchema(e.target.value)}
+                        placeholder="public"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Table Name</label>
+                      <Input
+                        value={exportTargetTable}
+                        onChange={(e) => setExportTargetTable(e.target.value)}
+                        placeholder="my_table"
+                      />
+                    </div>
                   </div>
-                )}
-              </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={exportCreateTable}
+                      onChange={(e) => setExportCreateTable(e.target.checked)}
+                      className="rounded border-gray-300"
+                    />
+                    Create table if it doesn&apos;t exist
+                  </label>
+                </div>
+              ) : (
+                <div className="max-h-44 overflow-auto rounded-md border">
+                  {!selectedDataSourceId ? (
+                    <div className="p-3 text-sm text-muted-foreground">Select a data source first.</div>
+                  ) : loadingExportTables && exportTables.length === 0 ? (
+                    <div className="p-3 text-sm text-muted-foreground">Checking table schemas...</div>
+                  ) : exportTablesError ? (
+                    <div className="p-3 text-sm text-destructive">{exportTablesError}</div>
+                  ) : exportTables.length === 0 ? (
+                    <div className="p-3 text-sm text-muted-foreground">No tables found in this data source.</div>
+                  ) : (
+                    <div className="divide-y">
+                      {exportTables.map((table) => (
+                        <button
+                          key={`${table.schema}.${table.name}`}
+                          type="button"
+                          className={cn(
+                            "flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors",
+                            table.compatible
+                              ? "hover:bg-muted/50"
+                              : "cursor-not-allowed text-muted-foreground opacity-80",
+                            exportTargetSchema === table.schema && exportTargetTable === table.name
+                              ? "bg-muted"
+                              : ""
+                          )}
+                          disabled={!table.compatible}
+                          onClick={() => {
+                            setExportTargetSchema(table.schema);
+                            setExportTargetTable(table.name);
+                            setExportCreateTable(false);
+                          }}
+                        >
+                          <span className="min-w-0 flex-1 truncate">{table.schema}.{table.name}</span>
+                          <span className="shrink-0 text-xs">
+                            {table.compatible ? (
+                              <Badge variant="outline" className="border-green-300 text-green-700 dark:border-green-800 dark:text-green-300">
+                                {table.matchPercent === 100 ? "100% Match" : `Compatible (${table.matchPercent}% Match)`}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline">Schema Incompatible</Badge>
+                            )}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Schema / Dataset</label>
-                <Input
-                  value={exportTargetSchema}
-                  onChange={(e) => setExportTargetSchema(e.target.value)}
-                  placeholder="public"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Table Name</label>
-                <Input
-                  value={exportTargetTable}
-                  onChange={(e) => setExportTargetTable(e.target.value)}
-                  placeholder="my_table"
-                />
-              </div>
-            </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={exportCreateTable}
-                onChange={(e) => setExportCreateTable(e.target.checked)}
-                className="rounded border-gray-300"
-              />
-              Create table if it doesn&apos;t exist
-            </label>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setExportDialogOpen(false)}>Cancel</Button>

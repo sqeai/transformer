@@ -184,9 +184,6 @@ function NewDatasetPageContent() {
   const [reviewSubTab, setReviewSubTab] = useState<"original" | "modified" | "transformations" | "mapping">("modified");
   const [expandedTransformStep, setExpandedTransformStep] = useState<number | null>(null);
   const [transformPreviewMode, setTransformPreviewMode] = useState<"before" | "after">("after");
-  const [confirmedSheets, setConfirmedSheets] = useState<Set<string>>(
-    new Set(datasetWorkflow.confirmedSheetIds),
-  );
   const [modifyPrompt, setModifyPrompt] = useState("");
   const modifyPollingRef = useRef<NodeJS.Timeout | null>(null);
   const modifyJobIdRef = useRef<string | null>(null);
@@ -336,9 +333,9 @@ function NewDatasetPageContent() {
       step,
       selectedSheets,
       jobResults,
-      confirmedSheetIds: Array.from(confirmedSheets),
+      confirmedSheetIds: [],
     });
-  }, [step, selectedSheets, jobResults, confirmedSheets]);
+  }, [step, selectedSheets, jobResults]);
 
   const toggleSheet = (sheet: SheetSelection) => {
     hasManuallyToggledSheets.current = true;
@@ -689,16 +686,6 @@ function NewDatasetPageContent() {
     }
   }, [modifyPrompt, schemaId, targetPaths, startModifyPolling, uploadedSheetRefs, uploadSheetCsv]);
 
-  const toggleConfirmSheet = (sheetResult: SheetJobResult) => {
-    const key = `${sheetResult.sheet.fileId}:${sheetResult.sheet.sheetIndex}`;
-    setConfirmedSheets((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
   // Export step
   useEffect(() => {
     if (step !== "export" || !schemaId) return;
@@ -717,13 +704,10 @@ function NewDatasetPageContent() {
     setExporting(true);
 
     try {
-      const confirmedResults = jobResults.filter((r) => {
-        const key = `${r.sheet.fileId}:${r.sheet.sheetIndex}`;
-        return confirmedSheets.has(key) && r.status === "completed" && r.result;
-      });
+      const exportableResults = jobResults.filter((r) => r.status === "completed" && r.result);
 
       const allRows: Record<string, unknown>[] = [];
-      for (const r of confirmedResults) {
+      for (const r of exportableResults) {
         if (r.result?.transformedRows) {
           allRows.push(...r.result.transformedRows);
         }
@@ -739,8 +723,8 @@ function NewDatasetPageContent() {
             name,
             rows: allRows,
             mappingSnapshot: {
-              toolsUsed: confirmedResults.map((r) => r.result?.toolsUsed ?? []),
-              transformations: confirmedResults.map((r) => r.result?.mapping ?? []),
+              toolsUsed: exportableResults.map((r) => r.result?.toolsUsed ?? []),
+              transformations: exportableResults.map((r) => r.result?.mapping ?? []),
             },
           }),
         });
@@ -766,19 +750,16 @@ function NewDatasetPageContent() {
     } finally {
       setExporting(false);
     }
-  }, [schemaId, jobResults, confirmedSheets, exportTargetDatasetId, newDatasetName, resetDatasetWorkflow, router]);
+  }, [schemaId, jobResults, exportTargetDatasetId, newDatasetName, resetDatasetWorkflow, router]);
 
   const handleDownloadExcel = useCallback(async () => {
     setDownloadingExcel(true);
     try {
-      const confirmedResults = jobResults.filter((r) => {
-        const key = `${r.sheet.fileId}:${r.sheet.sheetIndex}`;
-        return confirmedSheets.has(key) && r.status === "completed" && r.result;
-      });
+      const exportableResults = jobResults.filter((r) => r.status === "completed" && r.result);
 
-      const allCols = confirmedResults[0]?.result?.transformedColumns ?? [];
+      const allCols = exportableResults[0]?.result?.transformedColumns ?? [];
       const allRows: Record<string, unknown>[] = [];
-      for (const r of confirmedResults) {
+      for (const r of exportableResults) {
         if (r.result?.transformedRows) {
           allRows.push(...r.result.transformedRows);
         }
@@ -805,7 +786,7 @@ function NewDatasetPageContent() {
     } finally {
       setDownloadingExcel(false);
     }
-  }, [jobResults, confirmedSheets, newDatasetName]);
+  }, [jobResults, newDatasetName]);
 
   if (!schemaId || !schema) {
     return (
@@ -823,9 +804,8 @@ function NewDatasetPageContent() {
   const reviewableResults = jobResults.filter(
     (r) => (r.status === "completed" || r.status === "pending" || r.status === "running") && Boolean(r.result),
   );
-  const confirmedCount = Array.from(confirmedSheets).filter((key) =>
-    jobResults.some((r) => `${r.sheet.fileId}:${r.sheet.sheetIndex}` === key && r.status === "completed"),
-  ).length;
+  const exportableResults = jobResults.filter((r) => r.status === "completed" && r.result);
+  const exportableCount = exportableResults.length;
 
   return (
     <DashboardLayout>
@@ -1097,7 +1077,6 @@ function NewDatasetPageContent() {
             <div className="flex flex-wrap gap-2 border-b pb-2">
               {reviewableResults.map((r, i) => {
                 const key = `${r.sheet.fileId}:${r.sheet.sheetIndex}`;
-                const isConfirmed = confirmedSheets.has(key);
                 return (
                   <button
                     key={key}
@@ -1117,7 +1096,6 @@ function NewDatasetPageContent() {
                       setExpandedTransformStep(null);
                     }}
                   >
-                    {isConfirmed && <Check className="h-3 w-3" />}
                     {r.sheet.sheetName}
                   </button>
                 );
@@ -1126,8 +1104,6 @@ function NewDatasetPageContent() {
 
             {reviewableResults.length > 0 && reviewableResults[reviewSheetIndex] && (() => {
               const currentResult = reviewableResults[reviewSheetIndex];
-              const currentKey = `${currentResult.sheet.fileId}:${currentResult.sheet.sheetIndex}`;
-              const isConfirmed = confirmedSheets.has(currentKey);
               const transformedRows = currentResult.result?.transformedRows ?? [];
               const transformedCols = currentResult.result?.transformedColumns ?? [];
               const pipeline = currentResult.result?.pipeline;
@@ -1148,21 +1124,6 @@ function NewDatasetPageContent() {
                           {transformedRows.length} rows, {transformedCols.length} columns
                         </CardDescription>
                       </div>
-                      <Button
-                        variant={isConfirmed ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => toggleConfirmSheet(currentResult)}
-                        disabled={anySheetProcessing}
-                      >
-                        {isConfirmed ? (
-                          <>
-                            <CheckCircle2 className="mr-1.5 h-4 w-4" />
-                            Confirmed
-                          </>
-                        ) : (
-                          "Confirm Sheet"
-                        )}
-                      </Button>
                     </div>
 
                     {/* Sub-tabs */}
@@ -1514,9 +1475,9 @@ function NewDatasetPageContent() {
               </Button>
               <Button
                 onClick={() => setStep("export")}
-                disabled={confirmedCount === 0 || anySheetProcessing}
+                disabled={exportableCount === 0 || anySheetProcessing}
               >
-                Next: Export {confirmedCount} sheet{confirmedCount !== 1 ? "s" : ""}
+                Next: Export {exportableCount} sheet{exportableCount !== 1 ? "s" : ""}
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </div>
@@ -1529,7 +1490,7 @@ function NewDatasetPageContent() {
             <CardHeader>
               <CardTitle>Export Dataset</CardTitle>
               <CardDescription>
-                Choose where to save the {confirmedCount} confirmed sheet{confirmedCount !== 1 ? "s" : ""}.
+                Choose where to save {exportableCount} processed sheet{exportableCount !== 1 ? "s" : ""}.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1561,9 +1522,7 @@ function NewDatasetPageContent() {
 
               <div className="rounded-lg border p-4 space-y-2">
                 <p className="text-sm font-medium">Summary</p>
-                {jobResults
-                  .filter((r) => confirmedSheets.has(`${r.sheet.fileId}:${r.sheet.sheetIndex}`))
-                  .map((r) => (
+                {exportableResults.map((r) => (
                     <div key={`${r.sheet.fileId}:${r.sheet.sheetIndex}`} className="flex items-center gap-2 text-sm">
                       <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
                       <span className="truncate">
@@ -1585,7 +1544,7 @@ function NewDatasetPageContent() {
                   <Button
                     variant="outline"
                     onClick={handleDownloadExcel}
-                    disabled={downloadingExcel || confirmedCount === 0}
+                    disabled={downloadingExcel || exportableCount === 0}
                   >
                     {downloadingExcel ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />

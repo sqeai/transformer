@@ -34,7 +34,7 @@ const guideSteps = [
   {
     title: "2. Let AI Determine Mapping",
     description:
-      "Use Auto-map with AI, review suggested links, and confirm each sheet mapping.",
+      "Use Auto-map with AI and review suggested links for each sheet mapping.",
     image: "/guides/04-ai-mapping-determination.jpg",
     alt: "AI mapping determination screen",
   },
