@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET() {
   const auth = await getAuth();
   if (auth.response) return auth.response;
-  const { supabase, userId } = auth;
+  const { userId } = auth;
+  const admin = createAdminClient();
 
-  const { data, error } = await supabase!
+  const { data, error } = await admin
     .from("users")
     .select("id, email, full_name")
     .eq("is_activated", true)
