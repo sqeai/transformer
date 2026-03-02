@@ -53,6 +53,19 @@ function formatBigQueryError(err: unknown, context: Record<string, unknown>) {
   };
 }
 
+function coerceBigQueryWholeNumber(value: unknown): unknown {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).replace(/,/g, "").trim();
+  if (!normalized) return null;
+  if (!/^[-+]?(?:\d+\.?\d*|\.\d+)$/.test(normalized)) return null;
+
+  const sign = normalized.startsWith("-") ? "-" : "";
+  const unsigned = normalized.replace(/^[-+]/, "");
+  const integerPart = unsigned.split(".")[0] || "0";
+  const collapsed = integerPart.replace(/^0+(?=\d)/, "");
+  return `${sign}${collapsed || "0"}`;
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -239,7 +252,10 @@ export async function POST(
         const clean: Record<string, unknown> = {};
         for (const col of columns) {
           const type = fieldTypeMap[col] ?? "STRING";
-          const value = coerceForStorage(row[col], type);
+          let value = coerceForStorage(row[col], type);
+          if (type === "NUMERIC" || type === "INTEGER") {
+            value = coerceBigQueryWholeNumber(value);
+          }
           clean[col.replace(/[^a-zA-Z0-9_]/g, "_")] = value;
         }
         return clean;
