@@ -8,6 +8,7 @@ import {
   Sparkles,
   FileStack,
   Database,
+  Cable,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -26,6 +27,7 @@ import {
 const nav = [
   { name: "Datasets", href: "/datasets", icon: Database },
   { name: "Schemas", href: "/schemas", icon: FileStack },
+  { name: "Data Sources", href: "/data-sources", icon: Cable },
 ];
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
