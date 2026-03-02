@@ -165,6 +165,7 @@ function NewDatasetPageContent() {
   const [step, setStep] = useState<Step>(datasetWorkflow.step || "upload");
   const [selectedSheets, setSelectedSheets] = useState<SheetSelection[]>(datasetWorkflow.selectedSheets);
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
+  const hasManuallyToggledSheets = useRef(false);
 
   // Preview state
   const [previewSheet, setPreviewSheet] = useState<SheetSelection | null>(null);
@@ -254,9 +255,9 @@ function NewDatasetPageContent() {
     }
   }, [files]);
 
-  // Auto-select all sheets initially
+  // Auto-select all sheets initially (only on first load, not after manual deselect)
   useEffect(() => {
-    if (selectedSheets.length === 0 && files.length > 0) {
+    if (selectedSheets.length === 0 && files.length > 0 && !hasManuallyToggledSheets.current) {
       const allSheets: SheetSelection[] = [];
       for (const file of files) {
         for (let i = 0; i < file.sheetNames.length; i++) {
@@ -337,6 +338,7 @@ function NewDatasetPageContent() {
   }, [step, selectedSheets, jobResults, confirmedSheets]);
 
   const toggleSheet = (sheet: SheetSelection) => {
+    hasManuallyToggledSheets.current = true;
     const key = `${sheet.fileId}:${sheet.sheetIndex}`;
     setSelectedSheets((prev) => {
       const exists = prev.some((s) => `${s.fileId}:${s.sheetIndex}` === key);
@@ -346,6 +348,7 @@ function NewDatasetPageContent() {
   };
 
   const toggleAllSheetsForFile = (fileId: string) => {
+    hasManuallyToggledSheets.current = true;
     const file = files.find((f) => f.fileId === fileId);
     if (!file) return;
 
