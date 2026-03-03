@@ -255,6 +255,15 @@ function NewDatasetPageContent() {
   const [exporting, setExporting] = useState(false);
 
   const files = datasetWorkflow.files;
+  const handleHeaderBack = useCallback(() => {
+    const currentIndex = STEPS.findIndex((candidate) => candidate.key === step);
+    const previousStep = currentIndex > 0 ? STEPS[currentIndex - 1]?.key : null;
+    if (previousStep) {
+      setStep(previousStep);
+      return;
+    }
+    router.push("/datasets");
+  }, [router, step]);
 
   const uploadSheetCsv = useCallback(async (
     args: {
@@ -881,7 +890,7 @@ function NewDatasetPageContent() {
     <DashboardLayout>
       <div className="space-y-4 animate-fade-in">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => router.push("/datasets")}>
+          <Button variant="ghost" size="icon" onClick={handleHeaderBack}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
@@ -1291,6 +1300,46 @@ function NewDatasetPageContent() {
 
                     {reviewSubTab === "modified" && (
                       <div className="space-y-4">
+                        <div className="flex gap-2">
+                          <Textarea
+                            placeholder="Describe how to modify this data (e.g. 'Remove all rows where amount is 0', 'Combine first and last name columns')..."
+                            value={modifyPrompt}
+                            onChange={(e) => setModifyPrompt(e.target.value)}
+                            className="flex-1"
+                            rows={2}
+                            disabled={showModifyLoading}
+                          />
+                          <Button
+                            onClick={() => handleModifyWithAI(currentResult)}
+                            disabled={!modifyPrompt.trim() || anySheetProcessing || currentSheetSubmitting}
+                            className="shrink-0"
+                          >
+                            {showModifyLoading ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Sparkles className="mr-2 h-4 w-4" />
+                            )}
+                            Modify using AI
+                          </Button>
+                        </div>
+
+                        {currentSheetProcessing && (
+                          <div className="flex items-center justify-between gap-2 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                            <div className="flex items-center gap-2">
+                              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                              AI Data Cleanser is re-processing this sheet...
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleStopModify}
+                            >
+                              <Square className="mr-1.5 h-3.5 w-3.5" />
+                              Stop
+                            </Button>
+                          </div>
+                        )}
+
                         <ScrollArea className="w-full rounded-md border max-h-[700px] overflow-auto">
                           <Table>
                             <TableHeader className="sticky top-0 z-10 bg-background">
@@ -1330,46 +1379,6 @@ function NewDatasetPageContent() {
                             </Button>
                           </div>
                         )}
-
-                        {currentSheetProcessing && (
-                          <div className="flex items-center justify-between gap-2 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                            <div className="flex items-center gap-2">
-                              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                              AI Data Cleanser is re-processing this sheet...
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={handleStopModify}
-                            >
-                              <Square className="mr-1.5 h-3.5 w-3.5" />
-                              Stop
-                            </Button>
-                          </div>
-                        )}
-
-                        <div className="flex gap-2">
-                          <Textarea
-                            placeholder="Describe how to modify this data (e.g. 'Remove all rows where amount is 0', 'Combine first and last name columns')..."
-                            value={modifyPrompt}
-                            onChange={(e) => setModifyPrompt(e.target.value)}
-                            className="flex-1"
-                            rows={2}
-                            disabled={showModifyLoading}
-                          />
-                          <Button
-                            onClick={() => handleModifyWithAI(currentResult)}
-                            disabled={!modifyPrompt.trim() || anySheetProcessing || currentSheetSubmitting}
-                            className="shrink-0"
-                          >
-                            {showModifyLoading ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                              <Sparkles className="mr-2 h-4 w-4" />
-                            )}
-                            Modify using AI
-                          </Button>
-                        </div>
                       </div>
                     )}
 
