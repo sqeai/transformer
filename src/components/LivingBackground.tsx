@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { motion } from 'framer-motion';
+import { useMemo } from 'react';
 import { useTheme } from 'next-themes';
 
 function shuffle<T>(arr: T[]): T[] {
@@ -97,7 +96,6 @@ const { stages: STAGES, pipes: PIPE_SEGMENTS } = (() => {
   return { stages, pipes };
 })();
 
-const STAGE_GLOW_DURATION = 3;
 const STAGE_OPACITY_BASE = 0.5;
 const STAGE_OPACITY_GLOW = 1;
 const STAGE_OPACITY_NEIGHBOR = 0.5 + (STAGE_OPACITY_GLOW - STAGE_OPACITY_BASE) * 0.5;
@@ -112,9 +110,6 @@ function getStageNeighborIndices(index: number): number[] {
   });
   return out;
 }
-
-const FLOW_TRAVEL_DURATION = 8;
-const FLOW_REPEAT_DELAY = 2.5;
 
 // Horizontal pipe paths for dashed animation (grid variant) — pipeline-style conduits
 const H_PIPES = [
@@ -151,20 +146,14 @@ export function LivingBackground({ variant = 'default' }: LivingBackgroundProps)
   const isDark = isGridVariant || resolvedTheme === 'dark';
   const c = isDark ? DARK : LIGHT;
 
-  const [glowStep, setGlowStep] = useState(0);
   const glowOrder = useMemo(() => shuffle(STAGES.map((_, i) => i)), []);
-
-  useEffect(() => {
-    const id = setInterval(() => setGlowStep((s) => s + 1), STAGE_GLOW_DURATION * 1000);
-    return () => clearInterval(id);
-  }, []);
 
   const n = STAGES.length;
   const quarter = Math.max(1, Math.floor(n / 4));
-  const primaryIndex = glowOrder[glowStep % n];
-  const primaryIndex2 = glowOrder[(glowStep + quarter) % n];
-  const primaryIndex3 = glowOrder[(glowStep + quarter * 2) % n];
-  const primaryIndex4 = glowOrder[(glowStep + quarter * 3) % n];
+  const primaryIndex = glowOrder[0];
+  const primaryIndex2 = glowOrder[quarter % n];
+  const primaryIndex3 = glowOrder[(quarter * 2) % n];
+  const primaryIndex4 = glowOrder[(quarter * 3) % n];
   const neighborSet = useMemo(() => {
     const set = new Set<number>([
       ...getStageNeighborIndices(primaryIndex),
@@ -260,13 +249,10 @@ export function LivingBackground({ variant = 'default' }: LivingBackgroundProps)
           {isGridVariant && (
             <g fill="none" stroke="url(#pipeH)" strokeWidth="0.9" filter="url(#pipeGlow)">
               {H_PIPES.map((t, i) => (
-                <motion.path
+                <path
                   key={`h-${i}`}
                   d={t.d}
                   strokeDasharray={`${t.dash} ${14 - t.dash}`}
-                  initial={{ strokeDashoffset: 0 }}
-                  animate={{ strokeDashoffset: -(t.dash + (14 - t.dash)) }}
-                  transition={{ duration: t.speed, repeat: Infinity, ease: 'linear' }}
                 />
               ))}
             </g>
@@ -276,15 +262,10 @@ export function LivingBackground({ variant = 'default' }: LivingBackgroundProps)
           {isGridVariant && (
             <g fill="none" stroke="url(#pipeV)" strokeWidth="0.9" filter="url(#pipeGlow)">
               {V_PIPES.map((t, i) => (
-                <motion.path
+                <path
                   key={`v-${i}`}
                   d={t.d}
                   strokeDasharray={`${t.dash} ${14 - t.dash}`}
-                  initial={{ strokeDashoffset: 0 }}
-                  animate={{
-                    strokeDashoffset: i % 2 === 0 ? -(t.dash + (14 - t.dash)) : t.dash + (14 - t.dash),
-                  }}
-                  transition={{ duration: t.speed, repeat: Infinity, ease: 'linear' }}
                 />
               ))}
             </g>
@@ -307,13 +288,12 @@ export function LivingBackground({ variant = 'default' }: LivingBackgroundProps)
                   ? STAGE_OPACITY_NEIGHBOR
                   : STAGE_OPACITY_BASE;
               return (
-                <motion.path
+                <path
                   key={`stage-${i}`}
                   d={stagePath(stage.x, stage.y, stage.w, stage.h)}
                   fillRule="evenodd"
-                  initial={{ fill: c.STAGE_FILL, opacity: STAGE_OPACITY_BASE }}
-                  animate={{ fill, opacity }}
-                  transition={{ duration: 0.4, ease: 'easeInOut' }}
+                  fill={fill}
+                  opacity={opacity}
                 />
               );
             })}
@@ -322,21 +302,12 @@ export function LivingBackground({ variant = 'default' }: LivingBackgroundProps)
           {/* Flow along pipeline segments — data moving through pipes */}
           <g fill="none" strokeWidth="1.5" strokeLinecap="round" filter="url(#flowGlow)">
             {PIPE_SEGMENTS.map((seg, i) => (
-              <motion.path
+              <path
                 key={`flow-${i}`}
                 d={`M ${seg.x1} ${seg.y1} L ${seg.x2} ${seg.y2}`}
                 pathLength={1}
                 stroke={`url(#flowGrad-${i})`}
                 strokeDasharray="0.12 1"
-                initial={{ strokeDashoffset: 0 }}
-                animate={{ strokeDashoffset: 20 }}
-                transition={{
-                  duration: FLOW_TRAVEL_DURATION,
-                  repeat: Infinity,
-                  repeatDelay: FLOW_REPEAT_DELAY + (i % 4) * 0.5,
-                  delay: (i % 3) * 0.2,
-                  ease: 'linear',
-                }}
               />
             ))}
           </g>
