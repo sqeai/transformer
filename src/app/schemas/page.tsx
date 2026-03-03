@@ -981,6 +981,7 @@ export default function SchemasPage() {
                       <Pencil className="h-4 w-4 shrink-0" />
                     )}
                     <span className="min-w-0 break-words">Describe to AI</span>
+                    <Sparkles className="h-3.5 w-3.5 ml-auto shrink-0 text-violet-500" />
                   </span>
                   <span className="w-full text-left text-muted-foreground text-sm font-normal break-words mt-1.5 block">
                     Paste any unstructured data and let AI determine the fields
@@ -999,7 +1000,6 @@ export default function SchemasPage() {
                   <span className="flex w-full items-center gap-2 font-medium text-sm">
                     <LayoutTemplate className="h-4 w-4 shrink-0" />
                     <span className="min-w-0 break-words">Use Preset</span>
-                    <Sparkles className="h-3.5 w-3.5 ml-auto shrink-0 text-violet-500" />
                   </span>
                   <span className="w-full text-left text-muted-foreground text-sm font-normal break-words mt-1.5 block">
                     Start from a predefined schema template for common data structures.
