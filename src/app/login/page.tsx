@@ -28,7 +28,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!loading && user) {
-      router.replace("/schemas");
+      router.replace("/datasets");
     }
   }, [user, loading, router]);
 
@@ -52,7 +52,7 @@ export default function LoginPage() {
       setError(err.message);
       setIsLoading(false);
     } else {
-      router.push("/schemas");
+      router.push("/datasets");
     }
   };
 

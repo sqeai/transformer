@@ -977,7 +977,7 @@ function NewDatasetPageContent() {
                               <div
                                 key={idx}
                                 className={cn(
-                                  "flex items-center gap-2 px-2 py-1 rounded text-sm cursor-pointer",
+                                  "flex items-center gap-2 px-2 py-1 rounded text-sm",
                                   selected ? "bg-primary/10" : "hover:bg-muted",
                                   previewSheet?.fileId === file.fileId && previewSheet?.sheetIndex === idx && "ring-1 ring-primary",
                                 )}
@@ -988,13 +988,16 @@ function NewDatasetPageContent() {
                                   onChange={() => toggleSheet(sheet)}
                                   className="rounded"
                                 />
-                                <button
+                                <span className="flex-1 truncate">{name || `Sheet ${idx + 1}`}</span>
+                                <Button
                                   type="button"
-                                  className="flex-1 text-left truncate"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
                                   onClick={() => setPreviewSheet(sheet)}
                                 >
-                                  {name || `Sheet ${idx + 1}`}
-                                </button>
+                                  Preview
+                                </Button>
                               </div>
                             );
                           })}
@@ -1128,14 +1131,24 @@ function NewDatasetPageContent() {
                   </div>
                 ))}
               </div>
-              {allJobsDone && (
-                <div className="mt-4 flex justify-end">
-                  <Button onClick={() => setStep("review")}>
-                    Continue to Review
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </div>
-              )}
+              <div className="mt-4 flex justify-end">
+                <Button
+                  onClick={() => setStep("review")}
+                  disabled={!allJobsDone}
+                >
+                  {!allJobsDone ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      Continue to Review
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </>
+                  )}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}
