@@ -137,12 +137,12 @@ function MarkdownContent({ content, className }: { content: string; className?: 
             </blockquote>
           ),
           table: ({ children, ...props }: ComponentPropsWithoutRef<"table">) => (
-            <div className="my-2 overflow-x-auto last:mb-0">
+            <div className="my-2 overflow-auto max-h-screen last:mb-0">
               <table className="w-full text-xs border-collapse" {...props}>{children}</table>
             </div>
           ),
           th: ({ children, ...props }: ComponentPropsWithoutRef<"th">) => (
-            <th className="border border-border bg-muted/50 px-2 py-1 text-left font-semibold" {...props}>
+            <th className="sticky top-0 z-10 border border-border bg-muted/50 px-2 py-1 text-left font-semibold" {...props}>
               {children}
             </th>
           ),

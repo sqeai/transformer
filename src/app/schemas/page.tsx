@@ -171,9 +171,9 @@ function PresetPanel({
                   Use This Preset
                 </Button>
               </div>
-              <ScrollArea className="flex-1 min-h-0 rounded-md border">
+              <div className="flex-1 min-h-0 rounded-md border overflow-auto">
                 <Table>
-                  <TableHeader className="sticky top-0 z-10 bg-background">
+                  <TableHeader>
                     <TableRow>
                       <TableHead className="w-12">#</TableHead>
                       <TableHead>Field Name</TableHead>
@@ -194,7 +194,7 @@ function PresetPanel({
                     ))}
                   </TableBody>
                 </Table>
-              </ScrollArea>
+              </div>
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center text-muted-foreground">
@@ -358,9 +358,9 @@ function DataSourcePanel({
                     Use This Table
                   </Button>
                 </div>
-                <ScrollArea className="flex-1 min-h-0 rounded-md border">
+                <div className="flex-1 min-h-0 rounded-md border overflow-auto">
                   <Table>
-                    <TableHeader className="sticky top-0 z-10 bg-background">
+                    <TableHeader>
                       <TableRow>
                         <TableHead className="w-12">#</TableHead>
                         <TableHead>Column Name</TableHead>
@@ -385,7 +385,7 @@ function DataSourcePanel({
                       ))}
                     </TableBody>
                   </Table>
-                </ScrollArea>
+                </div>
               </>
             ) : (
               <div className="flex flex-1 items-center justify-center text-muted-foreground">
@@ -1118,7 +1118,7 @@ export default function SchemasPage() {
                   Loading preview…
                 </div>
               ) : sheetPreview.length > 0 ? (
-                <div className="rounded-md border overflow-x-auto max-w-full">
+                <div className="rounded-md border overflow-auto max-w-full max-h-[400px]">
                   <Table className="min-w-max">
                     <TableHeader>
                       <TableRow>

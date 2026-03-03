@@ -20,7 +20,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -756,7 +755,7 @@ function NewDatasetPageContent() {
     };
   }, []);
 
-  // Modify using AI - creates a job and polls
+  // Modify with AI Data Cleanser - creates a job and polls
   const handleModifyWithAI = useCallback(async (sheetResult: SheetJobResult) => {
     if (!modifyPrompt.trim() || !schemaId) return;
 
@@ -1097,11 +1096,11 @@ function NewDatasetPageContent() {
                     Loading preview...
                   </div>
                 ) : preview ? (
-                  <ScrollArea className="w-full rounded-md border max-h-[700px] overflow-auto">
+                  <div className="w-full rounded-md border overflow-auto max-h-[700px]">
                     <Table>
-                      <TableHeader className="sticky top-0 z-10 bg-background">
+                      <TableHeader>
                         <TableRow>
-                          <TableHead className="w-14 whitespace-nowrap sticky bg-background">#</TableHead>
+                          <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
                           {preview.columns.map((col) => (
                             <TableHead key={col} className="whitespace-nowrap bg-background">{col}</TableHead>
                           ))}
@@ -1120,8 +1119,7 @@ function NewDatasetPageContent() {
                         ))}
                       </TableBody>
                     </Table>
-                    <ScrollBar orientation="horizontal" />
-                  </ScrollArea>
+                  </div>
                 ) : (
                   <div className="flex items-center justify-center py-10 text-muted-foreground">
                     Click a sheet on the left to preview its contents.
@@ -1315,9 +1313,9 @@ function NewDatasetPageContent() {
                           </div>
                         ) : originalPreview ? (
                           <div className="space-y-3">
-                            <ScrollArea className="w-full rounded-md border max-h-[700px] overflow-auto">
+                            <div className="w-full rounded-md border overflow-auto max-h-[700px]">
                               <Table>
-                                <TableHeader className="sticky top-0 z-10 bg-background">
+                                <TableHeader>
                                   <TableRow>
                                     <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
                                     {originalPreview.columns.map((col) => (
@@ -1338,8 +1336,7 @@ function NewDatasetPageContent() {
                                   ))}
                                 </TableBody>
                               </Table>
-                              <ScrollBar orientation="horizontal" />
-                            </ScrollArea>
+                            </div>
                             {originalPreview.totalRows > originalVisibleCount && (
                               <div className="flex flex-col items-center gap-2">
                                 <p className="text-xs text-muted-foreground">
@@ -1363,27 +1360,29 @@ function NewDatasetPageContent() {
 
                     {reviewSubTab === "modified" && (
                       <div className="space-y-4">
-                        <div className="flex gap-2">
+                        <div className="flex items-end gap-2">
                           <Textarea
                             placeholder="Describe how to modify this data (e.g. 'Remove all rows where amount is 0', 'Combine first and last name columns')..."
                             value={modifyPrompt}
                             onChange={(e) => setModifyPrompt(e.target.value)}
-                            className="flex-1"
+                            className="flex-4"
                             rows={2}
                             disabled={showModifyLoading}
                           />
-                          <Button
-                            onClick={() => handleModifyWithAI(currentResult)}
-                            disabled={!modifyPrompt.trim() || anySheetProcessing || currentSheetSubmitting}
-                            className="shrink-0"
-                          >
-                            {showModifyLoading ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                              <Sparkles className="mr-2 h-4 w-4" />
-                            )}
-                            Modify using AI
-                          </Button>
+                          <div className="shrink-0 self-end rounded-md bg-gradient-to-r from-fuchsia-500 via-violet-500 to-cyan-500 p-[2px] flex-1">
+                            <Button
+                              onClick={() => handleModifyWithAI(currentResult)}
+                              disabled={!modifyPrompt.trim() || anySheetProcessing || currentSheetSubmitting}
+                              className="rounded-[4px] border-0 bg-background px-3 text-xs font-medium text-foreground hover:bg-white min-h-[80px] "
+                            >
+                              {showModifyLoading ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              ) : (
+                                <Sparkles className="mr-2 h-4 w-4" />
+                              )}
+                              Modify with AI Data Cleanser
+                            </Button>
+                          </div>
                         </div>
 
                         {currentSheetProcessing && (
@@ -1403,9 +1402,9 @@ function NewDatasetPageContent() {
                           </div>
                         )}
 
-                        <ScrollArea className="w-full rounded-md border max-h-[700px] overflow-auto">
+                        <div className="w-full rounded-md border overflow-auto max-h-[700px]">
                           <Table>
-                            <TableHeader className="sticky top-0 z-10 bg-background">
+                            <TableHeader>
                               <TableRow>
                                 <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
                                 {transformedCols.map((col) => (
@@ -1426,8 +1425,7 @@ function NewDatasetPageContent() {
                               ))}
                             </TableBody>
                           </Table>
-                          <ScrollBar orientation="horizontal" />
-                        </ScrollArea>
+                        </div>
                         {transformedRows.length > modifiedVisibleCount && (
                           <div className="flex flex-col items-center gap-2">
                             <p className="text-xs text-muted-foreground text-center">
@@ -1580,9 +1578,9 @@ function NewDatasetPageContent() {
                                       </div>
 
                                       {snapshot && snapshot.sampleRows.length > 0 && (
-                                        <ScrollArea className="w-full rounded-md border max-h-[400px] overflow-auto">
+                                        <div className="w-full rounded-md border overflow-auto max-h-[400px]">
                                           <Table>
-                                            <TableHeader className="sticky top-0 z-10 bg-background">
+                                            <TableHeader>
                                               <TableRow>
                                                 <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
                                                 {snapshot.columns.map((col) => (
@@ -1603,8 +1601,7 @@ function NewDatasetPageContent() {
                                               ))}
                                             </TableBody>
                                           </Table>
-                                          <ScrollBar orientation="horizontal" />
-                                        </ScrollArea>
+                                        </div>
                                       )}
 
                                       {snapshot && snapshot.totalRows > snapshot.sampleRows.length && (

@@ -304,7 +304,7 @@ function DataPreviewSection({
   return (
     <div className="mt-3 rounded-md border overflow-auto max-h-[280px]">
       <Table>
-        <TableHeader className="sticky top-0 z-10 bg-background">
+        <TableHeader>
           <TableRow>
             <TableHead className="w-10 text-center text-[10px] text-muted-foreground/60 font-mono">
               #
@@ -601,7 +601,7 @@ export default function FinalSchemaTable({
 
       {!collapsed && (
         <CardContent className="pt-0">
-          <div className="rounded-md border overflow-auto">
+          <div className="rounded-md border overflow-auto max-h-[700px]">
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
@@ -609,7 +609,7 @@ export default function FinalSchemaTable({
             >
               <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
                 <Table>
-                  <TableHeader className="sticky top-0 z-10 bg-background">
+                  <TableHeader>
                     <TableRow>
                       <TableHead className="w-8 px-1" />
                       <TableHead className="w-8 text-center text-[10px]">#</TableHead>

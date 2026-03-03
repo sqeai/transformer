@@ -773,7 +773,7 @@ export default function DataSourceDetailPage({
                                         No data
                                       </div>
                                     ) : (
-                                      <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
+                                      <div className="overflow-auto max-h-[300px]">
                                         <Table>
                                           <TableHeader>
                                             <TableRow>

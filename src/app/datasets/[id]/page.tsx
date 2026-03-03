@@ -8,7 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -979,9 +978,9 @@ export default function DatasetPage() {
               )}
             </CardHeader>
             <CardContent>
-              <ScrollArea ref={scrollAreaRef} className="w-full rounded-md border">
+              <div ref={scrollAreaRef} className="w-full rounded-md border overflow-auto max-h-[700px]">
                 <Table>
-                  <TableHeader className="sticky top-0 z-10 bg-background">
+                  <TableHeader>
                     <TableRow>
                       <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
                       {columns.map((c) => <TableHead key={c} className="whitespace-nowrap bg-background">{c}</TableHead>)}
@@ -1000,8 +999,7 @@ export default function DatasetPage() {
                     ))}
                   </TableBody>
                 </Table>
-                <ScrollBar orientation="horizontal" />
-              </ScrollArea>
+              </div>
               {canLoadMore && (
                 <div className="flex flex-col items-center gap-2 mt-4">
                   <p className="text-xs text-muted-foreground">
@@ -1010,11 +1008,11 @@ export default function DatasetPage() {
                   <Button
                     variant="outline"
                     onClick={() => {
-                      const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]");
-                      const scrollTop = viewport?.scrollTop ?? 0;
+                      const container = scrollAreaRef.current;
+                      const scrollTop = container?.scrollTop ?? 0;
                       setVisibleRowCount((prev) => prev + ROWS_PER_PAGE);
                       requestAnimationFrame(() => {
-                        if (viewport) viewport.scrollTop = scrollTop;
+                        if (container) container.scrollTop = scrollTop;
                       });
                     }}
                   >
@@ -1184,9 +1182,9 @@ export default function DatasetPage() {
                             </div>
 
                             {snapshot && snapshot.sampleRows.length > 0 && (
-                              <ScrollArea className="w-full rounded-md border max-h-[400px] overflow-auto">
+                              <div className="w-full rounded-md border overflow-auto max-h-[400px]">
                                 <Table>
-                                  <TableHeader className="sticky top-0 z-10 bg-background">
+                                  <TableHeader>
                                     <TableRow>
                                       <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
                                       {snapshot.columns.map((col) => (
@@ -1207,8 +1205,7 @@ export default function DatasetPage() {
                                     ))}
                                   </TableBody>
                                 </Table>
-                                <ScrollBar orientation="horizontal" />
-                              </ScrollArea>
+                              </div>
                             )}
 
                             {snapshot && snapshot.totalRows > snapshot.sampleRows.length && (
