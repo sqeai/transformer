@@ -420,7 +420,7 @@ function ManualSchemaPanel({
   return (
     <>
       <DialogHeader className="shrink-0 pb-4">
-        <DialogTitle>Add Fields Manually</DialogTitle>
+        <DialogTitle>Describe to AI</DialogTitle>
         <DialogDescription>
           Paste headers, sample rows, JSON, or any notes. The schema agent will infer the fields for you.
         </DialogDescription>
@@ -948,25 +948,6 @@ export default function SchemasPage() {
                   type="button"
                   className={cn(
                     "rainbow-border h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left transition-colors",
-                    initialSelection === "preset"
-                      ? "border-transparent ring-2 ring-primary"
-                      : "border-transparent hover:bg-muted/50",
-                  )}
-                  onClick={() => setInitialSelection("preset")}
-                >
-                  <span className="flex w-full items-center gap-2 font-medium text-sm">
-                    <LayoutTemplate className="h-4 w-4 shrink-0" />
-                    <span className="min-w-0 break-words">Use Preset</span>
-                    <Sparkles className="h-3.5 w-3.5 ml-auto shrink-0 text-violet-500" />
-                  </span>
-                  <span className="w-full text-left text-muted-foreground text-sm font-normal break-words mt-1.5 block">
-                    Start from a predefined schema template for common data structures.
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className={cn(
-                    "rainbow-border h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left transition-colors",
                     initialSelection === "datasource"
                       ? "border-transparent ring-2 ring-primary"
                       : "border-transparent hover:bg-muted/50",
@@ -982,12 +963,10 @@ export default function SchemasPage() {
                     Import schema from a connected database table.
                   </span>
                 </button>
-
-                {/* Standard option without rainbow */}
                 <button
                   type="button"
                   className={cn(
-                    "h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left transition-colors",
+                    "rainbow-border h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left transition-colors",
                     initialSelection === "manual"
                       ? "border-primary ring-2 ring-primary"
                       : "border-border hover:bg-muted/50",
@@ -1001,10 +980,29 @@ export default function SchemasPage() {
                     ) : (
                       <Pencil className="h-4 w-4 shrink-0" />
                     )}
-                    <span className="min-w-0 break-words">Add fields manually</span>
+                    <span className="min-w-0 break-words">Describe to AI</span>
                   </span>
                   <span className="w-full text-left text-muted-foreground text-sm font-normal break-words mt-1.5 block">
-                    Create an empty schema and define each field yourself.
+                    Paste any unstructured data and let AI determine the fields
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left transition-colors",
+                    initialSelection === "preset"
+                      ? "border-transparent ring-2 ring-primary"
+                      : "border-transparent hover:bg-muted/50",
+                  )}
+                  onClick={() => setInitialSelection("preset")}
+                >
+                  <span className="flex w-full items-center gap-2 font-medium text-sm">
+                    <LayoutTemplate className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 break-words">Use Preset</span>
+                    <Sparkles className="h-3.5 w-3.5 ml-auto shrink-0 text-violet-500" />
+                  </span>
+                  <span className="w-full text-left text-muted-foreground text-sm font-normal break-words mt-1.5 block">
+                    Start from a predefined schema template for common data structures.
                   </span>
                 </button>
               </div>
