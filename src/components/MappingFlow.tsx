@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   ReactFlow,
   Background,
@@ -93,44 +93,75 @@ const nodeTypes: NodeTypes = {
 };
 
 interface MappingFlowProps {
-  pipeline: PipelineDescriptor;
+  pipeline?: PipelineDescriptor;
+  pipelines?: PipelineDescriptor[];
   className?: string;
 }
 
-export default function MappingFlow({ pipeline, className }: MappingFlowProps) {
+export default function MappingFlow({ pipeline, pipelines, className }: MappingFlowProps) {
+  const flowPipelines = useMemo(
+    () => (pipelines && pipelines.length > 0 ? pipelines : pipeline ? [pipeline] : []),
+    [pipeline, pipelines],
+  );
+
   const initialNodes: Node[] = useMemo(
-    () =>
-      pipeline.nodes.map((node, i) => ({
-        id: node.id,
-        type: "pipeline",
-        position: { x: i * 320, y: 200 },
-        data: {
-          label: node.label,
-          nodeType: node.type,
-          params: node.data,
-        },
-        draggable: true,
-      })),
-    [pipeline.nodes],
+    () => {
+      const nodes: Node[] = [];
+      flowPipelines.forEach((singlePipeline, pipelineIdx) => {
+        const yOffset = pipelineIdx * 260;
+        singlePipeline.nodes.forEach((node, nodeIdx) => {
+          nodes.push({
+            id: `pipeline-${pipelineIdx}-${node.id}`,
+            type: "pipeline",
+            position: { x: nodeIdx * 320, y: yOffset + 100 },
+            data: {
+              label: node.label,
+              nodeType: node.type,
+              params: node.data,
+            },
+            draggable: true,
+          });
+        });
+      });
+      return nodes;
+    },
+    [flowPipelines],
   );
 
   const initialEdges: Edge[] = useMemo(
-    () =>
-      pipeline.edges.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        animated: true,
-        style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
-      })),
-    [pipeline.edges],
+    () => {
+      const edges: Edge[] = [];
+      flowPipelines.forEach((singlePipeline, pipelineIdx) => {
+        singlePipeline.edges.forEach((edge) => {
+          edges.push({
+            id: `pipeline-${pipelineIdx}-${edge.id}`,
+            source: `pipeline-${pipelineIdx}-${edge.source}`,
+            target: `pipeline-${pipelineIdx}-${edge.target}`,
+            animated: true,
+            style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
+          });
+        });
+      });
+      return edges;
+    },
+    [flowPipelines],
   );
 
-  const [nodes, , onNodesChange] = useNodesState(initialNodes);
-  const [edges, , onEdgesChange] = useEdgesState(initialEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  useEffect(() => {
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+  }, [initialNodes, initialEdges, setEdges, setNodes]);
 
   return (
     <div className={cn("h-[700px] w-full rounded-lg border bg-background", className)}>
+      {flowPipelines.length > 1 && (
+        <div className="border-b px-3 py-2 text-xs text-muted-foreground">
+          Showing {flowPipelines.length} iterations in sequence.
+        </div>
+      )}
       <ReactFlow
         nodes={nodes}
         edges={edges}

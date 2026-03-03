@@ -33,6 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   useSchemaStore,
   flattenFields,
+  type PipelineDescriptor,
   type SheetSelection,
   type SheetJobResult,
   type TransformationMappingEntry,
@@ -64,7 +65,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const MappingFlow = dynamic(() => import("@/components/MappingFlow"), { ssr: false });
+const MappingFlow = dynamic<{
+  pipeline?: PipelineDescriptor;
+  pipelines?: PipelineDescriptor[];
+  className?: string;
+}>(() => import("@/components/MappingFlow"), { ssr: false });
 
 const PREVIEW_ROWS = 100;
 const POLL_INTERVAL_MS = 1500;
@@ -139,6 +144,67 @@ function mergeJobResultWithIterationHistory(
       ? [...seenJobIds, jobId]
       : seenJobIds,
   };
+}
+
+function buildPipelineFromIteration(
+  iteration: TransformationMappingEntry[],
+  iterationIndex: number,
+): PipelineDescriptor {
+  const iterationTag = `Iteration ${iterationIndex + 1}`;
+  const sourceId = `iteration-${iterationIndex}-source`;
+  const targetId = `iteration-${iterationIndex}-target`;
+
+  const nodes: PipelineDescriptor["nodes"] = [
+    {
+      id: sourceId,
+      type: "source",
+      label: `${iterationTag} Input`,
+      data: {},
+    },
+    ...iteration.map((entry, idx) => ({
+      id: `iteration-${iterationIndex}-step-${idx}`,
+      type: "map" as const,
+      label: `${entry.step}. ${entry.tool}`,
+      data: {
+        ...entry.params,
+        phase: entry.phase,
+        rowCountBefore: entry.rowCountBefore,
+        rowCountAfter: entry.rowCountAfter,
+      },
+    })),
+    {
+      id: targetId,
+      type: "target",
+      label: `${iterationTag} Output`,
+      data: {},
+    },
+  ];
+
+  const edges: PipelineDescriptor["edges"] = [];
+  const firstStepId = iteration.length > 0 ? `iteration-${iterationIndex}-step-0` : targetId;
+  edges.push({
+    id: `iteration-${iterationIndex}-edge-source`,
+    source: sourceId,
+    target: firstStepId,
+  });
+
+  for (let idx = 0; idx < iteration.length - 1; idx += 1) {
+    edges.push({
+      id: `iteration-${iterationIndex}-edge-${idx}`,
+      source: `iteration-${iterationIndex}-step-${idx}`,
+      target: `iteration-${iterationIndex}-step-${idx + 1}`,
+    });
+  }
+
+  if (iteration.length > 0) {
+    edges.push({
+      id: `iteration-${iterationIndex}-edge-target`,
+      source: `iteration-${iterationIndex}-step-${iteration.length - 1}`,
+      target: targetId,
+    });
+  }
+
+  return { nodes, edges };
 }
 
 function escapeCsvCell(value: unknown): string {
@@ -1166,7 +1232,7 @@ function NewDatasetPageContent() {
                     key={key}
                     type="button"
                     className={cn(
-                      "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm border transition-colors",
+                      "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm border transition-colors bg-background",
                       reviewSheetIndex === i
                         ? "bg-primary text-primary-foreground border-primary"
                         : "border-border text-muted-foreground hover:bg-muted",
@@ -1191,6 +1257,11 @@ function NewDatasetPageContent() {
               const transformedRows = currentResult.result?.transformedRows ?? [];
               const transformedCols = currentResult.result?.transformedColumns ?? [];
               const pipeline = currentResult.result?.pipeline;
+              const mappingIterations = currentResult.result?.mappingIterations
+                ?? (currentResult.result?.mapping ? [currentResult.result.mapping] : []);
+              const iterationPipelines = mappingIterations.map((iteration, iterationIdx) =>
+                buildPipelineFromIteration(iteration, iterationIdx),
+              );
               const currentSheetProcessing = currentResult.status === "pending" || currentResult.status === "running";
               const currentSheetKey = `${currentResult.sheet.fileId}:${currentResult.sheet.sheetIndex}`;
               const currentSheetSubmitting = modifySubmittingSheetKey === currentSheetKey;
@@ -1375,8 +1446,6 @@ function NewDatasetPageContent() {
                     )}
 
                     {reviewSubTab === "transformations" && (() => {
-                      const mappingIterations = currentResult.result?.mappingIterations
-                        ?? (currentResult.result?.mapping ? [currentResult.result.mapping] : []);
                       if (mappingIterations.length === 0) {
                         return (
                           <p className="text-muted-foreground text-center py-4">
@@ -1555,12 +1624,17 @@ function NewDatasetPageContent() {
                       );
                     })()}
 
-                    {reviewSubTab === "mapping" && pipeline && (
+                    {reviewSubTab === "mapping" && iterationPipelines.length > 0 && (
+                      <div className="overflow-auto">
+                        <MappingFlow pipelines={iterationPipelines} />
+                      </div>
+                    )}
+                    {reviewSubTab === "mapping" && iterationPipelines.length === 0 && pipeline && (
                       <div className="overflow-auto">
                         <MappingFlow pipeline={pipeline} />
                       </div>
                     )}
-                    {reviewSubTab === "mapping" && !pipeline && (
+                    {reviewSubTab === "mapping" && iterationPipelines.length === 0 && !pipeline && (
                       <p className="text-muted-foreground text-center py-4">
                         No pipeline data available.
                       </p>
