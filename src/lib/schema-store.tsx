@@ -59,6 +59,7 @@ export interface SheetJobResult {
   jobId: string;
   sheet: SheetSelection;
   status: "pending" | "running" | "completed" | "failed";
+  transformationIterationJobIds?: string[];
   result?: {
     transformedColumns: string[];
     transformedRows: Record<string, unknown>[];
@@ -66,6 +67,7 @@ export interface SheetJobResult {
     pipeline: PipelineDescriptor;
     outputFilePath?: string;
     mapping?: TransformationMappingEntry[];
+    mappingIterations?: TransformationMappingEntry[][];
   };
   error?: string;
 }

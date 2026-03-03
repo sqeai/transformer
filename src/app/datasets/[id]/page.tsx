@@ -107,7 +107,7 @@ export default function DatasetPage() {
   const [visibleRowCount, setVisibleRowCount] = useState(ROWS_PER_PAGE);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"data" | "transformations" | "activity">("data");
-  const [expandedTransformStep, setExpandedTransformStep] = useState<number | null>(null);
+  const [expandedTransformStep, setExpandedTransformStep] = useState<string | null>(null);
   const [transformPreviewMode, setTransformPreviewMode] = useState<"before" | "after">("after");
   const [activeSheetIdx, setActiveSheetIdx] = useState(0);
 
@@ -289,10 +289,19 @@ export default function DatasetPage() {
     if (!dataset?.mappingSnapshot) return [];
     const t = (dataset.mappingSnapshot as Record<string, unknown>).transformations;
     if (!Array.isArray(t)) return [];
-    return t as TransformationMappingEntry[][];
+    const isLegacyShape = t.every((sheetEntry) =>
+      Array.isArray(sheetEntry)
+      && sheetEntry.every((entry) => !Array.isArray(entry)),
+    );
+    if (isLegacyShape) {
+      return (t as TransformationMappingEntry[][]).map((sheetEntries) => [sheetEntries]);
+    }
+    return t as TransformationMappingEntry[][][];
   }, [dataset]);
 
-  const hasTransformations = allTransformations.some((arr) => arr.length > 0);
+  const hasTransformations = allTransformations.some((sheetIterations) =>
+    sheetIterations.some((iteration) => iteration.length > 0),
+  );
   const currentSheetTransformations = allTransformations[activeSheetIdx] ?? [];
 
   const saveName = async () => {
@@ -895,75 +904,89 @@ export default function DatasetPage() {
               ) : (
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">
-                    {currentSheetTransformations.length} transformation{currentSheetTransformations.length !== 1 ? "s" : ""} applied
+                    {currentSheetTransformations.length} iteration{currentSheetTransformations.length !== 1 ? "s" : ""} recorded
                   </p>
-                  {currentSheetTransformations.map((entry, idx) => {
-                    const isExpanded = expandedTransformStep === idx;
-                    const snapshot = transformPreviewMode === "before" ? entry.before : entry.after;
-                    const rowDelta = entry.rowCountAfter - entry.rowCountBefore;
-                    const colDelta = entry.outputColumns.length - entry.inputColumns.length;
-
-                    return (
-                      <div key={idx} className="rounded-lg border overflow-hidden">
-                        <button
-                          type="button"
-                          className="flex items-center gap-3 w-full px-4 py-3 text-left hover:bg-muted/50 transition-colors"
-                          onClick={() => {
-                            setExpandedTransformStep(isExpanded ? null : idx);
-                            setTransformPreviewMode("after");
-                          }}
-                        >
-                          <div className={cn(
-                            "flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium shrink-0",
-                            entry.phase === "cleansing"
-                              ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
-                              : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
-                          )}>
-                            {entry.step}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium">
-                                {entry.tool.charAt(0).toUpperCase() + entry.tool.slice(1)}
-                              </span>
-                              <span className={cn(
-                                "text-[10px] font-medium px-1.5 py-0.5 rounded-full uppercase tracking-wider",
+                  {currentSheetTransformations.map((iteration, iterationIdx) => (
+                    <div key={iterationIdx} className="space-y-2 rounded-md border p-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                          Iteration {iterationIdx + 1}
+                        </p>
+                        <span className="text-xs text-muted-foreground">
+                          {iteration.length} transformation{iteration.length !== 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      {iteration.length === 0 ? (
+                        <p className="text-sm text-muted-foreground py-2">
+                          No transformations were applied in this iteration.
+                        </p>
+                      ) : iteration.map((entry, idx) => {
+                        const stepKey = `${iterationIdx}:${idx}`;
+                        const isExpanded = expandedTransformStep === stepKey;
+                        const snapshot = transformPreviewMode === "before" ? entry.before : entry.after;
+                        const rowDelta = entry.rowCountAfter - entry.rowCountBefore;
+                        const colDelta = entry.outputColumns.length - entry.inputColumns.length;
+                        return (
+                          <div key={stepKey} className="rounded-lg border overflow-hidden">
+                            <button
+                              type="button"
+                              className="flex items-center gap-3 w-full px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+                              onClick={() => {
+                                setExpandedTransformStep(isExpanded ? null : stepKey);
+                                setTransformPreviewMode("after");
+                              }}
+                            >
+                              <div className={cn(
+                                "flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium shrink-0",
                                 entry.phase === "cleansing"
                                   ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
                                   : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
                               )}>
-                                {entry.phase}
-                              </span>
-                            </div>
-                            {entry.reasoning && (
-                              <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                                {entry.reasoning}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
-                            <span className={cn(
-                              rowDelta > 0 ? "text-green-600" : rowDelta < 0 ? "text-orange-600" : "",
-                            )}>
-                              {entry.rowCountBefore} → {entry.rowCountAfter} rows
-                            </span>
-                            {colDelta !== 0 && (
-                              <span className={cn(
-                                colDelta > 0 ? "text-green-600" : "text-orange-600",
-                              )}>
-                                {colDelta > 0 ? "+" : ""}{colDelta} col{Math.abs(colDelta) !== 1 ? "s" : ""}
-                              </span>
-                            )}
-                            {isExpanded ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4" />
-                            )}
-                          </div>
-                        </button>
+                                {entry.step}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium">
+                                    {entry.tool.charAt(0).toUpperCase() + entry.tool.slice(1)}
+                                  </span>
+                                  <span className={cn(
+                                    "text-[10px] font-medium px-1.5 py-0.5 rounded-full uppercase tracking-wider",
+                                    entry.phase === "cleansing"
+                                      ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                                      : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
+                                  )}>
+                                    {entry.phase}
+                                  </span>
+                                </div>
+                                {entry.reasoning && (
+                                  <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                                    {entry.reasoning}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
+                                <span className={cn(
+                                  rowDelta > 0 ? "text-green-600" : rowDelta < 0 ? "text-orange-600" : "",
+                                )}>
+                                  {entry.rowCountBefore} → {entry.rowCountAfter} rows
+                                </span>
+                                {colDelta !== 0 && (
+                                  <span className={cn(
+                                    colDelta > 0 ? "text-green-600" : "text-orange-600",
+                                  )}>
+                                    {colDelta > 0 ? "+" : ""}{colDelta} col{Math.abs(colDelta) !== 1 ? "s" : ""}
+                                  </span>
+                                )}
+                                {isExpanded ? (
+                                  <ChevronDown className="h-4 w-4" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4" />
+                                )}
+                              </div>
+                            </button>
 
-                        {isExpanded && (
-                          <div className="border-t px-4 py-3 space-y-3">
+                            {isExpanded && (
+                              <div className="border-t px-4 py-3 space-y-3">
                             <div className="flex items-center gap-2">
                               <div className="flex gap-1 rounded-md border p-0.5">
                                 <button
@@ -1031,11 +1054,13 @@ export default function DatasetPage() {
                                 Showing {snapshot.sampleRows.length} of {snapshot.totalRows} rows
                               </p>
                             )}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                        );
+                      })}
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>

@@ -90,6 +90,57 @@ interface UploadedSheetRef {
   filePath: string;
 }
 
+function isSameTransformationIteration(
+  a: TransformationMappingEntry[],
+  b: TransformationMappingEntry[],
+): boolean {
+  if (a.length !== b.length) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function mergeJobResultWithIterationHistory(
+  previous: SheetJobResult,
+  incoming: SheetJobResult["result"] | undefined,
+  status: SheetJobResult["status"],
+  jobId: string,
+): Pick<SheetJobResult, "result" | "transformationIterationJobIds"> {
+  const fallbackResult = incoming ?? previous.result;
+  if (!fallbackResult) {
+    return {
+      result: fallbackResult,
+      transformationIterationJobIds: previous.transformationIterationJobIds,
+    };
+  }
+
+  const previousIterations =
+    previous.result?.mappingIterations
+    ?? (previous.result?.mapping ? [previous.result.mapping] : []);
+  const incomingMapping = fallbackResult.mapping ?? [];
+  const seenJobIds = previous.transformationIterationJobIds ?? [];
+  const alreadyRecorded = seenJobIds.includes(jobId);
+  const iterationAlreadyExists = previousIterations.some((it) =>
+    isSameTransformationIteration(it, incomingMapping),
+  );
+
+  const nextIterations = (
+    status === "completed" && !alreadyRecorded && !iterationAlreadyExists
+  )
+    ? [...previousIterations, incomingMapping]
+    : previousIterations;
+
+  return {
+    result: {
+      ...fallbackResult,
+      mappingIterations: nextIterations,
+    },
+    transformationIterationJobIds: (
+      status === "completed" && !alreadyRecorded
+    )
+      ? [...seenJobIds, jobId]
+      : seenJobIds,
+  };
+}
+
 function escapeCsvCell(value: unknown): string {
   const text = String(value ?? "");
   if (/[",\n\r]/.test(text)) {
@@ -182,7 +233,7 @@ function NewDatasetPageContent() {
   // Review state
   const [reviewSheetIndex, setReviewSheetIndex] = useState(0);
   const [reviewSubTab, setReviewSubTab] = useState<"original" | "modified" | "transformations" | "mapping">("modified");
-  const [expandedTransformStep, setExpandedTransformStep] = useState<number | null>(null);
+  const [expandedTransformStep, setExpandedTransformStep] = useState<string | null>(null);
   const [transformPreviewMode, setTransformPreviewMode] = useState<"before" | "after">("after");
   const [modifyPrompt, setModifyPrompt] = useState("");
   const modifyPollingRef = useRef<NodeJS.Timeout | null>(null);
@@ -468,10 +519,18 @@ function NewDatasetPageContent() {
           const updated = prev.map((r) => {
             const job = jobMap.get(r.jobId);
             if (!job) return r;
+            const nextStatus = job.status as SheetJobResult["status"];
+            const merged = mergeJobResultWithIterationHistory(
+              r,
+              job.result as SheetJobResult["result"] | undefined,
+              nextStatus,
+              r.jobId,
+            );
             return {
               ...r,
-              status: job.status as SheetJobResult["status"],
-              result: job.result as SheetJobResult["result"],
+              status: nextStatus,
+              result: merged.result,
+              transformationIterationJobIds: merged.transformationIterationJobIds,
               error: job.error,
             };
           });
@@ -569,16 +628,23 @@ function NewDatasetPageContent() {
         if (!job) return;
 
         setJobResults((prev) =>
-          prev.map((r) =>
-            r.jobId === jobId
-              ? {
-                  ...r,
-                  status: job.status as SheetJobResult["status"],
-                  result: (job.result as SheetJobResult["result"] | undefined) ?? r.result,
-                  error: job.error,
-                }
-              : r,
-          ),
+          prev.map((r) => {
+            if (r.jobId !== jobId) return r;
+            const nextStatus = job.status as SheetJobResult["status"];
+            const merged = mergeJobResultWithIterationHistory(
+              r,
+              (job.result as SheetJobResult["result"] | undefined) ?? r.result,
+              nextStatus,
+              jobId,
+            );
+            return {
+              ...r,
+              status: nextStatus,
+              result: merged.result,
+              transformationIterationJobIds: merged.transformationIterationJobIds,
+              error: job.error,
+            };
+          }),
         );
 
         if (job.status === "completed" || job.status === "failed") {
@@ -724,7 +790,11 @@ function NewDatasetPageContent() {
             rows: allRows,
             mappingSnapshot: {
               toolsUsed: exportableResults.map((r) => r.result?.toolsUsed ?? []),
-              transformations: exportableResults.map((r) => r.result?.mapping ?? []),
+              transformations: exportableResults.map((r) => {
+                const iterations = r.result?.mappingIterations;
+                if (Array.isArray(iterations) && iterations.length > 0) return iterations;
+                return [r.result?.mapping ?? []];
+              }),
             },
           }),
         });
@@ -1291,8 +1361,9 @@ function NewDatasetPageContent() {
                     )}
 
                     {reviewSubTab === "transformations" && (() => {
-                      const mapping = currentResult.result?.mapping ?? [];
-                      if (mapping.length === 0) {
+                      const mappingIterations = currentResult.result?.mappingIterations
+                        ?? (currentResult.result?.mapping ? [currentResult.result.mapping] : []);
+                      if (mappingIterations.length === 0) {
                         return (
                           <p className="text-muted-foreground text-center py-4">
                             No transformation data available.
@@ -1303,25 +1374,40 @@ function NewDatasetPageContent() {
                       return (
                         <div className="space-y-3">
                           <p className="text-sm text-muted-foreground">
-                            The AI agent applied {mapping.length} transformation{mapping.length !== 1 ? "s" : ""} to cleanse and reshape the data.
+                            The AI agent ran {mappingIterations.length} iteration{mappingIterations.length !== 1 ? "s" : ""} for this sheet.
                           </p>
-                          <div className="space-y-2">
-                            {mapping.map((entry: TransformationMappingEntry, idx: number) => {
-                              const isExpanded = expandedTransformStep === idx;
-                              const snapshot = transformPreviewMode === "before" ? entry.before : entry.after;
-                              const rowDelta = entry.rowCountAfter - entry.rowCountBefore;
-                              const colDelta = entry.outputColumns.length - entry.inputColumns.length;
+                          <div className="space-y-4">
+                            {mappingIterations.map((iteration, iterationIdx) => (
+                              <div key={iterationIdx} className="space-y-2 rounded-md border p-3">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                                    Iteration {iterationIdx + 1}
+                                  </p>
+                                  <span className="text-xs text-muted-foreground">
+                                    {iteration.length} transformation{iteration.length !== 1 ? "s" : ""}
+                                  </span>
+                                </div>
+                                {iteration.length === 0 ? (
+                                  <p className="text-sm text-muted-foreground py-2">
+                                    No transformations were applied in this iteration.
+                                  </p>
+                                ) : iteration.map((entry: TransformationMappingEntry, idx: number) => {
+                                  const stepKey = `${iterationIdx}:${idx}`;
+                                  const isExpanded = expandedTransformStep === stepKey;
+                                  const snapshot = transformPreviewMode === "before" ? entry.before : entry.after;
+                                  const rowDelta = entry.rowCountAfter - entry.rowCountBefore;
+                                  const colDelta = entry.outputColumns.length - entry.inputColumns.length;
 
                               return (
                                 <div
-                                  key={idx}
+                                  key={stepKey}
                                   className="rounded-lg border overflow-hidden"
                                 >
                                   <button
                                     type="button"
                                     className="flex items-center gap-3 w-full px-4 py-3 text-left hover:bg-muted/50 transition-colors"
                                     onClick={() => {
-                                      setExpandedTransformStep(isExpanded ? null : idx);
+                                      setExpandedTransformStep(isExpanded ? null : stepKey);
                                       setTransformPreviewMode("after");
                                     }}
                                   >
@@ -1447,7 +1533,9 @@ function NewDatasetPageContent() {
                                   )}
                                 </div>
                               );
-                            })}
+                                })}
+                              </div>
+                            ))}
                           </div>
                         </div>
                       );
