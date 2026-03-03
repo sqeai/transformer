@@ -963,6 +963,18 @@ function NewDatasetPageContent() {
         {/* Step 1: Upload */}
         {step === "upload" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-3 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => router.push("/datasets")}>
+                Cancel
+              </Button>
+              <Button
+                onClick={submitJobs}
+                disabled={selectedSheets.length === 0}
+              >
+                Next: Process {selectedSheets.length} sheet{selectedSheets.length !== 1 ? "s" : ""}
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
             <Card className="lg:col-span-1">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Files & Sheets</CardTitle>
@@ -1143,19 +1155,6 @@ function NewDatasetPageContent() {
                 )}
               </CardContent>
             </Card>
-
-            <div className="lg:col-span-3 flex justify-end gap-2">
-              <Button variant="outline" onClick={() => router.push("/datasets")}>
-                Cancel
-              </Button>
-              <Button
-                onClick={submitJobs}
-                disabled={selectedSheets.length === 0}
-              >
-                Next: Process {selectedSheets.length} sheet{selectedSheets.length !== 1 ? "s" : ""}
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </div>
           </div>
         )}
 
@@ -1163,13 +1162,34 @@ function NewDatasetPageContent() {
         {step === "processing" && (
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-primary" />
-                AI Data Cleanser is Processing
-              </CardTitle>
-              <CardDescription>
-                Each sheet is being analyzed and transformed by the AI agent.
-              </CardDescription>
+              <div className="flex items-start justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                    AI Data Cleanser is Processing
+                  </CardTitle>
+                  <CardDescription className="mt-1.5">
+                    Each sheet is being analyzed and transformed by the AI agent.
+                  </CardDescription>
+                </div>
+                <Button
+                  onClick={() => setStep("review")}
+                  disabled={!allJobsDone}
+                  className="shrink-0"
+                >
+                  {!allJobsDone ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      Continue to Review
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </>
+                  )}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
@@ -1196,24 +1216,6 @@ function NewDatasetPageContent() {
                   </div>
                 ))}
               </div>
-              <div className="mt-4 flex justify-end">
-                <Button
-                  onClick={() => setStep("review")}
-                  disabled={!allJobsDone}
-                >
-                  {!allJobsDone ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      Continue to Review
-                      <ArrowRight className="ml-2 h-4 w-4" />
-                    </>
-                  )}
-                </Button>
-              </div>
             </CardContent>
           </Card>
         )}
@@ -1221,6 +1223,20 @@ function NewDatasetPageContent() {
         {/* Step 3: Review */}
         {step === "review" && (
           <div className="space-y-4">
+            <div className="flex justify-between">
+              <Button variant="outline" onClick={() => setStep("upload")} disabled={anySheetProcessing}>
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back
+              </Button>
+              <Button
+                onClick={() => setStep("export")}
+                disabled={exportableCount === 0 || anySheetProcessing}
+              >
+                Next: Export {exportableCount} sheet{exportableCount !== 1 ? "s" : ""}
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+
             {/* Sheet tabs */}
             <div className="flex flex-wrap gap-2 border-b pb-2">
               {reviewableResults.map((r, i) => {
@@ -1639,19 +1655,6 @@ function NewDatasetPageContent() {
               );
             })()}
 
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep("upload")} disabled={anySheetProcessing}>
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back
-              </Button>
-              <Button
-                onClick={() => setStep("export")}
-                disabled={exportableCount === 0 || anySheetProcessing}
-              >
-                Next: Export {exportableCount} sheet{exportableCount !== 1 ? "s" : ""}
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </div>
           </div>
         )}
 
@@ -1659,10 +1662,38 @@ function NewDatasetPageContent() {
         {step === "export" && (
           <Card>
             <CardHeader>
-              <CardTitle>Export Dataset</CardTitle>
-              <CardDescription>
-                Choose where to save {exportableCount} processed sheet{exportableCount !== 1 ? "s" : ""}.
-              </CardDescription>
+              <div className="flex items-start justify-between">
+                <div>
+                  <CardTitle>Export Dataset</CardTitle>
+                  <CardDescription className="mt-1.5">
+                    Choose where to save {exportableCount} processed sheet{exportableCount !== 1 ? "s" : ""}.
+                  </CardDescription>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <Button variant="outline" onClick={() => setStep("review")}>
+                    <ArrowLeft className="mr-2 h-4 w-4" />
+                    Back
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={handleDownloadExcel}
+                    disabled={downloadingExcel || exportableCount === 0}
+                  >
+                    {downloadingExcel ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="mr-2 h-4 w-4" />
+                    )}
+                    Download Excel
+                  </Button>
+                  <Button onClick={handleExport} disabled={exporting}>
+                    {exporting ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : null}
+                    {exportTargetDatasetId === "__new" ? "Create Dataset" : "Add to Dataset"}
+                  </Button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -1706,32 +1737,6 @@ function NewDatasetPageContent() {
                   ))}
               </div>
 
-              <div className="flex justify-between pt-2">
-                <Button variant="outline" onClick={() => setStep("review")}>
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  Back
-                </Button>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={handleDownloadExcel}
-                    disabled={downloadingExcel || exportableCount === 0}
-                  >
-                    {downloadingExcel ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Download className="mr-2 h-4 w-4" />
-                    )}
-                    Download Excel
-                  </Button>
-                  <Button onClick={handleExport} disabled={exporting}>
-                    {exporting ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : null}
-                    {exportTargetDatasetId === "__new" ? "Create Dataset" : "Add to Dataset"}
-                  </Button>
-                </div>
-              </div>
             </CardContent>
           </Card>
         )}
