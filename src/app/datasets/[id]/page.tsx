@@ -92,6 +92,8 @@ interface ExportTableCandidate {
   compatible: boolean;
 }
 
+const CREATE_NEW_SCHEMA_OPTION = "__create_new_schema__";
+
 export default function DatasetPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -130,7 +132,9 @@ export default function DatasetPage() {
   const [exportTables, setExportTables] = useState<ExportTableCandidate[]>([]);
   const [loadingExportTables, setLoadingExportTables] = useState(false);
   const [exportTablesError, setExportTablesError] = useState<string | null>(null);
-  const [exportTargetSchema, setExportTargetSchema] = useState("public");
+  const [exportTargetSchema, setExportTargetSchema] = useState("");
+  const [useNewExportSchema, setUseNewExportSchema] = useState(false);
+  const [newExportSchemaName, setNewExportSchemaName] = useState("");
   const [exportTargetTable, setExportTargetTable] = useState("");
   const [showCreateTableForm, setShowCreateTableForm] = useState(false);
   const [exportingToDb, setExportingToDb] = useState(false);
@@ -160,16 +164,32 @@ export default function DatasetPage() {
     return true;
   }, [dataset, allApproved]);
 
+  const availableExportSchemas = useMemo(() => {
+    const unique = new Set(
+      exportTables
+        .map((table) => table.schema?.trim())
+        .filter((schema): schema is string => Boolean(schema))
+    );
+    return Array.from(unique).sort((a, b) => a.localeCompare(b));
+  }, [exportTables]);
+
+  const resolvedExportTargetSchema = useMemo(() => {
+    if (showCreateTableForm && useNewExportSchema) {
+      return newExportSchemaName.trim();
+    }
+    return exportTargetSchema.trim() || "public";
+  }, [showCreateTableForm, useNewExportSchema, newExportSchemaName, exportTargetSchema]);
+
   const createTargetAlreadyExists = useMemo(() => {
     if (!showCreateTableForm) return false;
-    const schema = (exportTargetSchema.trim() || "public").toLowerCase();
+    const schema = resolvedExportTargetSchema.toLowerCase();
     const table = exportTargetTable.trim().toLowerCase();
     if (!table) return false;
     return exportTables.some((candidate) => (
       candidate.schema.toLowerCase() === schema
       && candidate.name.toLowerCase() === table
     ));
-  }, [showCreateTableForm, exportTargetSchema, exportTargetTable, exportTables]);
+  }, [showCreateTableForm, resolvedExportTargetSchema, exportTargetTable, exportTables]);
 
   const handleAddToDatasetUpload = useCallback(
     (schemaId: string, files: UploadedFileEntry[]) => {
@@ -412,7 +432,7 @@ export default function DatasetPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           dataSourceId: selectedDataSourceId,
-          targetSchema: exportTargetSchema.trim() || "public",
+            targetSchema: resolvedExportTargetSchema || "public",
           targetTable: exportTargetTable.trim(),
           createTable: showCreateTableForm,
         }),
@@ -495,13 +515,20 @@ export default function DatasetPage() {
         return a.name.localeCompare(b.name);
       });
       setExportTables(candidates);
+      const schemas = Array.from(new Set(candidates.map((candidate) => candidate.schema))).sort((a, b) => a.localeCompare(b));
+      if (!useNewExportSchema && schemas.length > 0) {
+        const currentSchema = exportTargetSchema.trim();
+        if (!currentSchema || !schemas.includes(currentSchema)) {
+          setExportTargetSchema(schemas[0]);
+        }
+      }
     } catch (err: unknown) {
       setExportTables([]);
       setExportTablesError((err as Error).message);
     } finally {
       setLoadingExportTables(false);
     }
-  }, [selectedDataSourceId, columns, normalizeColumnKey]);
+  }, [selectedDataSourceId, columns, normalizeColumnKey, exportTargetSchema, useNewExportSchema]);
 
   useEffect(() => {
     if (!exportDialogOpen || !selectedDataSourceId) return;
@@ -525,7 +552,9 @@ export default function DatasetPage() {
     setSelectedDataSourceId("");
     setDataSources([]);
     setExportTargetTable("");
-    setExportTargetSchema("public");
+    setExportTargetSchema("");
+    setUseNewExportSchema(false);
+    setNewExportSchemaName("");
     setShowCreateTableForm(false);
     setExportTables([]);
     setExportTablesError(null);
@@ -1295,11 +1324,40 @@ export default function DatasetPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Schema / Dataset</label>
-                      <Input
-                        value={exportTargetSchema}
-                        onChange={(e) => setExportTargetSchema(e.target.value)}
-                        placeholder="public"
-                      />
+                      <Select
+                        value={useNewExportSchema ? CREATE_NEW_SCHEMA_OPTION : exportTargetSchema}
+                        onValueChange={(value) => {
+                          if (value === CREATE_NEW_SCHEMA_OPTION) {
+                            setUseNewExportSchema(true);
+                            return;
+                          }
+                          setUseNewExportSchema(false);
+                          setExportTargetSchema(value);
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select schema / dataset..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableExportSchemas.length === 0 ? (
+                            <SelectItem value={CREATE_NEW_SCHEMA_OPTION}>Create new schema / dataset</SelectItem>
+                          ) : (
+                            <>
+                              {availableExportSchemas.map((schema) => (
+                                <SelectItem key={schema} value={schema}>{schema}</SelectItem>
+                              ))}
+                              <SelectItem value={CREATE_NEW_SCHEMA_OPTION}>+ Create new schema / dataset</SelectItem>
+                            </>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      {useNewExportSchema ? (
+                        <Input
+                          value={newExportSchemaName}
+                          onChange={(e) => setNewExportSchemaName(e.target.value)}
+                          placeholder="new_schema"
+                        />
+                      ) : null}
                     </div>
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Table Name</label>
@@ -1369,7 +1427,13 @@ export default function DatasetPage() {
             <Button variant="outline" onClick={() => setExportDialogOpen(false)}>Cancel</Button>
             <Button
               onClick={exportToDatabase}
-              disabled={exportingToDb || !selectedDataSourceId || !exportTargetTable.trim() || createTargetAlreadyExists}
+              disabled={
+                exportingToDb
+                || !selectedDataSourceId
+                || !exportTargetTable.trim()
+                || (showCreateTableForm && !resolvedExportTargetSchema.trim())
+                || createTargetAlreadyExists
+              }
             >
               {exportingToDb ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
               {exportingToDb ? "Exporting..." : "Export"}

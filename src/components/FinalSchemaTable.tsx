@@ -85,6 +85,13 @@ function toSnakeCase(value: string): string {
     .replace(/_+/g, "_");
 }
 
+function toSnakeCaseDraft(value: string): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/_+/g, "_");
+}
+
 function flattenWithPath(fields: SchemaField[], prefix = ""): FlatField[] {
   const out: FlatField[] = [];
   const sorted = [...fields].sort((a, b) => a.order - b.order);
@@ -464,7 +471,7 @@ export default function FinalSchemaTable({
 
   const handleRename = useCallback(
     (index: number, newName: string) => {
-      const normalizedName = toSnakeCase(newName);
+      const normalizedName = toSnakeCaseDraft(newName);
       const next = flat.map((item, i) => {
         if (i !== index) return item;
         const basePath = item.path.split(".").slice(0, -1).join(".");

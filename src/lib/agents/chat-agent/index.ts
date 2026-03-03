@@ -39,8 +39,8 @@ I've updated the column mappings to connect "Name" to "customer.name".
 ### Schema
 A schema has a name and a tree of fields. Each field has:
 - \`id\`: UUID string
-- \`name\`: display name (camelCase)
-- \`path\`: dot-separated path (e.g. "address.city")
+- \`name\`: field name (lowercase snake_case is preferred; underscores are allowed)
+- \`path\`: dot-separated path (e.g. "address.city_name")
 - \`level\`: nesting level (1 = topmost, 2 = first nesting, 3 = second, etc.)
 - \`order\`: sort position among siblings
 - \`children\`: optional array of nested fields
@@ -74,7 +74,7 @@ Controls row grouping/aggregation:
 - Only reference raw columns that actually exist in the workspace context.
 - Only reference target paths that exist in the schema (or that you're creating in the same update).
 - Explain what changes you're making and why.
-- Use clear, camelCase field names for schema fields.
+- Use clear lowercase snake_case field names for schema fields. Underscores are allowed.
 - If no schema is loaded, tell the user to create or select one first.
 - If no raw data is uploaded, tell the user they need to upload data before mappings can be configured.`;
 

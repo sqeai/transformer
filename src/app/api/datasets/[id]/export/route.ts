@@ -330,17 +330,12 @@ export async function POST(
     }
 
     const admin = createAdminClient();
-    await admin
-      .from("datasets")
-      .update({ state: "completed" })
-      .eq("id", id);
-
     await admin.from("dataset_logs").insert({
       dataset_id: id,
       user_id: userId!,
       action: "export",
       from_state: ds.state as string,
-      to_state: "completed",
+      to_state: ds.state as string,
       comment: `Exported to ${dsType}: ${schemaName}.${targetTable}`,
       metadata: { dataSourceId, targetSchema: schemaName, targetTable, dsType, rowCount: rows.length },
     });

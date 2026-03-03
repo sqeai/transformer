@@ -34,6 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { useSchemaStore, flattenFields } from "@/lib/schema-store";
 import {
   Plus,
@@ -85,7 +86,7 @@ function toSnakeCase(value: string): string {
     .replace(/_+/g, "_");
 }
 
-type DialogMode = "initial" | "preset" | "datasource";
+type DialogMode = "initial" | "preset" | "datasource" | "manual";
 
 interface DataSourceEntry {
   id: string;
@@ -405,6 +406,55 @@ function DataSourcePanel({
   );
 }
 
+function ManualSchemaPanel({
+  prompt,
+  onPromptChange,
+  onCreateSchema,
+  creating,
+}: {
+  prompt: string;
+  onPromptChange: (next: string) => void;
+  onCreateSchema: () => void;
+  creating: boolean;
+}) {
+  return (
+    <>
+      <DialogHeader className="shrink-0 pb-4">
+        <DialogTitle>Add Fields Manually</DialogTitle>
+        <DialogDescription>
+          Paste headers, sample rows, JSON, or any notes. The schema agent will infer the fields for you.
+        </DialogDescription>
+      </DialogHeader>
+      <div className="flex flex-1 min-h-0 flex-col gap-4">
+        <Textarea
+          value={prompt}
+          onChange={(e) => onPromptChange(e.target.value)}
+          placeholder="Paste anything here, for example:
+invoice_no, invoice_date, customer_name, currency, subtotal, vat, total
+
+or
+
+JSON sample:
+{&quot;customerId&quot;:&quot;C-001&quot;,&quot;orderDate&quot;:&quot;2026-03-03&quot;,&quot;amount&quot;:125000}"
+          className="flex-1 min-h-[360px] resize-none font-mono text-sm"
+        />
+        <div className="flex justify-end">
+          <Button onClick={onCreateSchema} disabled={!prompt.trim() || creating}>
+            {creating ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Inferring fields...
+              </>
+            ) : (
+              "Create Schema"
+            )}
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function SchemasPage() {
   const { user } = useAuth();
   const { schemas, schemasLoading, deleteSchema, addSchema } = useSchemaStore();
@@ -413,7 +463,7 @@ export default function SchemasPage() {
   const [uploading, setUploading] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [addSchemaOpen, setAddSchemaOpen] = useState(false);
-  const [addingManual, setAddingManual] = useState(false);
+  const [creatingFromManual, setCreatingFromManual] = useState(false);
   const [sheetPickerOpen, setSheetPickerOpen] = useState(false);
   const [sheetNames, setSheetNames] = useState<string[]>([]);
   const [activeSheetIndex, setActiveSheetIndex] = useState(0);
@@ -425,6 +475,7 @@ export default function SchemasPage() {
   // Expanded dialog state
   const [dialogMode, setDialogMode] = useState<DialogMode>("initial");
   const [initialSelection, setInitialSelection] = useState<"upload" | "manual" | "preset" | "datasource" | null>(null);
+  const [manualPrompt, setManualPrompt] = useState("");
   const [selectedPreset, setSelectedPreset] = useState<SchemaPreset | null>(null);
   const [creatingPreset, setCreatingPreset] = useState(false);
 
@@ -509,21 +560,35 @@ export default function SchemasPage() {
   );
 
   const handleAddFieldsManually = async () => {
-    setAddingManual(true);
+    if (!manualPrompt.trim()) return;
+    setCreatingFromManual(true);
     try {
+      const res = await fetch("/api/schema-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: manualPrompt }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to infer schema fields");
+      }
+      const data = await res.json();
       const schema: FinalSchema = {
         id: crypto.randomUUID(),
-        name: "New Schema",
-        fields: [],
+        name: typeof data?.schemaName === "string" && data.schemaName.trim()
+          ? data.schemaName.trim()
+          : "generated_schema",
+        fields: Array.isArray(data?.fields) ? data.fields : [],
         createdAt: new Date().toISOString(),
       };
       const created = await addSchema(schema);
       setAddSchemaOpen(false);
+      resetDialogMode();
       router.push(`/schemas/${created.id}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to create schema");
     } finally {
-      setAddingManual(false);
+      setCreatingFromManual(false);
     }
   };
 
@@ -553,6 +618,7 @@ export default function SchemasPage() {
   const resetDialogMode = () => {
     setDialogMode("initial");
     setInitialSelection(null);
+    setManualPrompt("");
     setSelectedPreset(null);
     setSelectedDataSourceId("");
     setTables([]);
@@ -571,7 +637,7 @@ export default function SchemasPage() {
         handleUploadClick();
         break;
       case "manual":
-        handleAddFieldsManually();
+        setDialogMode("manual");
         break;
       case "preset":
         setDialogMode("preset");
@@ -691,7 +757,7 @@ export default function SchemasPage() {
     }
   };
 
-  const isExpanded = dialogMode === "preset" || dialogMode === "datasource";
+  const isExpanded = dialogMode === "preset" || dialogMode === "datasource" || dialogMode === "manual";
 
   return (
     <DashboardLayout>
@@ -927,10 +993,10 @@ export default function SchemasPage() {
                       : "border-border hover:bg-muted/50",
                   )}
                   onClick={() => setInitialSelection("manual")}
-                  disabled={addingManual}
+                  disabled={creatingFromManual}
                 >
                   <span className="flex w-full items-center gap-2 font-medium text-sm">
-                    {addingManual ? (
+                    {creatingFromManual ? (
                       <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
                     ) : (
                       <Pencil className="h-4 w-4 shrink-0" />
@@ -945,9 +1011,9 @@ export default function SchemasPage() {
               <div className="flex justify-end pt-1">
                 <Button
                   onClick={handleConfirmSelection}
-                  disabled={!initialSelection || uploading || addingManual}
+                  disabled={!initialSelection || uploading || creatingFromManual}
                 >
-                  {(uploading || addingManual) && (
+                  {(uploading || creatingFromManual) && (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   )}
                   Confirm
@@ -990,6 +1056,14 @@ export default function SchemasPage() {
                     columnsLoading={columnsLoading}
                     onCreateFromDataSource={handleCreateFromDataSource}
                     creating={creatingFromDataSource}
+                  />
+                )}
+                {dialogMode === "manual" && (
+                  <ManualSchemaPanel
+                    prompt={manualPrompt}
+                    onPromptChange={setManualPrompt}
+                    onCreateSchema={handleAddFieldsManually}
+                    creating={creatingFromManual}
                   />
                 )}
               </div>

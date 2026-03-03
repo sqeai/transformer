@@ -201,7 +201,50 @@ export interface DataCleansingPlan {
   hierarchyValueColumn?: string;
 }
 
+export interface InferredSchemaField {
+  name: string;
+  dataType: SqlCompatibleType;
+}
+
+export interface InferredSchemaFromText {
+  schemaName: string;
+  fields: InferredSchemaField[];
+}
+
 const PLACEHOLDER_COLUMN_HEADER_RE = /^Column\s+\d+$/i;
+
+const SCHEMA_FROM_TEXT_PROMPT = `You are a schema design agent for a data cleansing application.
+
+You will receive unstructured user input that may include:
+- sample headers
+- sample rows
+- natural language requirements
+- JSON, CSV-like text, or copied spreadsheet fragments
+
+Your task:
+1. Infer a practical schema name.
+2. Infer the target output fields needed for this data.
+3. Return concise field names in lower_snake_case.
+4. Recommend SQL-compatible data types.
+5. Be inclusive: if uncertain, still propose useful fields.
+
+Use only these data types:
+- STRING
+- INTEGER
+- FLOAT
+- NUMERIC
+- BOOLEAN
+- DATE
+- DATETIME
+- TIMESTAMP
+
+Respond ONLY JSON:
+{
+  "schemaName": string,
+  "fields": [
+    { "name": string, "dataType": string }
+  ]
+}`;
 
 function stringifyForHeader(value: unknown): string {
   if (value == null) return "";
@@ -617,5 +660,45 @@ export async function buildDataCleansingPlanWithLLM(
         ? parsed.hierarchyValueColumn
         : undefined,
   };
+}
+
+export async function inferSchemaFromTextWithLLM(input: string): Promise<InferredSchemaFromText> {
+  const text = await callLlm(
+    SCHEMA_FROM_TEXT_PROMPT,
+    `Infer a data schema from this input:\n\n${input}`,
+  );
+
+  let parsed: { schemaName?: unknown; fields?: Array<{ name?: unknown; dataType?: unknown }> };
+  try {
+    parsed = JSON.parse(cleanJsonResponse(text));
+  } catch {
+    throw new Error(
+      `LLM returned invalid JSON for schema inference. Raw response:\n${text.slice(0, 500)}`,
+    );
+  }
+
+  const schemaName =
+    typeof parsed.schemaName === "string" && parsed.schemaName.trim()
+      ? parsed.schemaName.trim()
+      : "generated_schema";
+
+  const fields: InferredSchemaField[] = Array.isArray(parsed.fields)
+    ? parsed.fields
+        .map((field) => {
+          const name = String(field.name ?? "").trim();
+          if (!name) return null;
+          return {
+            name,
+            dataType: normalizeSqlCompatibleType(field.dataType),
+          };
+        })
+        .filter((field): field is InferredSchemaField => field !== null)
+    : [];
+
+  if (fields.length === 0) {
+    throw new Error("Could not infer any fields from your input");
+  }
+
+  return { schemaName, fields };
 }
 
