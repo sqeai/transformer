@@ -19,7 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { DatasetRecord, DatasetState, AppUser } from "@/lib/types";
+import type { DatasetRecord, DatasetState, AppUser, SchemaField } from "@/lib/types";
 import {
   ArrowLeft,
   Check,
@@ -33,6 +33,7 @@ import {
   History,
   Layers,
   Loader2,
+  Sparkles,
 
   Plus,
   Send,
@@ -44,7 +45,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import ExcelJS from "exceljs";
-import { useSchemaStore, type UploadedFileEntry, type TransformationMappingEntry } from "@/lib/schema-store";
+import { flattenFields, useSchemaStore, type UploadedFileEntry, type TransformationMappingEntry } from "@/lib/schema-store";
 import { UploadDatasetDialog } from "@/components/UploadDatasetDialog";
 import {
   DropdownMenu,
@@ -90,6 +91,12 @@ interface ExportTableCandidate {
   requiredColumns: number;
   matchPercent: number;
   compatible: boolean;
+}
+
+interface AiCleanseJobResult {
+  transformedRows: Record<string, unknown>[];
+  toolsUsed?: unknown;
+  mapping?: TransformationMappingEntry[];
 }
 
 const CREATE_NEW_SCHEMA_OPTION = "__create_new_schema__";
@@ -138,6 +145,9 @@ export default function DatasetPage() {
   const [exportTargetTable, setExportTargetTable] = useState("");
   const [showCreateTableForm, setShowCreateTableForm] = useState(false);
   const [exportingToDb, setExportingToDb] = useState(false);
+  const [aiCleanserDialogOpen, setAiCleanserDialogOpen] = useState(false);
+  const [aiCleanserInstructions, setAiCleanserInstructions] = useState("");
+  const [aiCleanserRunning, setAiCleanserRunning] = useState(false);
 
   const { setDatasetWorkflow, resetDatasetWorkflow } = useSchemaStore();
 
@@ -247,6 +257,23 @@ export default function DatasetPage() {
       .replace(/^_+|_+$/g, "");
   }, []);
 
+  const escapeCsvCell = useCallback((value: unknown): string => {
+    const text = String(value ?? "");
+    if (/[",\n\r]/.test(text)) {
+      return `"${text.replace(/"/g, "\"\"")}"`;
+    }
+    return text;
+  }, []);
+
+  const rowsToCsv = useCallback((csvColumns: string[], csvRows: Record<string, unknown>[]): string => {
+    const lines: string[] = [];
+    lines.push(csvColumns.map((col) => escapeCsvCell(col)).join(","));
+    for (const row of csvRows) {
+      lines.push(csvColumns.map((col) => escapeCsvCell(row[col])).join(","));
+    }
+    return lines.join("\n");
+  }, [escapeCsvCell]);
+
   const fetchDataSources = useCallback(async () => {
     setLoadingDataSources(true);
     try {
@@ -303,6 +330,126 @@ export default function DatasetPage() {
     sheetIterations.some((iteration) => iteration.length > 0),
   );
   const currentSheetTransformations = allTransformations[activeSheetIdx] ?? [];
+
+  const runAiDataCleanser = async () => {
+    if (!dataset || columns.length === 0 || dataset.rows.length === 0) return;
+    setAiCleanserRunning(true);
+    try {
+      const schemaRes = await fetch(`/api/schemas/${dataset.schemaId}`);
+      const schemaData = await schemaRes.json().catch(() => ({}));
+      if (!schemaRes.ok) throw new Error(schemaData.error ?? "Failed to load schema");
+
+      const schemaFields = Array.isArray(schemaData?.schema?.fields)
+        ? (schemaData.schema.fields as SchemaField[])
+        : [];
+      const targetPaths = flattenFields(schemaFields)
+        .filter((field) => !field.children?.length)
+        .map((field) => field.path);
+
+      if (targetPaths.length === 0) {
+        throw new Error("Schema does not contain any leaf fields");
+      }
+
+      const presignRes = await fetch("/api/sheets/presign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: `${dataset.name} (dataset ai cleanse)`,
+          type: "intermediary",
+          dimensions: {
+            rowCount: dataset.rows.length,
+            columnCount: columns.length,
+          },
+        }),
+      });
+      const presignData = await presignRes.json().catch(() => ({}));
+      if (!presignRes.ok) throw new Error(presignData.error ?? "Failed to prepare upload");
+
+      const csvPayload = rowsToCsv(columns, dataset.rows);
+      const uploadRes = await fetch(String(presignData.uploadUrl), {
+        method: "PUT",
+        headers: { "Content-Type": "text/csv" },
+        body: csvPayload,
+      });
+      if (!uploadRes.ok) throw new Error("Failed to upload dataset for AI cleansing");
+
+      const jobRes = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "data_cleanse",
+          sheetId: String(presignData.sheetId),
+          payload: {
+            filePath: String(presignData.filePath),
+            targetPaths,
+            sheetName: dataset.name,
+            userDirective: aiCleanserInstructions.trim() || undefined,
+          },
+        }),
+      });
+      const jobData = await jobRes.json().catch(() => ({}));
+      if (!jobRes.ok) throw new Error(jobData.error ?? "Failed to create AI cleanse job");
+
+      await fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
+
+      const jobId = String(jobData.jobId);
+      let nextResult: AiCleanseJobResult | null = null;
+      for (let attempt = 0; attempt < 240; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const statusRes = await fetch(`/api/jobs?ids=${encodeURIComponent(jobId)}`);
+        const statusData = await statusRes.json().catch(() => ({}));
+        if (!statusRes.ok) continue;
+        const job = Array.isArray(statusData.jobs) ? statusData.jobs[0] : null;
+        if (!job) continue;
+        if (job.status === "completed") {
+          nextResult = (job.result ?? null) as AiCleanseJobResult | null;
+          break;
+        }
+        if (job.status === "failed") {
+          throw new Error(String(job.error ?? "AI Data Cleanser job failed"));
+        }
+      }
+
+      if (!nextResult) {
+        throw new Error("Timed out waiting for AI Data Cleanser");
+      }
+      const finalResult = nextResult;
+
+      const nextRows = Array.isArray(finalResult.transformedRows) ? finalResult.transformedRows : [];
+      const existingSnapshot = (dataset.mappingSnapshot ?? {}) as Record<string, unknown>;
+      const existingToolsUsed = Array.isArray(existingSnapshot.toolsUsed) ? existingSnapshot.toolsUsed : [];
+      const nextTransformations = allTransformations.length > 0 ? [...allTransformations] : [[]];
+      if (!nextTransformations[0]) nextTransformations[0] = [];
+      nextTransformations[0] = [
+        ...nextTransformations[0],
+        Array.isArray(finalResult.mapping) ? finalResult.mapping : [],
+      ];
+
+      const patchRes = await fetch(`/api/datasets/${dataset.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          replaceRows: nextRows,
+          mappingSnapshot: {
+            ...existingSnapshot,
+            toolsUsed: [...existingToolsUsed, finalResult.toolsUsed ?? []],
+            transformations: nextTransformations,
+          },
+        }),
+      });
+      const patchData = await patchRes.json().catch(() => ({}));
+      if (!patchRes.ok) throw new Error(patchData.error ?? "Failed to save cleansed dataset");
+
+      toast.success(`AI Data Cleanser updated dataset (${nextRows.length} rows)`);
+      setAiCleanserDialogOpen(false);
+      setAiCleanserInstructions("");
+      await fetchDataset();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to run AI Data Cleanser");
+    } finally {
+      setAiCleanserRunning(false);
+    }
+  };
 
   const saveName = async () => {
     if (!dataset) return;
@@ -810,11 +957,26 @@ export default function DatasetPage() {
         {/* Data tab */}
         {activeTab === "data" && (
           <Card>
-            <CardHeader>
-              <CardTitle>Data</CardTitle>
-              <CardDescription>
-                Showing {visibleRows.length} of {dataset.rows.length} rows
-              </CardDescription>
+            <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle>Data</CardTitle>
+                <CardDescription>
+                  Showing {visibleRows.length} of {dataset.rows.length} rows
+                </CardDescription>
+              </div>
+              {!isReadOnlyApprover && (
+                <div className="rounded-md bg-[linear-gradient(90deg,#f59e0b,#ef4444,#8b5cf6,#3b82f6,#10b981)] p-[1px]">
+                  <Button
+                    variant="outline"
+                    className="border-0 bg-background hover:bg-muted"
+                    onClick={() => setAiCleanserDialogOpen(true)}
+                    disabled={aiCleanserRunning || dataset.rows.length === 0}
+                  >
+                    {aiCleanserRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                    AI Data Cleanser
+                  </Button>
+                </div>
+              )}
             </CardHeader>
             <CardContent>
               <ScrollArea ref={scrollAreaRef} className="w-full rounded-md border">
@@ -1141,6 +1303,51 @@ export default function DatasetPage() {
         datasetName={dataset.name}
         onUpload={handleAddToDatasetUpload}
       />
+
+      <Dialog open={aiCleanserDialogOpen} onOpenChange={setAiCleanserDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4" />
+              AI Data Cleanser
+            </DialogTitle>
+            <DialogDescription>
+              Transform this dataset using the same AI agent. Output columns stay locked to the current schema.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">
+              Instructions <span className="text-muted-foreground font-normal">(optional)</span>
+            </label>
+            <Textarea
+              rows={4}
+              value={aiCleanserInstructions}
+              onChange={(e) => setAiCleanserInstructions(e.target.value)}
+              placeholder="Example: Normalize customer names and trim whitespace; remove obvious summary rows."
+              disabled={aiCleanserRunning}
+            />
+            <p className="text-xs text-muted-foreground">
+              This replaces current dataset rows with AI-cleansed rows while preserving this dataset&apos;s schema.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setAiCleanserDialogOpen(false)}
+              disabled={aiCleanserRunning}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={runAiDataCleanser}
+              disabled={aiCleanserRunning || dataset.rows.length === 0}
+            >
+              {aiCleanserRunning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {aiCleanserRunning ? "Running..." : "Run Cleanser"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Submit for approval dialog */}
       <Dialog open={approverDialogOpen} onOpenChange={setApproverDialogOpen}>

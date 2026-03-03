@@ -577,17 +577,9 @@ function NewDatasetPageContent() {
     };
   }, []);
 
-  // Auto-transition from processing to review
   const allJobsDone = jobResults.length > 0 && jobResults.every(
     (r) => r.status === "completed" || r.status === "failed" || !r.jobId,
   );
-
-  useEffect(() => {
-    if (step === "processing" && allJobsDone) {
-      const timer = setTimeout(() => setStep("review"), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [step, allJobsDone]);
 
   // Load original data for review tab
   const loadOriginalPreview = useCallback(async (sheetResult: SheetJobResult) => {

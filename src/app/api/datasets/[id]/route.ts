@@ -136,6 +136,7 @@ export async function PATCH(
   let body: {
     name?: string;
     appendRows?: Record<string, unknown>[];
+    replaceRows?: Record<string, unknown>[];
     mappingSnapshot?: Record<string, unknown>;
   };
   try {
@@ -160,7 +161,17 @@ export async function PATCH(
   if (body.mappingSnapshot && typeof body.mappingSnapshot === "object") {
     updates.mapping_snapshot = body.mappingSnapshot;
   }
-  if (Array.isArray(body.appendRows) && body.appendRows.length > 0) {
+  const hasReplaceRows = Array.isArray(body.replaceRows);
+  const hasAppendRows = Array.isArray(body.appendRows) && body.appendRows.length > 0;
+
+  if (hasReplaceRows && hasAppendRows) {
+    return NextResponse.json(
+      { error: "Provide either replaceRows or appendRows, not both" },
+      { status: 400 },
+    );
+  }
+
+  if (hasReplaceRows || hasAppendRows) {
     const { data: schemaFieldRows, error: schemaFieldError } = await supabase!
       .from("schema_fields")
       .select("path, data_type")
@@ -171,9 +182,12 @@ export async function PATCH(
     const fieldTypeMap = buildFieldTypeMap(
       ((schemaFieldRows ?? []) as Array<{ path: string; data_type: string | null }>)
     );
-    const sanitizedAppendRows = normalizeRowsForStorage(body.appendRows, fieldTypeMap);
+    const normalizedIncoming = normalizeRowsForStorage(
+      hasReplaceRows ? (body.replaceRows ?? []) : (body.appendRows ?? []),
+      fieldTypeMap,
+    );
     const currentRows = Array.isArray(existing.rows) ? existing.rows : [];
-    const nextRows = [...currentRows, ...sanitizedAppendRows];
+    const nextRows = hasReplaceRows ? normalizedIncoming : [...currentRows, ...normalizedIncoming];
     updates.rows = nextRows;
     updates.row_count = nextRows.length;
   }
