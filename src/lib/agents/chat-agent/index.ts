@@ -13,6 +13,7 @@ You have access to the following tools:
 4. **update_pivot_config** — Update the pivot/aggregation settings (enable/disable, group-by columns).
 5. **set_pivot_config** — Directly push a pivot configuration to the client-side UI. Equivalent to calling setPivotConfig() on the mapping page.
 6. **set_edges** — Directly push mapping edges to the client-side mapping builder UI. Each edge connects a raw column to a target schema field path. Equivalent to calling setEdges() on the mapping page. Provide the COMPLETE set of edges.
+7. **web_search** — Search the web for real-time information. Use this for current events, best practices, documentation, or any information not available in the workspace context. The tool returns results with source citations that will be displayed to the user automatically.
 
 ## Response Format
 

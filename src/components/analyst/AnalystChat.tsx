@@ -136,6 +136,42 @@ function extractVisualizations(toolParts: unknown[]): VisualizationPayload[] {
   return visualizations;
 }
 
+interface Citation {
+  title: string;
+  url: string;
+}
+
+function extractCitations(toolParts: unknown[]): Citation[] {
+  const citations: Citation[] = [];
+  for (const part of toolParts) {
+    const p = part as Record<string, unknown>;
+    if (p.toolName !== "web_search") continue;
+
+    const output = p.output;
+    let content = "";
+    if (output && typeof output === "object" && "kwargs" in (output as Record<string, unknown>)) {
+      content = ((output as Record<string, unknown>).kwargs as Record<string, unknown>)?.content as string ?? "";
+    } else if (typeof output === "string") {
+      content = output;
+    }
+
+    const citationMatch = content.match(/<!-- CITATIONS_JSON:(.*?) -->/);
+    if (citationMatch) {
+      try {
+        const parsed = JSON.parse(citationMatch[1]) as Citation[];
+        for (const cite of parsed) {
+          if (!citations.some(c => c.url === cite.url)) {
+            citations.push(cite);
+          }
+        }
+      } catch {
+        // skip parse errors
+      }
+    }
+  }
+  return citations;
+}
+
 function MarkdownContent({
   content,
   className,
@@ -323,6 +359,7 @@ function AssistantMessage({
   response,
   toolParts,
   visualizations,
+  citations,
   hasThinking,
   hasResponse,
   hasTools,
@@ -331,6 +368,7 @@ function AssistantMessage({
   response: string;
   toolParts: unknown[];
   visualizations: VisualizationPayload[];
+  citations: Citation[];
   hasThinking: boolean;
   hasResponse: boolean;
   hasTools: boolean;
@@ -482,6 +520,28 @@ function AssistantMessage({
         {hasResponse && (
           <div className="rounded-2xl rounded-bl-md bg-muted text-foreground px-3.5 py-2.5 text-sm leading-relaxed">
             <MarkdownContent content={response} />
+          </div>
+        )}
+
+        {citations.length > 0 && (
+          <div className="mt-1">
+            <p className="text-[11px] font-semibold text-muted-foreground mb-1">Sources</p>
+            <div className="flex flex-wrap gap-1.5">
+              {citations.slice(0, 6).map((cite, i) => (
+                <a
+                  key={i}
+                  href={cite.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 transition-colors border border-blue-100 dark:border-blue-800"
+                >
+                  {cite.title.length > 35 ? cite.title.substring(0, 35) + "..." : cite.title}
+                  <svg className="h-3 w-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </a>
+              ))}
+            </div>
           </div>
         )}
 
@@ -926,6 +986,7 @@ export function AnalystChat() {
 
             const { thinking, response } = parseThinking(fullText);
             const visualizations = extractVisualizations(toolParts);
+            const citations = extractCitations(toolParts);
             const hasThinking = thinking.trim().length > 0;
             const hasResponse = response.trim().length > 0;
             const hasTools = toolParts.length > 0;
@@ -940,6 +1001,7 @@ export function AnalystChat() {
                 response={response}
                 toolParts={toolParts}
                 visualizations={visualizations}
+                citations={citations}
                 hasThinking={hasThinking}
                 hasResponse={hasResponse}
                 hasTools={hasTools}

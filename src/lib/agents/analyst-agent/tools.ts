@@ -1,5 +1,6 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import Anthropic from "@anthropic-ai/sdk";
 
 export interface DataSourceContext {
   id: string;
@@ -114,10 +115,12 @@ Provide chart-agnostic data with a labelKey (the categorical/label column) and v
 
 Always include the sql parameter with the SQL query you used to produce the data, so the user can see it.
 
-Use this tool when:
+Use this tool proactively when:
 - The user asks to "show", "plot", "chart", "visualize", or "graph" data
-- Query results would benefit from visual representation (trends, comparisons, distributions)
+- Query results would benefit from visual representation (trends, comparisons, distributions, rankings)
+- A chart would strengthen your analysis or make the data easier to understand — do NOT wait for the user to explicitly request a chart
 - There are numeric values that can be meaningfully charted
+- You are presenting a comparison, trend, breakdown, or ranking that is better understood visually
 
 Choose the best default chartType for the data shape:
 - Categorical comparisons → "bar"
@@ -138,5 +141,94 @@ Keep data to ≤50 rows for readability; aggregate in SQL if needed.`,
     },
   );
 
-  return [queryDatabaseTool, listAvailableTablesTool, visualizeDataTool];
+  const webSearchTool = tool(
+    async (input) => {
+      const client = new Anthropic();
+      try {
+        const response = await client.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4096,
+          tools: [
+            {
+              type: "web_search_20250305",
+              name: "web_search",
+              max_uses: 5,
+            },
+          ],
+          messages: [
+            {
+              role: "user",
+              content: `Search the web for: ${input.query}\n\nProvide a summary of the most relevant and recent information you find.`,
+            },
+          ],
+        } as Parameters<typeof client.messages.create>[0]);
+
+        const outputLines: string[] = [`**Web Search Results for '${input.query}':**\n`];
+        const citations: { title: string; url: string }[] = [];
+
+        for (const block of response.content) {
+          if (block.type === "text") {
+            outputLines.push(block.text);
+
+            if ((block as Record<string, unknown>).citations && Array.isArray((block as Record<string, unknown>).citations)) {
+              for (const citation of (block as Record<string, unknown>).citations as Array<{ url?: string; title?: string }>) {
+                if (citation.url && !citations.some(c => c.url === citation.url)) {
+                  citations.push({
+                    title: citation.title || citation.url,
+                    url: citation.url,
+                  });
+                }
+              }
+            }
+          }
+
+          if (block.type === "web_search_tool_result") {
+            const content = (block as Anthropic.WebSearchToolResultBlock).content;
+            if (Array.isArray(content)) {
+              for (const item of content) {
+                if (item.type === "web_search_result" && item.url) {
+                  if (!citations.some(c => c.url === item.url)) {
+                    citations.push({
+                      title: item.title || item.url,
+                      url: item.url,
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if (citations.length > 0) {
+          outputLines.push("\n\n---\n**Sources:**");
+          citations.forEach((c, i) => {
+            outputLines.push(`${i + 1}. [${c.title}](${c.url})`);
+          });
+
+          outputLines.push(`\n\n<!-- CITATIONS_JSON:${JSON.stringify(citations)} -->`);
+        }
+
+        return outputLines.length > 1 ? outputLines.join("\n") : "No results found.";
+      } catch (err: unknown) {
+        return `Web search error: ${(err as Error).message}`;
+      }
+    },
+    {
+      name: "web_search",
+      description: `Search the web for real-time information. Use this when:
+- The user asks about current events, market data, news, or anything requiring up-to-date information
+- You need external context to supplement database analysis (e.g. industry benchmarks, economic indicators, company news)
+- The user's question cannot be answered from the database alone
+- You need to verify or contextualize findings with external data
+- Market comparisons, industry benchmarks, valuation multiples, competitor analysis
+- Any question containing: "market", "industry", "benchmark", "comparable", "peers", "external"
+
+Returns a summary of search results with source citations.`,
+      schema: z.object({
+        query: z.string().describe("The search query to look up on the web"),
+      }),
+    },
+  );
+
+  return [queryDatabaseTool, listAvailableTablesTool, visualizeDataTool, webSearchTool];
 }

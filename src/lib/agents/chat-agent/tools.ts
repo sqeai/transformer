@@ -1,5 +1,6 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import Anthropic from "@anthropic-ai/sdk";
 
 const schemaFieldSchema: z.ZodType = z.lazy(() =>
   z.object({
@@ -137,6 +138,94 @@ export function createGetWorkspaceContextTool(workspaceJson: string | null) {
   );
 }
 
+export const webSearchTool = tool(
+  async (input) => {
+    const client = new Anthropic();
+    try {
+      const response = await client.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 4096,
+        tools: [
+          {
+            type: "web_search_20250305",
+            name: "web_search",
+            max_uses: 5,
+          },
+        ],
+        messages: [
+          {
+            role: "user",
+            content: `Search the web for: ${input.query}\n\nProvide a summary of the most relevant and recent information you find.`,
+          },
+        ],
+      } as Parameters<typeof client.messages.create>[0]);
+
+      const outputLines: string[] = [`**Web Search Results for '${input.query}':**\n`];
+      const citations: { title: string; url: string }[] = [];
+
+      for (const block of response.content) {
+        if (block.type === "text") {
+          outputLines.push(block.text);
+
+          if ((block as Record<string, unknown>).citations && Array.isArray((block as Record<string, unknown>).citations)) {
+            for (const citation of (block as Record<string, unknown>).citations as Array<{ url?: string; title?: string }>) {
+              if (citation.url && !citations.some(c => c.url === citation.url)) {
+                citations.push({
+                  title: citation.title || citation.url,
+                  url: citation.url,
+                });
+              }
+            }
+          }
+        }
+
+        const blockType = (block as Record<string, unknown>).type;
+        if (blockType === "web_search_tool_result") {
+          const content = (block as Record<string, unknown>).content;
+          if (Array.isArray(content)) {
+            for (const item of content as Array<{ type?: string; url?: string; title?: string }>) {
+              if (item.type === "web_search_result" && item.url) {
+                if (!citations.some(c => c.url === item.url)) {
+                  citations.push({
+                    title: item.title || item.url,
+                    url: item.url,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (citations.length > 0) {
+        outputLines.push("\n\n---\n**Sources:**");
+        citations.forEach((c, i) => {
+          outputLines.push(`${i + 1}. [${c.title}](${c.url})`);
+        });
+
+        outputLines.push(`\n\n<!-- CITATIONS_JSON:${JSON.stringify(citations)} -->`);
+      }
+
+      return outputLines.length > 1 ? outputLines.join("\n") : "No results found.";
+    } catch (err: unknown) {
+      return `Web search error: ${(err as Error).message}`;
+    }
+  },
+  {
+    name: "web_search",
+    description: `Search the web for real-time information. Use this when:
+- The user asks about current events, market data, news, or anything requiring up-to-date information
+- You need external context to supplement analysis (e.g. industry benchmarks, best practices, documentation)
+- The user's question cannot be answered from the workspace context alone
+- You need to verify or contextualize findings with external data
+
+Returns a summary of search results with source citations.`,
+    schema: z.object({
+      query: z.string().describe("The search query to look up on the web"),
+    }),
+  },
+);
+
 export function createTools(workspaceContext: string | null) {
   return [
     updateSchemaTool,
@@ -145,5 +234,6 @@ export function createTools(workspaceContext: string | null) {
     setPivotConfigTool,
     setEdgesTool,
     createGetWorkspaceContextTool(workspaceContext),
+    webSearchTool,
   ];
 }
