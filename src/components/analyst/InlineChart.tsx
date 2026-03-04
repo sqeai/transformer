@@ -78,6 +78,21 @@ function fmtCell(value: unknown): string {
 const fmtAxis = (v: number) => v.toLocaleString("en-US");
 const fmtTooltip = (v: number | undefined, name: string | undefined): [string, string] => [(v ?? 0).toLocaleString("en-US"), name ?? ""];
 
+function estimateYAxisWidth(data: Record<string, unknown>[], valueKeys: string[]): number {
+  let maxLen = 0;
+  for (const row of data) {
+    for (const key of valueKeys) {
+      const v = row[key];
+      if (v == null) continue;
+      const formatted = typeof v === "number" || !Number.isNaN(Number(v))
+        ? Number(v).toLocaleString("en-US")
+        : String(v);
+      if (formatted.length > maxLen) maxLen = formatted.length;
+    }
+  }
+  return Math.max(40, Math.min(maxLen * 7.5 + 12, 160));
+}
+
 function WaterfallView({
   data,
   labelKey,
@@ -103,12 +118,17 @@ function WaterfallView({
     });
   }, [data, labelKey, valueKey]);
 
+  const yAxisWidth = useMemo(
+    () => estimateYAxisWidth(waterfallData, ["value", "start", "end"]),
+    [waterfallData],
+  );
+
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={waterfallData}>
         <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
         <XAxis dataKey="name" tick={{ fontSize: 11 }} tickLine={false} />
-        <YAxis tick={{ fontSize: 11 }} tickLine={false} tickFormatter={fmtAxis} />
+        <YAxis width={yAxisWidth} tick={{ fontSize: 11 }} tickLine={false} tickFormatter={fmtAxis} />
         <Tooltip contentStyle={tooltipStyle} formatter={fmtTooltip} />
         <Bar dataKey="start" stackId="waterfall" fill="transparent" />
         <Bar dataKey="value" stackId="waterfall">
@@ -227,6 +247,8 @@ function ChartView({
   labelKey: string;
   valueKeys: string[];
 }) {
+  const yAxisWidth = useMemo(() => estimateYAxisWidth(data, valueKeys), [data, valueKeys]);
+
   if (!data || data.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -242,7 +264,7 @@ function ChartView({
           <BarChart data={data}>
             <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
             <XAxis dataKey={labelKey} tick={{ fontSize: 11 }} tickLine={false} />
-            <YAxis tick={{ fontSize: 11 }} tickLine={false} tickFormatter={fmtAxis} />
+            <YAxis width={yAxisWidth} tick={{ fontSize: 11 }} tickLine={false} tickFormatter={fmtAxis} />
             <Tooltip contentStyle={tooltipStyle} formatter={fmtTooltip} />
             <Legend wrapperStyle={{ fontSize: "11px" }} />
             {valueKeys.map((key, i) => (
@@ -264,7 +286,7 @@ function ChartView({
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
             <XAxis dataKey={labelKey} tick={{ fontSize: 11 }} tickLine={false} />
-            <YAxis tick={{ fontSize: 11 }} tickLine={false} tickFormatter={fmtAxis} />
+            <YAxis width={yAxisWidth} tick={{ fontSize: 11 }} tickLine={false} tickFormatter={fmtAxis} />
             <Tooltip contentStyle={tooltipStyle} formatter={fmtTooltip} />
             <Legend wrapperStyle={{ fontSize: "11px" }} />
             {valueKeys.map((key, i) => (
@@ -325,6 +347,7 @@ function ChartView({
               type="category"
             />
             <YAxis
+              width={yAxisWidth}
               dataKey={yValueKey}
               name={yValueKey}
               tick={{ fontSize: 11 }}
