@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -8,12 +9,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import { DataTable } from "@/components/DataTable";
 import {
   ArrowRight,
   ChevronDown,
   ChevronRight,
   FileSpreadsheet,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SheetSelection, UploadedFileEntry } from "@/lib/schema-store";
@@ -32,6 +35,8 @@ interface UploadStepProps {
   previewSheet: SheetSelection | null;
   preview: PreviewState | null;
   previewLoading: boolean;
+  aiInstructions: Record<string, string>;
+  onAiInstructionsChange: (sheetKey: string, value: string) => void;
   onToggleFile: (fileId: string) => void;
   onToggleSheet: (sheet: SheetSelection) => void;
   onToggleAllSheetsForFile: (fileId: string) => void;
@@ -49,6 +54,8 @@ export function UploadStep({
   previewSheet,
   preview,
   previewLoading,
+  aiInstructions,
+  onAiInstructionsChange,
   onToggleFile,
   onToggleSheet,
   onToggleAllSheetsForFile,
@@ -58,6 +65,14 @@ export function UploadStep({
   onSubmit,
   isSheetSelected,
 }: UploadStepProps) {
+  const previewSheetKey = previewSheet ? `${previewSheet.fileId}:${previewSheet.sheetIndex}` : "";
+  const currentInstructions = previewSheetKey ? (aiInstructions[previewSheetKey] ?? "") : "";
+  const [aiSectionOpen, setAiSectionOpen] = useState(currentInstructions.length > 0);
+
+  useEffect(() => {
+    setAiSectionOpen(currentInstructions.length > 0);
+  }, [previewSheetKey]);
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <div className="lg:col-span-3 flex justify-end gap-2">
@@ -191,7 +206,40 @@ export function UploadStep({
               : "Select a sheet to preview"}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          {previewSheet && (
+            <div className="rounded-md border p-3 space-y-2">
+              <button
+                type="button"
+                className="flex items-center gap-2 w-full text-left"
+                onClick={() => setAiSectionOpen((prev) => !prev)}
+              >
+                {aiSectionOpen ? (
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                )}
+                <Sparkles className="h-4 w-4 shrink-0 text-purple-500" />
+                <span className="text-sm font-medium">AI Instructions</span>
+                <span className="text-xs text-muted-foreground ml-auto">Optional</span>
+              </button>
+              {aiSectionOpen && (
+                <div className="space-y-1.5 pt-1">
+                  <Textarea
+                    placeholder="e.g. Only include rows where the status is 'active'. Amounts should be in USD..."
+                    value={currentInstructions}
+                    onChange={(e) => onAiInstructionsChange(previewSheetKey, e.target.value)}
+                    rows={3}
+                    className="resize-y text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Instructions for this sheet will be passed to the AI agent as a high-priority directive.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {preview ? (
             <DataTable
               columns={preview.columns}

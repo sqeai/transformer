@@ -129,6 +129,7 @@ function NewDatasetPageContent() {
   const [selectedSheets, setSelectedSheets] = useState<SheetSelection[]>(datasetWorkflow.selectedSheets);
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   const hasManuallyToggledSheets = useRef(false);
+  const [aiInstructions, setAiInstructions] = useState<Record<string, string>>(datasetWorkflow.aiInstructions ?? {});
 
   const [previewSheet, setPreviewSheet] = useState<SheetSelection | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
@@ -267,8 +268,8 @@ function NewDatasetPageContent() {
   // --- Persist workflow state ---
 
   useEffect(() => {
-    setDatasetWorkflow({ step, selectedSheets, jobResults, confirmedSheetIds: [] });
-  }, [step, selectedSheets, jobResults]);
+    setDatasetWorkflow({ step, selectedSheets, jobResults, confirmedSheetIds: [], aiInstructions });
+  }, [step, selectedSheets, jobResults, aiInstructions]);
 
   // --- Sheet selection ---
 
@@ -366,10 +367,12 @@ function NewDatasetPageContent() {
         const uploaded = await uploadSheetCsv({ sheetName: sheet.sheetName, columns: parsed.columns, rows: parsed.rows, type: "raw" });
         nextUploadedRefs[`${sheet.fileId}:${sheet.sheetIndex}`] = uploaded;
 
+        const sheetKey = `${sheet.fileId}:${sheet.sheetIndex}`;
+        const sheetDirective = aiInstructions[sheetKey]?.trim() || undefined;
         const res = await fetch("/api/jobs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "data_cleanse", sheetId: uploaded.sheetId, payload: { filePath: uploaded.filePath, targetPaths, sheetName: sheet.sheetName } }),
+          body: JSON.stringify({ type: "data_cleanse", sheetId: uploaded.sheetId, payload: { filePath: uploaded.filePath, targetPaths, sheetName: sheet.sheetName, userDirective: sheetDirective } }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Failed to create job");
@@ -383,7 +386,7 @@ function NewDatasetPageContent() {
     setJobResults(results);
     fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
     startPolling(results);
-  }, [schemaId, selectedSheets, files, targetPaths, uploadSheetCsv, startPolling]);
+  }, [schemaId, selectedSheets, files, targetPaths, aiInstructions, uploadSheetCsv, startPolling]);
 
   useEffect(() => { return () => { if (pollingRef.current) clearInterval(pollingRef.current); }; }, []);
 
@@ -645,6 +648,10 @@ function NewDatasetPageContent() {
             previewSheet={previewSheet}
             preview={preview}
             previewLoading={previewLoading}
+            aiInstructions={aiInstructions}
+            onAiInstructionsChange={(sheetKey, value) =>
+              setAiInstructions((prev) => ({ ...prev, [sheetKey]: value }))
+            }
             onToggleFile={toggleFile}
             onToggleSheet={toggleSheet}
             onToggleAllSheetsForFile={toggleAllSheetsForFile}

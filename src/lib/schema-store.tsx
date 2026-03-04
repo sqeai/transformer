@@ -114,6 +114,7 @@ export interface DatasetWorkflowState {
   jobResults: SheetJobResult[];
   confirmedSheetIds: string[];
   exportTargetDatasetId: string | null;
+  aiInstructions: Record<string, string>;
 }
 
 const defaultDatasetWorkflow: DatasetWorkflowState = {
@@ -124,6 +125,7 @@ const defaultDatasetWorkflow: DatasetWorkflowState = {
   jobResults: [],
   confirmedSheetIds: [],
   exportTargetDatasetId: null,
+  aiInstructions: {},
 };
 
 interface SchemaStoreContextType {
