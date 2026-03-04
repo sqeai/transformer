@@ -9,6 +9,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { DataTable } from "@/components/DataTable";
 import { UnstructuredPreview } from "@/components/datasets/UnstructuredPreview";
@@ -20,6 +28,7 @@ import {
   FileText,
   FileType,
   Image as ImageIcon,
+  Settings2,
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -46,6 +55,8 @@ interface UploadStepProps {
   onToggleAllWorksheetsForFile: (fileId: string) => void;
   onPreviewFile: (selection: FileSelection) => void;
   onLoadMorePreview: () => void;
+  globalAiInstructions: string;
+  onGlobalAiInstructionsChange: (value: string) => void;
   onCancel: () => void;
   onSubmit: () => void;
   isFileSelected: (fileId: string, worksheetIndex: number) => boolean;
@@ -65,6 +76,8 @@ export function UploadStep({
   onToggleAllWorksheetsForFile,
   onPreviewFile,
   onLoadMorePreview,
+  globalAiInstructions,
+  onGlobalAiInstructionsChange,
   onCancel,
   onSubmit,
   isFileSelected,
@@ -72,6 +85,8 @@ export function UploadStep({
   const previewFileKey = previewFile ? `${previewFile.fileId}:${previewFile.worksheetIndex}` : "";
   const currentInstructions = previewFileKey ? (aiInstructions[previewFileKey] ?? "") : "";
   const [aiSectionOpen, setAiSectionOpen] = useState(currentInstructions.length > 0);
+  const [globalInstructionsOpen, setGlobalInstructionsOpen] = useState(false);
+  const [draftGlobalInstructions, setDraftGlobalInstructions] = useState(globalAiInstructions);
 
   useEffect(() => {
     setAiSectionOpen(currentInstructions.length > 0);
@@ -90,11 +105,65 @@ export function UploadStep({
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button onClick={onSubmit} disabled={selectedFiles.length === 0}>
-            Next: Process {selectedFiles.length} file
-            {selectedFiles.length !== 1 ? "s" : ""}
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </Button>
+          <div className="inline-flex rounded-md shadow-sm">
+            <Button
+              onClick={onSubmit}
+              disabled={selectedFiles.length === 0}
+              className="rounded-r-none"
+            >
+              Next: Process {selectedFiles.length} file
+              {selectedFiles.length !== 1 ? "s" : ""}
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className={cn(
+                "rounded-l-none border-l-0 px-2",
+                globalAiInstructions.trim() && "border-purple-400 bg-purple-50 text-purple-600 hover:bg-purple-100 dark:bg-purple-950 dark:text-purple-400 dark:hover:bg-purple-900",
+              )}
+              onClick={() => {
+                setDraftGlobalInstructions(globalAiInstructions);
+                setGlobalInstructionsOpen(true);
+              }}
+            >
+              <Settings2 className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <Dialog open={globalInstructionsOpen} onOpenChange={setGlobalInstructionsOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Global AI Instructions</DialogTitle>
+                <DialogDescription>
+                  These instructions will be applied to every file being processed as additional context for the AI agent.
+                </DialogDescription>
+              </DialogHeader>
+              <Textarea
+                placeholder="e.g. All monetary values should be in USD. Dates should be in YYYY-MM-DD format..."
+                value={draftGlobalInstructions}
+                onChange={(e) => setDraftGlobalInstructions(e.target.value)}
+                rows={5}
+                className="resize-y text-sm"
+              />
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setGlobalInstructionsOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => {
+                    onGlobalAiInstructionsChange(draftGlobalInstructions);
+                    setGlobalInstructionsOpen(false);
+                  }}
+                >
+                  Save Instructions
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 

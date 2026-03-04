@@ -138,6 +138,7 @@ export interface DatasetWorkflowState {
   confirmedFileIds: string[];
   exportTargetDatasetId: string | null;
   aiInstructions: Record<string, string>;
+  globalAiInstructions: string;
 }
 
 const defaultDatasetWorkflow: DatasetWorkflowState = {
@@ -149,6 +150,7 @@ const defaultDatasetWorkflow: DatasetWorkflowState = {
   confirmedFileIds: [],
   exportTargetDatasetId: null,
   aiInstructions: {},
+  globalAiInstructions: "",
 };
 
 interface SchemaStoreContextType {

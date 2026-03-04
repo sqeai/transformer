@@ -144,6 +144,7 @@ function NewDatasetPageContent() {
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   const hasManuallyToggledFiles = useRef(false);
   const [aiInstructions, setAiInstructions] = useState<Record<string, string>>(datasetWorkflow.aiInstructions ?? {});
+  const [globalAiInstructions, setGlobalAiInstructions] = useState<string>(datasetWorkflow.globalAiInstructions ?? "");
 
   const [previewFile, setPreviewFile] = useState<FileSelection | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
@@ -304,8 +305,8 @@ function NewDatasetPageContent() {
   // --- Persist workflow state ---
 
   useEffect(() => {
-    setDatasetWorkflow({ step, selectedFiles, jobResults, confirmedFileIds: [], aiInstructions });
-  }, [step, selectedFiles, jobResults, aiInstructions]);
+    setDatasetWorkflow({ step, selectedFiles, jobResults, confirmedFileIds: [], aiInstructions, globalAiInstructions });
+  }, [step, selectedFiles, jobResults, aiInstructions, globalAiInstructions]);
 
   // --- File selection ---
 
@@ -447,12 +448,14 @@ function NewDatasetPageContent() {
         nextUploadedRefs[`${selection.fileId}:${selection.worksheetIndex}`] = uploaded;
 
         const fileKey = `${selection.fileId}:${selection.worksheetIndex}`;
-        const fileDirective = aiInstructions[fileKey]?.trim() || undefined;
+        const fileDirective = aiInstructions[fileKey]?.trim() || "";
+        const globalDirective = globalAiInstructions.trim();
+        const combinedDirective = [globalDirective, fileDirective].filter(Boolean).join("\n") || undefined;
         const jobPayload: Record<string, unknown> = {
           filePath: uploaded.filePath,
           targetPaths,
           fileName: selection.worksheetName,
-          userDirective: fileDirective,
+          userDirective: combinedDirective,
         };
         if (unstructuredMimeType) {
           jobPayload.unstructuredMimeType = unstructuredMimeType;
@@ -475,7 +478,7 @@ function NewDatasetPageContent() {
     setJobResults(results);
     fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
     startPolling(results);
-  }, [schemaId, selectedFiles, files, targetPaths, aiInstructions, uploadFileCsv, startPolling]);
+  }, [schemaId, selectedFiles, files, targetPaths, aiInstructions, globalAiInstructions, uploadFileCsv, startPolling]);
 
   useEffect(() => { return () => { if (pollingRef.current) clearInterval(pollingRef.current); }; }, []);
 
@@ -767,6 +770,8 @@ function NewDatasetPageContent() {
             onToggleAllWorksheetsForFile={toggleAllWorksheetsForFile}
             onPreviewFile={setPreviewFile}
             onLoadMorePreview={() => setPreviewTopRows((prev) => prev + PREVIEW_ROWS)}
+            globalAiInstructions={globalAiInstructions}
+            onGlobalAiInstructionsChange={setGlobalAiInstructions}
             onCancel={() => router.push("/datasets")}
             onSubmit={submitJobs}
             isFileSelected={isFileSelected}
