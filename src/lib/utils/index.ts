@@ -12,6 +12,7 @@ export {
   applyExpand,
   applyAggregate,
   applyMap,
+  applyFilterRows,
   applyBalanceSheet,
   applyUnstructured,
 } from "./transformations";

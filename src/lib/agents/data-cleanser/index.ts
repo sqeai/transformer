@@ -84,14 +84,23 @@ You must generate the plan by calling **emitPlan** with the full ordered list of
 ## Available transformation types:
 
 1. **filter** — remove noise rows. Params: { removeEmptyRows: boolean, removeDuplicates: boolean, duplicateKeyColumns: string[], removeMatchingKeywords: string[] }
-2. **trimColumns** — drop irrelevant columns or keep only specific ones. Params: { keepColumns?: string[], dropColumns?: string[] }. Use keepColumns OR dropColumns (not both).
-3. **padColumns** — forward-fill empty cells in specified columns so every row is complete. Params: { paddingColumns: string[] }
-4. **handleBalanceSheet** — flatten hierarchy (star/indent convention). Params: { labelColumn?: string, maxDepth: number (2-8) }
-5. **handleUnstructuredData** — collapse rows to text. Params: { textColumnName: string }
-6. **unpivot** — melt wide columns into rows. Params: { unpivotColumns: string[], nameColumn: string, valueColumn: string, extractFields?: Array<{ fieldName: string, valuesBySourceColumn: Record<string, string> }> }
-7. **expand** — flatten hierarchy with nesting levels. Params: { labelColumn: string, maxDepth: number }
-8. **aggregate** — group and aggregate. Params: { groupByColumns: string[], aggregations: Array<{ column: string, function: "sum"|"concat"|"count"|"min"|"max"|"first" }> }
-9. **map** — map columns to target schema paths (MUST be the final transformation). Params: { mappings: Array<{ sourceColumn: string, targetPath: string, defaultValue?: string }>, defaults?: Array<{ targetPath: string, value: string }> }
+2. **filterRows** — remove or keep rows matching a regex pattern on a specific column. Use this when the user asks to remove/keep rows based on a condition (e.g. "remove rows where status is inactive", "keep only rows where amount > 0"). Params: { column: string, pattern: string (JavaScript regex), mode: "remove" | "keep" (default "remove"), caseInsensitive: boolean (default true) }. mode "remove" discards matching rows; mode "keep" retains only matching rows.
+3. **trimColumns** — drop irrelevant columns or keep only specific ones. Params: { keepColumns?: string[], dropColumns?: string[] }. Use keepColumns OR dropColumns (not both).
+4. **padColumns** — forward-fill empty cells in specified columns so every row is complete. Params: { paddingColumns: string[] }
+5. **handleBalanceSheet** — flatten hierarchy (star/indent convention). Params: { labelColumn?: string, maxDepth: number (2-8) }
+6. **handleUnstructuredData** — collapse rows to text. Params: { textColumnName: string }
+7. **unpivot** — melt wide columns into rows. Params: { unpivotColumns: string[], nameColumn: string, valueColumn: string, extractFields?: Array<{ fieldName: string, valuesBySourceColumn: Record<string, string> }> }
+8. **expand** — flatten hierarchy with nesting levels. Params: { labelColumn: string, maxDepth: number }
+9. **aggregate** — group and aggregate. Params: { groupByColumns: string[], aggregations: Array<{ column: string, function: "sum"|"concat"|"count"|"min"|"max"|"first" }> }
+10. **map** — map columns to target schema paths (MUST be the final transformation). Params: { mappings: Array<{ sourceColumn: string, targetPath: string, defaultValue?: string }>, defaults?: Array<{ targetPath: string, value: string }> }
+
+### When to use filterRows vs filter
+- Use **filter** for generic noise removal (empty rows, duplicates, keyword-based removal).
+- Use **filterRows** when the user explicitly asks to remove or keep rows based on a condition on a specific column. Translate the user's condition into a regex pattern. Examples:
+  - "Remove rows where status is inactive" → { column: "status", pattern: "^inactive$", mode: "remove" }
+  - "Keep only rows where amount is not 0" → { column: "amount", pattern: "^0(\\\\.0+)?$", mode: "remove" }
+  - "Remove rows where name contains test" → { column: "name", pattern: "test", mode: "remove" }
+  - "Keep rows where category is Food or Drink" → { column: "category", pattern: "^(Food|Drink)$", mode: "keep" }
 
 ## Plan Structure — TWO PHASES (follow this order STRICTLY)
 
@@ -99,15 +108,17 @@ You must generate the plan by calling **emitPlan** with the full ordered list of
 Goal: Prepare and enrich the data WITHOUT losing any information.
 Priority order within this phase:
 1. **filter** — remove only obvious noise (empty rows, title/summary rows). Be conservative.
-2. **padColumns** — forward-fill empty cells. Check ALL columns for empty cells. ANY column with >0% empty cells that follows a group/category pattern MUST be padded. Include ALL such columns.
-3. **unpivot** — if wide columns represent repeating categories or time periods, melt them into rows. This ADDS rows and is safe.
-4. **expand** / **handleBalanceSheet** — flatten hierarchies. This restructures but preserves data.
+2. **filterRows** — if the user directive asks to remove or keep specific rows based on column values, apply this step. This is the PRIMARY tool for user-requested row removal/filtering.
+3. **padColumns** — forward-fill empty cells. Check ALL columns for empty cells. ANY column with >0% empty cells that follows a group/category pattern MUST be padded. Include ALL such columns.
+4. **unpivot** — if wide columns represent repeating categories or time periods, melt them into rows. This ADDS rows and is safe.
+5. **expand** / **handleBalanceSheet** — flatten hierarchies. This restructures but preserves data.
 
 ### PHASE 2: Transformation (reshaping and finalizing)
 Goal: Reshape the cleansed data into the target schema.
-1. **trimColumns** — drop columns no longer needed (only AFTER cleansing is complete).
-2. **aggregate** — group and aggregate if needed.
-3. **map** — map to final schema (MUST be the last step).
+1. **filterRows** — can also be used here if filtering depends on columns created during cleansing.
+2. **trimColumns** — drop columns no longer needed (only AFTER cleansing is complete).
+3. **aggregate** — group and aggregate if needed.
+4. **map** — map to final schema (MUST be the last step).
 
 ## CRITICAL Rules
 

@@ -273,6 +273,31 @@ export function applyBalanceSheet(data: FileData, params: Record<string, unknown
   return applyExpand(data, { ...params, labelColumn });
 }
 
+export function applyFilterRows(data: FileData, params: Record<string, unknown>): FileData {
+  const column = params.column as string;
+  const pattern = params.pattern as string;
+  const mode = (params.mode as string) ?? "remove";
+  const caseInsensitive = params.caseInsensitive !== false;
+
+  if (!column || !pattern) return data;
+  if (!data.columns.includes(column)) return data;
+
+  let regex: RegExp;
+  try {
+    regex = new RegExp(pattern, caseInsensitive ? "i" : "");
+  } catch {
+    return data;
+  }
+
+  const matches = (row: Record<string, unknown>) => regex.test(String(row[column] ?? ""));
+
+  const rows = mode === "keep"
+    ? data.rows.filter(matches)
+    : data.rows.filter((row) => !matches(row));
+
+  return { columns: data.columns, rows };
+}
+
 export function applyUnstructured(data: FileData, params: Record<string, unknown>): FileData {
   const textColumn = String(params.textColumnName ?? "raw_text").trim() || "raw_text";
   const flattened = data.rows.map((row) => ({
@@ -294,6 +319,7 @@ export function executeTransformation(data: FileData, step: TransformationStep, 
     case "expand": return applyExpand(data, step.params);
     case "aggregate": return applyAggregate(data, step.params);
     case "map": return applyMap(data, step.params, targetPaths);
+    case "filterRows": return applyFilterRows(data, step.params);
     case "handleBalanceSheet": return applyBalanceSheet(data, step.params);
     case "handleUnstructuredData": return applyUnstructured(data, step.params);
     case "handleStructuredData": return data;
