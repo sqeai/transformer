@@ -23,6 +23,10 @@ import {
   ChevronRight,
   Wrench,
   Brain,
+  Paperclip,
+  FileText,
+  FileImage,
+  File as FileIcon,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -187,10 +191,58 @@ function ThinkingIndicator() {
   );
 }
 
+interface AttachedFile {
+  file: File;
+  id: string;
+  status: "pending" | "processing" | "done" | "error";
+  extractedText?: string;
+  error?: string;
+}
+
+const ACCEPTED_FILE_TYPES = [
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "text/plain",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+];
+
+const ACCEPTED_EXTENSIONS = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".txt", ".docx", ".pptx"];
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.split(",")[1]);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function isAcceptedFile(file: File): boolean {
+  if (ACCEPTED_FILE_TYPES.includes(file.type)) return true;
+  const ext = "." + file.name.split(".").pop()?.toLowerCase();
+  return ACCEPTED_EXTENSIONS.includes(ext);
+}
+
+function getFileIcon(file: File) {
+  if (file.type.startsWith("image/")) return FileImage;
+  if (file.type === "application/pdf" || file.name.endsWith(".pdf")) return FileText;
+  return FileIcon;
+}
+
 export function ChatBubble() {
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [input, setInput] = useState("");
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const { messages, sendMessage, setMessages, status } = useChatContext();
   const {
     schemas,
@@ -198,7 +250,9 @@ export function ChatBubble() {
   } = useSchemaStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const appliedPayloads = useRef<Set<string>>(new Set());
+  const dragCounter = useRef(0);
 
   const isLoading = status === "streaming" || status === "submitted";
 
@@ -266,16 +320,162 @@ export function ChatBubble() {
     });
   }, [currentSchema]);
 
-  const onSubmit = useCallback(
-    (e: FormEvent) => {
+  const addFiles = useCallback((files: File[]) => {
+    const accepted = files.filter(isAcceptedFile);
+    if (accepted.length < files.length) {
+      toast.error("Some files were skipped", {
+        description: `Supported: ${ACCEPTED_EXTENSIONS.join(", ")}`,
+      });
+    }
+    if (accepted.length === 0) return;
+
+    const newAttachments: AttachedFile[] = accepted.map((file) => ({
+      file,
+      id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      status: "pending",
+    }));
+    setAttachedFiles((prev) => [...prev, ...newAttachments]);
+  }, []);
+
+  const removeFile = useCallback((id: string) => {
+    setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
+  }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.types.includes("Files")) {
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
       e.preventDefault();
-      if (!input.trim() || isLoading) return;
+      e.stopPropagation();
+      setIsDragging(false);
+      dragCounter.current = 0;
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) addFiles(files);
+    },
+    [addFiles],
+  );
+
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      if (files.length > 0) addFiles(files);
+      e.target.value = "";
+    },
+    [addFiles],
+  );
+
+  const processFilesWithOcr = useCallback(
+    async (files: AttachedFile[]): Promise<AttachedFile[]> => {
+      const results = await Promise.all(
+        files.map(async (af) => {
+          try {
+            setAttachedFiles((prev) =>
+              prev.map((f) => (f.id === af.id ? { ...f, status: "processing" as const } : f)),
+            );
+
+            const base64 = await fileToBase64(af.file);
+            const mimeType = af.file.type || "application/octet-stream";
+
+            const res = await fetch("/api/ocr", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ base64, mimeType, fileName: af.file.name }),
+            });
+
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({ error: "OCR failed" }));
+              throw new Error(err.error || "OCR failed");
+            }
+
+            const result: { extractedText: string } = await res.json();
+
+            const updated: AttachedFile = { ...af, status: "done", extractedText: result.extractedText };
+            setAttachedFiles((prev) =>
+              prev.map((f) => (f.id === af.id ? updated : f)),
+            );
+            return updated;
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "OCR failed";
+            const updated: AttachedFile = { ...af, status: "error", error: errorMsg };
+            setAttachedFiles((prev) =>
+              prev.map((f) => (f.id === af.id ? updated : f)),
+            );
+            return updated;
+          }
+        }),
+      );
+      return results;
+    },
+    [],
+  );
+
+  const onSubmit = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      if ((!input.trim() && attachedFiles.length === 0) || isLoading || isOcrProcessing) return;
 
       const workspaceContext = buildWorkspaceContext();
-      sendMessage({ text: input.trim() }, { body: { workspaceContext } });
-      setInput("");
+
+      if (attachedFiles.length > 0) {
+        setIsOcrProcessing(true);
+        try {
+          const pendingFiles = attachedFiles.filter((f) => f.status === "pending" || f.status === "error");
+          const alreadyDone = attachedFiles.filter((f) => f.status === "done");
+
+          const processed = pendingFiles.length > 0
+            ? await processFilesWithOcr(pendingFiles)
+            : [];
+
+          const allProcessed = [...alreadyDone, ...processed];
+          const successFiles = allProcessed.filter((f) => f.status === "done" && f.extractedText);
+
+          if (successFiles.length === 0 && !input.trim()) {
+            toast.error("Could not extract text from any files");
+            setIsOcrProcessing(false);
+            return;
+          }
+
+          const fileContextParts = successFiles.map(
+            (f) => `--- File: ${f.file.name} ---\n${f.extractedText}`,
+          );
+          const fileContext = fileContextParts.length > 0
+            ? `[Attached file content]\n${fileContextParts.join("\n\n")}\n[End of attached file content]\n\n`
+            : "";
+
+          const messageText = `${fileContext}${input.trim()}`;
+          sendMessage({ text: messageText }, { body: { workspaceContext } });
+          setInput("");
+          setAttachedFiles([]);
+        } finally {
+          setIsOcrProcessing(false);
+        }
+      } else {
+        sendMessage({ text: input.trim() }, { body: { workspaceContext } });
+        setInput("");
+      }
     },
-    [input, isLoading, sendMessage, buildWorkspaceContext],
+    [input, attachedFiles, isLoading, isOcrProcessing, sendMessage, buildWorkspaceContext, processFilesWithOcr],
   );
 
   const onKeyDown = useCallback(
@@ -306,6 +506,10 @@ export function ChatBubble() {
 
       {/* Chat panel */}
       <div
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
         className={cn(
           "fixed z-50 flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl transition-all duration-300 ease-out",
           expanded
@@ -316,6 +520,7 @@ export function ChatBubble() {
               ? "h-[calc(100vh-2rem)] opacity-100 translate-y-0"
               : "h-[560px] max-h-[calc(100vh-3rem)] opacity-100 translate-y-0"
             : "h-0 max-h-0 opacity-0 translate-y-4 pointer-events-none",
+          isDragging && "ring-2 ring-primary ring-inset",
         )}
       >
         {/* Header */}
@@ -395,10 +600,39 @@ export function ChatBubble() {
               const text = textParts.map((p) => p.text).join("");
               if (!text) return null;
 
+              const fileBlockMatch = text.match(/\[Attached file content\]\n([\s\S]*?)\n\[End of attached file content\]\n\n/);
+              const userText = fileBlockMatch
+                ? text.replace(fileBlockMatch[0], "").trim()
+                : text;
+
+              const attachedFileNames: string[] = [];
+              if (fileBlockMatch) {
+                const fileHeaders = fileBlockMatch[1].match(/--- File: (.+?) ---/g);
+                if (fileHeaders) {
+                  for (const h of fileHeaders) {
+                    const name = h.match(/--- File: (.+?) ---/)?.[1];
+                    if (name) attachedFileNames.push(name);
+                  }
+                }
+              }
+
               return (
                 <div key={msg.id} className="flex gap-2 justify-end">
                   <div className="max-w-[85%] rounded-2xl rounded-br-md bg-primary text-primary-foreground px-3.5 py-2.5 text-sm leading-relaxed">
-                    <p className="whitespace-pre-wrap break-words">{text}</p>
+                    {attachedFileNames.length > 0 && (
+                      <div className="mb-1.5 flex flex-wrap gap-1">
+                        {attachedFileNames.map((name) => (
+                          <span
+                            key={name}
+                            className="inline-flex items-center gap-1 rounded-md bg-primary-foreground/20 px-1.5 py-0.5 text-xs"
+                          >
+                            <Paperclip className="h-3 w-3" />
+                            {name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {userText && <p className="whitespace-pre-wrap break-words">{userText}</p>}
                   </div>
                   <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/20">
                     <User className="h-3.5 w-3.5 text-primary" />
@@ -453,18 +687,87 @@ export function ChatBubble() {
           )}
         </div>
 
+        {/* Drag overlay */}
+        {isDragging && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-primary/5 backdrop-blur-[1px]">
+            <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-primary/50 bg-card/90 px-8 py-6">
+              <Paperclip className="h-8 w-8 text-primary/60" />
+              <p className="text-sm font-medium text-primary">Drop files here</p>
+              <p className="text-xs text-muted-foreground">PDF, images, TXT, DOCX, PPTX</p>
+            </div>
+          </div>
+        )}
+
         {/* Input */}
         <form
           onSubmit={onSubmit}
           className="border-t border-border bg-card p-3"
         >
+          {/* File chips */}
+          {attachedFiles.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {attachedFiles.map((af) => {
+                const Icon = getFileIcon(af.file);
+                return (
+                  <div
+                    key={af.id}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs",
+                      af.status === "error"
+                        ? "border-destructive/50 bg-destructive/10 text-destructive"
+                        : af.status === "processing"
+                          ? "border-primary/50 bg-primary/5 text-primary"
+                          : af.status === "done"
+                            ? "border-green-500/50 bg-green-500/10 text-green-700 dark:text-green-400"
+                            : "border-border bg-muted/50 text-foreground",
+                    )}
+                  >
+                    {af.status === "processing" ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Icon className="h-3 w-3 shrink-0" />
+                    )}
+                    <span className="max-w-[120px] truncate">{af.file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeFile(af.id)}
+                      className="ml-0.5 rounded-full p-0.5 hover:bg-foreground/10"
+                      disabled={af.status === "processing"}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           <div className="flex items-end gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={ACCEPTED_EXTENSIONS.join(",")}
+              onChange={handleFileInputChange}
+              className="hidden"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-10 w-10 shrink-0 rounded-xl text-muted-foreground hover:text-foreground"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading || isOcrProcessing}
+              title="Attach files"
+            >
+              <Paperclip className="h-4 w-4" />
+            </Button>
             <textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="Ask about your schema..."
+              placeholder={attachedFiles.length > 0 ? "Add a message about these files..." : "Ask about your schema..."}
               rows={1}
               className={cn(
                 "flex-1 resize-none rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm",
@@ -472,15 +775,15 @@ export function ChatBubble() {
                 "max-h-[120px] min-h-[40px]",
               )}
               style={{ fieldSizing: "content" } as React.CSSProperties}
-              disabled={isLoading}
+              disabled={isLoading || isOcrProcessing}
             />
             <Button
               type="submit"
               size="icon"
               className="h-10 w-10 shrink-0 rounded-xl"
-              disabled={!input.trim() || isLoading}
+              disabled={(!input.trim() && attachedFiles.length === 0) || isLoading || isOcrProcessing}
             >
-              {isLoading ? (
+              {isLoading || isOcrProcessing ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Send className="h-4 w-4" />
