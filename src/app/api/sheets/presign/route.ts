@@ -8,6 +8,8 @@ interface PresignBody {
   dimensions?: unknown;
   type?: unknown;
   sheetId?: unknown;
+  contentType?: unknown;
+  fileExtension?: unknown;
 }
 
 export async function POST(request: NextRequest) {
@@ -40,8 +42,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "dimensions.rowCount and dimensions.columnCount must be non-negative numbers" }, { status: 400 });
   }
 
+  const contentType = typeof body.contentType === "string" ? body.contentType.trim() : "text/csv";
+  const fileExtension = typeof body.fileExtension === "string" ? body.fileExtension.trim() : undefined;
+
   try {
-    const upload = await createSheetUploadUrl("text/csv");
+    const upload = await createSheetUploadUrl(contentType, fileExtension);
     const sheet = await createSheetRecord(auth.supabase!, {
       userId: auth.userId!,
       sheetId,

@@ -24,6 +24,19 @@ import { ExportStep } from "@/components/datasets/ExportStep";
 const PREVIEW_ROWS = 100;
 const POLL_INTERVAL_MS = 1500;
 
+function getMimeTypeForUnstructured(type: string): string {
+  switch (type) {
+    case "pdf": return "application/pdf";
+    case "png": return "image/png";
+    case "jpg":
+    case "jpeg": return "image/jpeg";
+    case "txt": return "text/plain";
+    case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case "pptx": return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    default: return "application/octet-stream";
+  }
+}
+
 interface PreviewState {
   columns: string[];
   rows: Record<string, unknown>[];
@@ -241,6 +254,12 @@ function NewDatasetPageContent() {
     const file = files.find((f) => f.fileId === previewSheet.fileId);
     if (!file) return;
 
+    if (file.unstructuredType) {
+      setPreview(null);
+      setPreviewLoading(false);
+      return;
+    }
+
     let cancelled = false;
     setPreviewLoading(true);
 
@@ -363,16 +382,58 @@ function NewDatasetPageContent() {
       const file = files.find((f) => f.fileId === sheet.fileId);
       if (!file) continue;
       try {
-        const parsed = await parseExcelToRows(file.buffer, { headerRowIndex: 0, dataStartRowIndex: 1, sheetIndex: sheet.sheetIndex });
-        const uploaded = await uploadSheetCsv({ sheetName: sheet.sheetName, columns: parsed.columns, rows: parsed.rows, type: "raw" });
+        let uploaded: UploadedSheetRef;
+        let unstructuredMimeType: string | undefined;
+
+        if (file.unstructuredType) {
+          const mimeType = getMimeTypeForUnstructured(file.unstructuredType);
+          unstructuredMimeType = mimeType;
+
+          const presignRes = await fetch("/api/sheets/presign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: sheet.sheetName,
+              type: "raw",
+              dimensions: { rowCount: 0, columnCount: 0 },
+              contentType: mimeType,
+              fileExtension: file.unstructuredType,
+            }),
+          });
+          const presignData = await presignRes.json();
+          if (!presignRes.ok) throw new Error(presignData.error ?? "Failed to request upload URL");
+
+          const uploadRes = await fetch(String(presignData.uploadUrl), {
+            method: "PUT",
+            headers: { "Content-Type": mimeType },
+            body: new Uint8Array(file.buffer),
+          });
+          if (!uploadRes.ok) throw new Error("Failed to upload file to S3");
+
+          uploaded = { sheetId: String(presignData.sheetId), filePath: String(presignData.filePath) };
+        } else {
+          const parsed = await parseExcelToRows(file.buffer, { headerRowIndex: 0, dataStartRowIndex: 1, sheetIndex: sheet.sheetIndex });
+          uploaded = await uploadSheetCsv({ sheetName: sheet.sheetName, columns: parsed.columns, rows: parsed.rows, type: "raw" });
+        }
+
         nextUploadedRefs[`${sheet.fileId}:${sheet.sheetIndex}`] = uploaded;
 
         const sheetKey = `${sheet.fileId}:${sheet.sheetIndex}`;
         const sheetDirective = aiInstructions[sheetKey]?.trim() || undefined;
+        const jobPayload: Record<string, unknown> = {
+          filePath: uploaded.filePath,
+          targetPaths,
+          sheetName: sheet.sheetName,
+          userDirective: sheetDirective,
+        };
+        if (unstructuredMimeType) {
+          jobPayload.unstructuredMimeType = unstructuredMimeType;
+        }
+
         const res = await fetch("/api/jobs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "data_cleanse", sheetId: uploaded.sheetId, payload: { filePath: uploaded.filePath, targetPaths, sheetName: sheet.sheetName, userDirective: sheetDirective } }),
+          body: JSON.stringify({ type: "data_cleanse", sheetId: uploaded.sheetId, payload: jobPayload }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Failed to create job");
@@ -401,10 +462,18 @@ function NewDatasetPageContent() {
     if (!file) return;
     setOriginalPreviewLoading(true);
     try {
-      const parsed = await parseExcelToRows(file.buffer, { headerRowIndex: 0, dataStartRowIndex: 1, sheetIndex: sheetResult.sheet.sheetIndex });
-      allOriginalRowsRef.current = parsed.rows;
-      setOriginalVisibleCount(PREVIEW_ROWS);
-      setOriginalPreview({ columns: parsed.columns, rows: parsed.rows, totalRows: parsed.rows.length, visibleRows: parsed.rows.length });
+      if (file.unstructuredType) {
+        const text = file.extractedText ?? new TextDecoder().decode(file.buffer);
+        const rows = text.split("\n").filter((l) => l.trim()).map((line) => ({ content: line }));
+        allOriginalRowsRef.current = rows;
+        setOriginalVisibleCount(PREVIEW_ROWS);
+        setOriginalPreview({ columns: ["content"], rows, totalRows: rows.length, visibleRows: rows.length });
+      } else {
+        const parsed = await parseExcelToRows(file.buffer, { headerRowIndex: 0, dataStartRowIndex: 1, sheetIndex: sheetResult.sheet.sheetIndex });
+        allOriginalRowsRef.current = parsed.rows;
+        setOriginalVisibleCount(PREVIEW_ROWS);
+        setOriginalPreview({ columns: parsed.columns, rows: parsed.rows, totalRows: parsed.rows.length, visibleRows: parsed.rows.length });
+      }
     } catch {
       setOriginalPreview(null);
     } finally {
@@ -686,6 +755,7 @@ function NewDatasetPageContent() {
             onLoadOriginalPreview={loadOriginalPreview}
             originalVisibleCount={originalVisibleCount}
             onLoadMoreOriginal={() => setOriginalVisibleCount((prev) => prev + PREVIEW_ROWS)}
+            files={files}
             onBack={() => setStep("upload")}
             onNext={() => setStep("export")}
           />

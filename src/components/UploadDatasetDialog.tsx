@@ -16,8 +16,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useSchemaStore, type UploadedFileEntry } from "@/lib/schema-store";
-import { FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
+import {
+  useSchemaStore,
+  type UploadedFileEntry,
+  isUnstructuredExtension,
+  getUnstructuredFileType,
+} from "@/lib/schema-store";
+import { FileSpreadsheet, FileText, Image, FileType, Loader2, Upload, X } from "lucide-react";
 import { getExcelSheetNames } from "@/lib/parse-excel-preview";
 
 export interface UploadDatasetDialogProps {
@@ -61,17 +66,33 @@ export function UploadDatasetDialog({
     setProcessingFiles(true);
     const entries: UploadedFileEntry[] = [];
     for (const file of files) {
-      const ext = file.name.toLowerCase();
-      if (!ext.endsWith(".xlsx") && !ext.endsWith(".xls")) continue;
+      const name = file.name.toLowerCase();
       try {
         const buffer = await file.arrayBuffer();
-        const sheetNames = (await getExcelSheetNames(buffer)) ?? [file.name];
-        entries.push({
-          fileId: crypto.randomUUID(),
-          fileName: file.name,
-          buffer,
-          sheetNames,
-        });
+
+        if (isUnstructuredExtension(name)) {
+          const unstructuredType = getUnstructuredFileType(name)!;
+          let extractedText: string | undefined;
+          if (unstructuredType === "txt") {
+            extractedText = new TextDecoder().decode(buffer);
+          }
+          entries.push({
+            fileId: crypto.randomUUID(),
+            fileName: file.name,
+            buffer,
+            sheetNames: [file.name],
+            unstructuredType,
+            extractedText,
+          });
+        } else if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+          const sheetNames = (await getExcelSheetNames(buffer)) ?? [file.name];
+          entries.push({
+            fileId: crypto.randomUUID(),
+            fileName: file.name,
+            buffer,
+            sheetNames,
+          });
+        }
       } catch {
         // skip unreadable files
       }
@@ -133,8 +154,8 @@ export function UploadDatasetDialog({
           </DialogTitle>
           <DialogDescription>
             {isAddToDataset
-              ? "Upload Excel files to process and add to this dataset."
-              : "Select a target schema and upload Excel files to process."}
+              ? "Upload files to process and add to this dataset. Supports Excel, PDF, images, text, Word, and PowerPoint."
+              : "Select a target schema and upload files to process. Supports Excel, PDF, images, text, Word, and PowerPoint."}
           </DialogDescription>
         </DialogHeader>
 
@@ -185,14 +206,14 @@ export function UploadDatasetDialog({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".xlsx,.xls"
+                accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg,.txt,.docx,.pptx"
                 multiple
                 className="hidden"
                 onChange={handleFileInput}
               />
               <Upload className="mx-auto h-8 w-8 text-muted-foreground mb-3" />
               <p className="text-sm text-muted-foreground">
-                Drag and drop Excel files here, or{" "}
+                Drag and drop files here, or{" "}
                 <button
                   type="button"
                   className="text-primary underline underline-offset-2"
@@ -202,7 +223,7 @@ export function UploadDatasetDialog({
                 </button>
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Supports .xlsx and .xls files. Multiple files allowed.
+                Supports Excel (.xlsx, .xls), PDF, images (.png, .jpg), text (.txt), Word (.docx), and PowerPoint (.pptx).
               </p>
             </div>
           </div>
@@ -221,17 +242,26 @@ export function UploadDatasetDialog({
                 ready
               </label>
               <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                {uploadedFiles.map((f) => (
+                {uploadedFiles.map((f) => {
+                  const FileIcon = f.unstructuredType
+                    ? (f.unstructuredType === "png" || f.unstructuredType === "jpg" || f.unstructuredType === "jpeg"
+                      ? Image
+                      : f.unstructuredType === "txt"
+                        ? FileText
+                        : FileType)
+                    : FileSpreadsheet;
+                  return (
                   <div
                     key={f.fileId}
                     className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2"
                   >
-                    <FileSpreadsheet className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <FileIcon className="h-4 w-4 text-muted-foreground shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{f.fileName}</p>
                       <p className="text-xs text-muted-foreground">
-                        {f.sheetNames.length} sheet
-                        {f.sheetNames.length !== 1 ? "s" : ""}
+                        {f.unstructuredType
+                          ? f.unstructuredType.toUpperCase()
+                          : `${f.sheetNames.length} sheet${f.sheetNames.length !== 1 ? "s" : ""}`}
                       </p>
                     </div>
                     <Button
@@ -243,7 +273,8 @@ export function UploadDatasetDialog({
                       <X className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,13 +12,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { DataTable } from "@/components/DataTable";
+import { UnstructuredPreview } from "@/components/datasets/UnstructuredPreview";
 import { TransformationStepList } from "@/components/TransformationStepList";
-import { ArrowLeft, ArrowRight, Loader2, Sparkles, Square } from "lucide-react";
+import { ArrowLeft, ArrowRight, Download, Loader2, Sparkles, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type {
   SheetJobResult,
   PipelineDescriptor,
   TransformationMappingEntry,
+  UploadedFileEntry,
 } from "@/lib/schema-store";
 
 const MappingFlow = dynamic<{
@@ -104,8 +106,30 @@ interface ReviewStepProps {
   onLoadOriginalPreview: (result: SheetJobResult) => void;
   originalVisibleCount: number;
   onLoadMoreOriginal: () => void;
+  files: UploadedFileEntry[];
   onBack: () => void;
   onNext: () => void;
+}
+
+function getMimeTypeForDownload(type: string): string {
+  switch (type) {
+    case "pdf": return "application/pdf";
+    case "png": return "image/png";
+    case "jpg":
+    case "jpeg": return "image/jpeg";
+    case "txt": return "text/plain";
+    case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case "pptx": return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    default: return "application/octet-stream";
+  }
+}
+
+function getStructuredMimeType(fileName: string): string {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".csv")) return "text/csv";
+  if (lower.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  if (lower.endsWith(".xls")) return "application/vnd.ms-excel";
+  return "application/octet-stream";
 }
 
 export function ReviewStep({
@@ -122,12 +146,26 @@ export function ReviewStep({
   onLoadOriginalPreview,
   originalVisibleCount,
   onLoadMoreOriginal,
+  files,
   onBack,
   onNext,
 }: ReviewStepProps) {
   const [reviewSheetIndex, setReviewSheetIndex] = useState(0);
   const [reviewSubTab, setReviewSubTab] = useState<ReviewSubTab>("modified");
   const [modifiedVisibleCount, setModifiedVisibleCount] = useState(PREVIEW_ROWS);
+
+  const handleDownloadOriginal = useCallback((file: UploadedFileEntry) => {
+    const mimeType = file.unstructuredType
+      ? getMimeTypeForDownload(file.unstructuredType)
+      : getStructuredMimeType(file.fileName);
+    const blob = new Blob([file.buffer], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -238,7 +276,12 @@ export function ReviewStep({
                       onClick={() => {
                         setReviewSubTab(tab);
                         if (tab === "original" && !originalPreview) {
-                          onLoadOriginalPreview(currentResult);
+                          const file = files.find(
+                            (f) => f.fileId === currentResult.sheet.fileId,
+                          );
+                          if (!file?.unstructuredType) {
+                            onLoadOriginalPreview(currentResult);
+                          }
                         }
                       }}
                     >
@@ -248,20 +291,43 @@ export function ReviewStep({
                 </div>
               </CardHeader>
               <CardContent>
-                {reviewSubTab === "original" && (
-                  <DataTable
-                    columns={originalPreview?.columns ?? []}
-                    rows={
-                      originalPreview?.rows.slice(0, originalVisibleCount) ??
-                      []
-                    }
-                    totalRows={originalPreview?.totalRows}
-                    loading={originalPreviewLoading}
-                    loadingMessage="Loading original data..."
-                    emptyMessage="No preview available."
-                    onLoadMore={onLoadMoreOriginal}
-                  />
-                )}
+                {reviewSubTab === "original" && (() => {
+                  const originalFile = files.find(
+                    (f) => f.fileId === currentResult.sheet.fileId,
+                  );
+                  return (
+                    <div className="space-y-4">
+                      {originalFile && (
+                        <div className="flex justify-end">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDownloadOriginal(originalFile)}
+                          >
+                            <Download className="mr-2 h-4 w-4" />
+                            Download Original
+                          </Button>
+                        </div>
+                      )}
+                      {originalFile?.unstructuredType ? (
+                        <UnstructuredPreview file={originalFile} />
+                      ) : (
+                        <DataTable
+                          columns={originalPreview?.columns ?? []}
+                          rows={
+                            originalPreview?.rows.slice(0, originalVisibleCount) ??
+                            []
+                          }
+                          totalRows={originalPreview?.totalRows}
+                          loading={originalPreviewLoading}
+                          loadingMessage="Loading original data..."
+                          emptyMessage="No preview available."
+                          onLoadMore={onLoadMoreOriginal}
+                        />
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {reviewSubTab === "modified" && (
                   <div className="space-y-4">

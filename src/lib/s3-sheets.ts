@@ -29,10 +29,11 @@ export interface PresignedSheetUpload {
   uploadUrl: string;
 }
 
-export async function createSheetUploadUrl(contentType = "text/csv"): Promise<PresignedSheetUpload> {
+export async function createSheetUploadUrl(contentType = "text/csv", fileExtension?: string): Promise<PresignedSheetUpload> {
   const { bucket } = getS3Config();
   const s3 = createS3Client();
-  const key = `sheets/${randomUUID()}.csv`;
+  const ext = fileExtension ?? "csv";
+  const key = `sheets/${randomUUID()}.${ext}`;
   const putCommand = new PutObjectCommand({
     Bucket: bucket,
     Key: key,
@@ -72,7 +73,8 @@ export async function downloadS3FileToTmp(filePath: string): Promise<string> {
     throw new Error(`Empty S3 object body for ${filePath}`);
   }
   const bytes = await body.transformToByteArray();
-  const localPath = path.join("/tmp", `sheet-${randomUUID()}.csv`);
+  const ext = path.extname(key) || ".csv";
+  const localPath = path.join("/tmp", `sheet-${randomUUID()}${ext}`);
   await fs.writeFile(localPath, Buffer.from(bytes));
   return localPath;
 }

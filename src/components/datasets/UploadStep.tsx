@@ -11,11 +11,15 @@ import {
 } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { DataTable } from "@/components/DataTable";
+import { UnstructuredPreview } from "@/components/datasets/UnstructuredPreview";
 import {
   ArrowRight,
   ChevronDown,
   ChevronRight,
   FileSpreadsheet,
+  FileText,
+  FileType,
+  Image as ImageIcon,
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -103,20 +107,31 @@ export function UploadStep({
                 isSheetSelected(file.fileId, idx),
               );
 
+              const FileIcon = file.unstructuredType
+                ? (file.unstructuredType === "png" || file.unstructuredType === "jpg" || file.unstructuredType === "jpeg"
+                  ? ImageIcon
+                  : file.unstructuredType === "txt"
+                    ? FileText
+                    : FileType)
+                : FileSpreadsheet;
+              const isUnstructured = Boolean(file.unstructuredType);
+
               return (
                 <div key={file.fileId}>
                   <div className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted">
-                    <button
-                      type="button"
-                      className="flex items-center justify-center shrink-0"
-                      onClick={() => onToggleFile(file.fileId)}
-                    >
-                      {expandedFiles.has(file.fileId) ? (
-                        <ChevronDown className="h-3.5 w-3.5 shrink-0" />
-                      ) : (
-                        <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-                      )}
-                    </button>
+                    {!isUnstructured && (
+                      <button
+                        type="button"
+                        className="flex items-center justify-center shrink-0"
+                        onClick={() => onToggleFile(file.fileId)}
+                      >
+                        {expandedFiles.has(file.fileId) ? (
+                          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                        )}
+                      </button>
+                    )}
                     <input
                       type="checkbox"
                       checked={allSelected}
@@ -133,12 +148,30 @@ export function UploadStep({
                     <button
                       type="button"
                       className="flex items-center gap-2 flex-1 text-sm text-left min-w-0"
-                      onClick={() => onToggleFile(file.fileId)}
+                      onClick={() => {
+                        if (isUnstructured) {
+                          onToggleAllSheetsForFile(file.fileId);
+                          const sheet: SheetSelection = {
+                            fileId: file.fileId,
+                            fileName: file.fileName,
+                            sheetIndex: 0,
+                            sheetName: file.sheetNames[0] ?? file.fileName,
+                          };
+                          onPreviewSheet(sheet);
+                        } else {
+                          onToggleFile(file.fileId);
+                        }
+                      }}
                     >
-                      <FileSpreadsheet className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <FileIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
                       <span className="truncate font-medium">
                         {file.fileName}
                       </span>
+                      {isUnstructured && (
+                        <span className="ml-auto text-xs text-muted-foreground uppercase">
+                          {file.unstructuredType}
+                        </span>
+                      )}
                     </button>
                   </div>
                   {expandedFiles.has(file.fileId) && (
@@ -240,29 +273,43 @@ export function UploadStep({
             </div>
           )}
 
-          {preview ? (
-            <DataTable
-              columns={preview.columns}
-              rows={preview.rows}
-              totalRows={preview.totalRows}
-              loading={previewLoading}
-              loadingMessage="Loading preview..."
-              emptyMessage="Click a sheet on the left to preview its contents."
-              onLoadMore={onLoadMorePreview}
-              loadMoreDisabled={previewLoading}
-            />
-          ) : previewLoading ? (
-            <DataTable
-              columns={[]}
-              rows={[]}
-              loading
-              loadingMessage="Loading preview..."
-            />
-          ) : (
-            <div className="flex items-center justify-center py-10 text-muted-foreground">
-              Click a sheet on the left to preview its contents.
-            </div>
-          )}
+          {(() => {
+            const previewFile = previewSheet
+              ? files.find((f) => f.fileId === previewSheet.fileId)
+              : null;
+            if (previewFile?.unstructuredType) {
+              return <UnstructuredPreview file={previewFile} />;
+            }
+            if (preview) {
+              return (
+                <DataTable
+                  columns={preview.columns}
+                  rows={preview.rows}
+                  totalRows={preview.totalRows}
+                  loading={previewLoading}
+                  loadingMessage="Loading preview..."
+                  emptyMessage="Click a sheet on the left to preview its contents."
+                  onLoadMore={onLoadMorePreview}
+                  loadMoreDisabled={previewLoading}
+                />
+              );
+            }
+            if (previewLoading) {
+              return (
+                <DataTable
+                  columns={[]}
+                  rows={[]}
+                  loading
+                  loadingMessage="Loading preview..."
+                />
+              );
+            }
+            return (
+              <div className="flex items-center justify-center py-10 text-muted-foreground">
+                Click a file or sheet on the left to preview its contents.
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
     </div>

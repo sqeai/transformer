@@ -21,11 +21,34 @@ const IDB_DATASET_WORKFLOW_KEY = "dataset_workflow";
 const api = (path: string, init?: RequestInit) =>
   fetch(path, { ...init, credentials: "include" });
 
+export type UnstructuredFileType = "pdf" | "png" | "jpg" | "jpeg" | "txt" | "docx" | "pptx";
+
+export const UNSTRUCTURED_EXTENSIONS: readonly string[] = [
+  ".pdf", ".png", ".jpg", ".jpeg", ".txt", ".docx", ".pptx",
+];
+
+export function isUnstructuredExtension(fileName: string): boolean {
+  const lower = fileName.toLowerCase();
+  return UNSTRUCTURED_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+export function getUnstructuredFileType(fileName: string): UnstructuredFileType | null {
+  const lower = fileName.toLowerCase();
+  for (const ext of UNSTRUCTURED_EXTENSIONS) {
+    if (lower.endsWith(ext)) return ext.slice(1) as UnstructuredFileType;
+  }
+  return null;
+}
+
 export interface UploadedFileEntry {
   fileId: string;
   fileName: string;
   buffer: ArrayBuffer;
   sheetNames: string[];
+  /** Set for unstructured files (PDF, PNG, TXT, DOCX, PPTX) */
+  unstructuredType?: UnstructuredFileType;
+  /** Text content extracted from unstructured files (for TXT, or after OCR) */
+  extractedText?: string;
 }
 
 export interface SheetSelection {

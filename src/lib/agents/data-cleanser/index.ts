@@ -35,6 +35,8 @@ export interface DataCleanserInput {
   originalFilePath?: string;
   modifiedFilePath?: string;
   sheetId?: string;
+  /** When set, the file is unstructured and needs OCR before processing */
+  unstructuredMimeType?: string;
 }
 
 const SNAPSHOT_SAMPLE_ROWS = 20;
@@ -518,7 +520,35 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
 
   const runId = input.sheetId ? input.sheetId.slice(0, 8) : randomUUID().slice(0, 8);
 
-  const rawTmpPath = await downloadS3FileToTmp(input.filePath);
+  let rawTmpPath: string;
+
+  if (input.unstructuredMimeType) {
+    const { extractFileFromS3 } = await import("../../ocr");
+    const ocrResult = await extractFileFromS3(
+      input.filePath,
+      input.sheetName,
+      input.unstructuredMimeType,
+      input.targetPaths,
+    );
+
+    const csvPath = path.join("/tmp", `ocr-${randomUUID()}.csv`);
+    if (ocrResult.columns.length > 0 && ocrResult.rows.length > 0) {
+      const { writeLocalCsv: writeCsv } = await import("../../utils/csv-fs");
+      await writeCsv(csvPath, ocrResult.columns, ocrResult.rows);
+    } else {
+      const fallbackCols = ["content"];
+      const fallbackRows = ocrResult.extractedText
+        .split("\n")
+        .filter((line) => line.trim())
+        .map((line) => ({ content: line }));
+      const { writeLocalCsv: writeCsv } = await import("../../utils/csv-fs");
+      await writeCsv(csvPath, fallbackCols, fallbackRows.length > 0 ? fallbackRows : [{ content: ocrResult.extractedText }]);
+    }
+    rawTmpPath = csvPath;
+  } else {
+    rawTmpPath = await downloadS3FileToTmp(input.filePath);
+  }
+
   const rawBackupPath = path.join("/tmp", `raw-backup-${randomUUID()}.csv`);
   await fs.copyFile(rawTmpPath, rawBackupPath);
 
