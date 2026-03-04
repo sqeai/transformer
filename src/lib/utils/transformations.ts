@@ -20,6 +20,7 @@ function aggregateValues(values: unknown[], fn: string): unknown {
     case "count": return values.length;
     case "min": { const nums = values.map(Number).filter((n) => !Number.isNaN(n)); return nums.length > 0 ? Math.min(...nums) : ""; }
     case "max": { const nums = values.map(Number).filter((n) => !Number.isNaN(n)); return nums.length > 0 ? Math.max(...nums) : ""; }
+    case "avg": { const nums = values.map(Number).filter((n) => !Number.isNaN(n)); return nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : ""; }
     case "concat": return [...new Set(values.map((v) => String(v ?? "")).filter(Boolean))].join(", ");
     case "first": return values[0] ?? "";
     default: return values[0] ?? "";
@@ -266,6 +267,140 @@ export function applyMap(data: FileData, params: Record<string, unknown>, target
   return { columns: targetPaths, rows: result };
 }
 
+// ---------------------------------------------------------------------------
+// mapRows — row-by-row conditional transformation with lookups
+// ---------------------------------------------------------------------------
+
+interface MapRowsCondition {
+  column: string;
+  operator: "eq" | "neq" | "contains" | "not_contains" | "gt" | "gte" | "lt" | "lte" | "regex" | "is_empty" | "is_not_empty";
+  value?: unknown;
+}
+
+interface MapRowsRule {
+  conditions: MapRowsCondition[];
+  conditionLogic?: "and" | "or";
+  targetColumn: string;
+  value: unknown;
+  valueFromColumn?: string;
+}
+
+interface MapRowsLookup {
+  sourceColumn: string;
+  lookupData: Record<string, unknown>;
+  targetColumn: string;
+  defaultValue?: unknown;
+}
+
+function evaluateCondition(row: Record<string, unknown>, cond: MapRowsCondition): boolean {
+  const cellVal = row[cond.column];
+  const cellStr = String(cellVal ?? "").trim();
+  const compareVal = String(cond.value ?? "").trim();
+
+  switch (cond.operator) {
+    case "eq": return cellStr.toLowerCase() === compareVal.toLowerCase();
+    case "neq": return cellStr.toLowerCase() !== compareVal.toLowerCase();
+    case "contains": return cellStr.toLowerCase().includes(compareVal.toLowerCase());
+    case "not_contains": return !cellStr.toLowerCase().includes(compareVal.toLowerCase());
+    case "gt": return Number(cellStr) > Number(compareVal);
+    case "gte": return Number(cellStr) >= Number(compareVal);
+    case "lt": return Number(cellStr) < Number(compareVal);
+    case "lte": return Number(cellStr) <= Number(compareVal);
+    case "regex": {
+      try { return new RegExp(compareVal, "i").test(cellStr); } catch { return false; }
+    }
+    case "is_empty": return cellStr === "";
+    case "is_not_empty": return cellStr !== "";
+    default: return false;
+  }
+}
+
+export function applyMapRows(data: FileData, params: Record<string, unknown>): FileData {
+  const rules = (params.rules ?? []) as MapRowsRule[];
+  const lookups = (params.lookups ?? []) as MapRowsLookup[];
+  const newColumns = new Set(data.columns);
+
+  for (const rule of rules) {
+    newColumns.add(rule.targetColumn);
+  }
+  for (const lookup of lookups) {
+    newColumns.add(lookup.targetColumn);
+  }
+
+  const columns = [...newColumns];
+  const rows = data.rows.map((row) => {
+    const out = { ...row };
+
+    for (const rule of rules) {
+      const results = rule.conditions.map((c) => evaluateCondition(row, c));
+      const logic = rule.conditionLogic ?? "and";
+      const match = logic === "and" ? results.every(Boolean) : results.some(Boolean);
+
+      if (match) {
+        out[rule.targetColumn] = rule.valueFromColumn ? row[rule.valueFromColumn] : rule.value;
+      }
+    }
+
+    for (const lookup of lookups) {
+      const key = String(row[lookup.sourceColumn] ?? "").trim();
+      out[lookup.targetColumn] = lookup.lookupData[key] ?? lookup.defaultValue ?? "";
+    }
+
+    return out;
+  });
+
+  return { columns, rows };
+}
+
+// ---------------------------------------------------------------------------
+// reduce — aggregate multiple columns into fewer columns by a key
+// ---------------------------------------------------------------------------
+
+interface ReduceAggregation {
+  sourceColumn: string;
+  function: string;
+  outputColumn?: string;
+}
+
+export function applyReduce(data: FileData, params: Record<string, unknown>): FileData {
+  const keyColumns = params.keyColumns as string[];
+  const aggregations = (params.aggregations ?? []) as ReduceAggregation[];
+  const includeCount = params.includeCount as boolean | undefined;
+
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const row of data.rows) {
+    const key = keyColumns.map((col) => String(row[col] ?? "")).join("|||");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(row);
+  }
+
+  const outputColumns = [...keyColumns];
+  for (const agg of aggregations) {
+    const outCol = agg.outputColumn ?? `${agg.sourceColumn}_${agg.function}`;
+    if (!outputColumns.includes(outCol)) outputColumns.push(outCol);
+  }
+  if (includeCount && !outputColumns.includes("_count")) {
+    outputColumns.push("_count");
+  }
+
+  const result: Record<string, unknown>[] = [];
+  for (const rows of groups.values()) {
+    const out: Record<string, unknown> = {};
+    for (const col of keyColumns) out[col] = rows[0][col];
+
+    for (const agg of aggregations) {
+      const values = rows.map((r) => r[agg.sourceColumn]);
+      const outCol = agg.outputColumn ?? `${agg.sourceColumn}_${agg.function}`;
+      out[outCol] = aggregateValues(values, agg.function);
+    }
+
+    if (includeCount) out["_count"] = rows.length;
+    result.push(out);
+  }
+
+  return { columns: outputColumns, rows: result };
+}
+
 export function applyBalanceSheet(data: FileData, params: Record<string, unknown>): FileData {
   const labelColumn = (params.labelColumn as string | undefined) && data.columns.includes(params.labelColumn as string)
     ? params.labelColumn as string
@@ -318,6 +453,8 @@ export function executeTransformation(data: FileData, step: TransformationStep, 
     case "unpivot": return applyUnpivot(data, step.params);
     case "expand": return applyExpand(data, step.params);
     case "aggregate": return applyAggregate(data, step.params);
+    case "mapRows": return applyMapRows(data, step.params);
+    case "reduce": return applyReduce(data, step.params);
     case "map": return applyMap(data, step.params, targetPaths);
     case "filterRows": return applyFilterRows(data, step.params);
     case "handleBalanceSheet": return applyBalanceSheet(data, step.params);

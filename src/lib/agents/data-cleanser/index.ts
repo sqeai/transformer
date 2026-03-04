@@ -92,7 +92,20 @@ You must generate the plan by calling **emitPlan** with the full ordered list of
 7. **unpivot** — melt wide columns into rows. Params: { unpivotColumns: string[], nameColumn: string, valueColumn: string, extractFields?: Array<{ fieldName: string, valuesBySourceColumn: Record<string, string> }> }
 8. **expand** — flatten hierarchy with nesting levels. Params: { labelColumn: string, maxDepth: number }
 9. **aggregate** — group and aggregate. Params: { groupByColumns: string[], aggregations: Array<{ column: string, function: "sum"|"concat"|"count"|"min"|"max"|"first" }> }
-10. **map** — map columns to target schema paths (MUST be the final transformation). Params: { mappings: Array<{ sourceColumn: string, targetPath: string, defaultValue?: string }>, defaults?: Array<{ targetPath: string, value: string }> }
+10. **mapRows** — apply row-by-row conditional transformations and lookups. Use this when you need to derive a column's value based on conditions in other columns, or populate a column via a lookup table. Params:
+    - rules: Array<{ conditions: Array<{ column: string, operator: "eq"|"neq"|"contains"|"not_contains"|"gt"|"gte"|"lt"|"lte"|"regex"|"is_empty"|"is_not_empty", value?: any }>, conditionLogic?: "and"|"or" (default "and"), targetColumn: string, value: any, valueFromColumn?: string }>
+    - lookups: Array<{ sourceColumn: string, lookupData: Record<string, any>, targetColumn: string, defaultValue?: any }>
+    Rules are evaluated in order per row. If a rule's conditions match, targetColumn is set to value (or to the row's valueFromColumn if specified). Lookups map sourceColumn values through a lookup table to produce targetColumn values.
+    Examples:
+      - Set "is_active" to TRUE when "status" equals "active": { rules: [{ conditions: [{ column: "status", operator: "eq", value: "active" }], targetColumn: "is_active", value: "TRUE" }] }
+      - Copy "full_name" from "first_name" when "last_name" is empty: { rules: [{ conditions: [{ column: "last_name", operator: "is_empty" }], targetColumn: "full_name", valueFromColumn: "first_name" }] }
+      - Map country codes to country names: { lookups: [{ sourceColumn: "country_code", lookupData: { "US": "United States", "GB": "United Kingdom" }, targetColumn: "country_name", defaultValue: "Unknown" }] }
+11. **reduce** — aggregate multiple columns by key columns, with explicit control over output column names. Similar to aggregate but allows renaming output columns and optionally includes a count. Params: { keyColumns: string[], aggregations: Array<{ sourceColumn: string, function: "sum"|"count"|"min"|"max"|"concat"|"first"|"avg", outputColumn?: string }>, includeCount?: boolean }
+    If outputColumn is omitted, defaults to "{sourceColumn}_{function}". When includeCount is true, a "_count" column is added.
+    Examples:
+      - Sum revenue by region: { keyColumns: ["region"], aggregations: [{ sourceColumn: "revenue", function: "sum", outputColumn: "total_revenue" }] }
+      - Combine metrics by product: { keyColumns: ["product_id"], aggregations: [{ sourceColumn: "quantity", function: "sum", outputColumn: "total_qty" }, { sourceColumn: "price", function: "max", outputColumn: "max_price" }], includeCount: true }
+12. **map** — map columns to target schema paths (MUST be the final transformation). Params: { mappings: Array<{ sourceColumn: string, targetPath: string, defaultValue?: string }>, defaults?: Array<{ targetPath: string, value: string }> }
 
 ### When to use filterRows vs filter
 - Use **filter** for generic noise removal (empty rows, duplicates, keyword-based removal).
@@ -110,15 +123,18 @@ Priority order within this phase:
 1. **filter** — remove only obvious noise (empty rows, title/summary rows). Be conservative.
 2. **filterRows** — if the user directive asks to remove or keep specific rows based on column values, apply this step. This is the PRIMARY tool for user-requested row removal/filtering.
 3. **padColumns** — forward-fill empty cells. Check ALL columns for empty cells. ANY column with >0% empty cells that follows a group/category pattern MUST be padded. Include ALL such columns.
-4. **unpivot** — if wide columns represent repeating categories or time periods, melt them into rows. This ADDS rows and is safe.
-5. **expand** / **handleBalanceSheet** — flatten hierarchies. This restructures but preserves data.
+4. **mapRows** — derive new columns or fill existing columns based on conditional logic or lookups. Use this when the user wants to set a column's value based on another column's value (e.g., "set X to TRUE if Y is Z"), or to map values through a lookup table. This is safe — it only adds/modifies columns, never removes rows.
+5. **unpivot** — if wide columns represent repeating categories or time periods, melt them into rows. This ADDS rows and is safe.
+6. **expand** / **handleBalanceSheet** — flatten hierarchies. This restructures but preserves data.
 
 ### PHASE 2: Transformation (reshaping and finalizing)
 Goal: Reshape the cleansed data into the target schema.
 1. **filterRows** — can also be used here if filtering depends on columns created during cleansing.
-2. **trimColumns** — drop columns no longer needed (only AFTER cleansing is complete).
-3. **aggregate** — group and aggregate if needed.
-4. **map** — map to final schema (MUST be the last step).
+2. **mapRows** — can also be used here for post-cleansing conditional transformations or lookups.
+3. **trimColumns** — drop columns no longer needed (only AFTER cleansing is complete).
+4. **aggregate** — group and aggregate if needed.
+5. **reduce** — aggregate columns by key with explicit output column naming. Use when you need more control over output column names than aggregate provides, or when combining multiple metrics.
+6. **map** — map to final schema (MUST be the last step).
 
 ## CRITICAL Rules
 

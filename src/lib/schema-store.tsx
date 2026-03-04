@@ -87,6 +87,8 @@ export interface PipelineNode {
     | "unpivot"
     | "expand"
     | "aggregate"
+    | "mapRows"
+    | "reduce"
     | "map"
     | "target";
   label: string;
