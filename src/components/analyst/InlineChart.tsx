@@ -312,18 +312,17 @@ function ChartView({
     }
 
     case "scatter": {
-      const xValueKey = valueKeys[0];
-      const yValueKey = valueKeys[1] ?? valueKeys[0];
+      const yValueKey = valueKeys[0];
       return (
         <ResponsiveContainer width="100%" height="100%">
           <ScatterChart>
             <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
             <XAxis
-              dataKey={xValueKey}
-              name={xValueKey}
+              dataKey={labelKey}
+              name={labelKey}
               tick={{ fontSize: 11 }}
               tickLine={false}
-              tickFormatter={fmtAxis}
+              type="category"
             />
             <YAxis
               dataKey={yValueKey}
@@ -335,10 +334,6 @@ function ChartView({
             <Tooltip
               contentStyle={tooltipStyle}
               formatter={fmtTooltip}
-              labelFormatter={(_, payload) => {
-                const item = payload?.[0]?.payload as Record<string, unknown> | undefined;
-                return item ? String(item[labelKey] ?? "") : "";
-              }}
             />
             <Scatter data={data} fill={COLORS[0]}>
               {data.map((_, index) => (
