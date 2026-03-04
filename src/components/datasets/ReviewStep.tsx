@@ -1,0 +1,357 @@
+"use client";
+
+import { useState } from "react";
+import dynamic from "next/dynamic";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { DataTable } from "@/components/DataTable";
+import { TransformationStepList } from "@/components/TransformationStepList";
+import { ArrowLeft, ArrowRight, Loader2, Sparkles, Square } from "lucide-react";
+import { cn } from "@/lib/utils";
+import type {
+  SheetJobResult,
+  PipelineDescriptor,
+  TransformationMappingEntry,
+} from "@/lib/schema-store";
+
+const MappingFlow = dynamic<{
+  pipeline?: PipelineDescriptor;
+  pipelines?: PipelineDescriptor[];
+  className?: string;
+}>(() => import("@/components/MappingFlow"), { ssr: false });
+
+const PREVIEW_ROWS = 100;
+
+function buildPipelineFromIteration(
+  iteration: TransformationMappingEntry[],
+  iterationIndex: number,
+): PipelineDescriptor {
+  const iterationTag = `Iteration ${iterationIndex + 1}`;
+  const sourceId = `iteration-${iterationIndex}-source`;
+  const targetId = `iteration-${iterationIndex}-target`;
+
+  const nodes: PipelineDescriptor["nodes"] = [
+    { id: sourceId, type: "source", label: `${iterationTag} Input`, data: {} },
+    ...iteration.map((entry, idx) => ({
+      id: `iteration-${iterationIndex}-step-${idx}`,
+      type: "map" as const,
+      label: `${entry.step}. ${entry.tool}`,
+      data: {
+        ...entry.params,
+        phase: entry.phase,
+        rowCountBefore: entry.rowCountBefore,
+        rowCountAfter: entry.rowCountAfter,
+      },
+    })),
+    { id: targetId, type: "target", label: `${iterationTag} Output`, data: {} },
+  ];
+
+  const edges: PipelineDescriptor["edges"] = [];
+  const firstStepId =
+    iteration.length > 0
+      ? `iteration-${iterationIndex}-step-0`
+      : targetId;
+  edges.push({
+    id: `iteration-${iterationIndex}-edge-source`,
+    source: sourceId,
+    target: firstStepId,
+  });
+
+  for (let idx = 0; idx < iteration.length - 1; idx += 1) {
+    edges.push({
+      id: `iteration-${iterationIndex}-edge-${idx}`,
+      source: `iteration-${iterationIndex}-step-${idx}`,
+      target: `iteration-${iterationIndex}-step-${idx + 1}`,
+    });
+  }
+
+  if (iteration.length > 0) {
+    edges.push({
+      id: `iteration-${iterationIndex}-edge-target`,
+      source: `iteration-${iterationIndex}-step-${iteration.length - 1}`,
+      target: targetId,
+    });
+  }
+
+  return { nodes, edges };
+}
+
+type ReviewSubTab = "original" | "modified" | "transformations" | "mapping";
+
+interface ReviewStepProps {
+  reviewableResults: SheetJobResult[];
+  exportableCount: number;
+  anySheetProcessing: boolean;
+  modifyPrompt: string;
+  onModifyPromptChange: (value: string) => void;
+  onModifyWithAI: (result: SheetJobResult) => void;
+  onStopModify: () => void;
+  modifySubmittingSheetKey: string | null;
+  originalPreview: {
+    columns: string[];
+    rows: Record<string, unknown>[];
+    totalRows: number;
+    visibleRows: number;
+  } | null;
+  originalPreviewLoading: boolean;
+  onLoadOriginalPreview: (result: SheetJobResult) => void;
+  originalVisibleCount: number;
+  onLoadMoreOriginal: () => void;
+  onBack: () => void;
+  onNext: () => void;
+}
+
+export function ReviewStep({
+  reviewableResults,
+  exportableCount,
+  anySheetProcessing,
+  modifyPrompt,
+  onModifyPromptChange,
+  onModifyWithAI,
+  onStopModify,
+  modifySubmittingSheetKey,
+  originalPreview,
+  originalPreviewLoading,
+  onLoadOriginalPreview,
+  originalVisibleCount,
+  onLoadMoreOriginal,
+  onBack,
+  onNext,
+}: ReviewStepProps) {
+  const [reviewSheetIndex, setReviewSheetIndex] = useState(0);
+  const [reviewSubTab, setReviewSubTab] = useState<ReviewSubTab>("modified");
+  const [modifiedVisibleCount, setModifiedVisibleCount] = useState(PREVIEW_ROWS);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between">
+        <Button
+          variant="outline"
+          onClick={onBack}
+          disabled={anySheetProcessing}
+        >
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back
+        </Button>
+        <Button
+          onClick={onNext}
+          disabled={exportableCount === 0 || anySheetProcessing}
+        >
+          Next: Export {exportableCount} sheet
+          {exportableCount !== 1 ? "s" : ""}
+          <ArrowRight className="ml-2 h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="flex flex-wrap gap-2 border-b pb-2">
+        {reviewableResults.map((r, i) => {
+          const key = `${r.sheet.fileId}:${r.sheet.sheetIndex}`;
+          return (
+            <button
+              key={key}
+              type="button"
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm border transition-colors bg-background",
+                reviewSheetIndex === i
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "border-border text-muted-foreground hover:bg-muted",
+              )}
+              onClick={() => {
+                setReviewSheetIndex(i);
+                setReviewSubTab("modified");
+                setModifiedVisibleCount(PREVIEW_ROWS);
+              }}
+            >
+              {r.sheet.sheetName}
+            </button>
+          );
+        })}
+      </div>
+
+      {reviewableResults.length > 0 &&
+        reviewableResults[reviewSheetIndex] &&
+        (() => {
+          const currentResult = reviewableResults[reviewSheetIndex];
+          const transformedRows =
+            currentResult.result?.transformedRows ?? [];
+          const transformedCols =
+            currentResult.result?.transformedColumns ?? [];
+          const pipeline = currentResult.result?.pipeline;
+          const mappingIterations =
+            currentResult.result?.mappingIterations ??
+            (currentResult.result?.mapping
+              ? [currentResult.result.mapping]
+              : []);
+          const iterationPipelines = mappingIterations.map(
+            (iteration, idx) => buildPipelineFromIteration(iteration, idx),
+          );
+          const currentSheetProcessing =
+            currentResult.status === "pending" ||
+            currentResult.status === "running";
+          const currentSheetKey = `${currentResult.sheet.fileId}:${currentResult.sheet.sheetIndex}`;
+          const currentSheetSubmitting =
+            modifySubmittingSheetKey === currentSheetKey;
+          const showModifyLoading =
+            currentSheetProcessing || currentSheetSubmitting;
+
+          return (
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base">
+                      {currentResult.sheet.fileName} /{" "}
+                      {currentResult.sheet.sheetName}
+                    </CardTitle>
+                    <CardDescription>
+                      {transformedRows.length} rows,{" "}
+                      {transformedCols.length} columns
+                    </CardDescription>
+                  </div>
+                </div>
+
+                <div className="flex gap-1 mt-3">
+                  {(
+                    [
+                      "original",
+                      "modified",
+                      "transformations",
+                      "mapping",
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      className={cn(
+                        "px-3 py-1.5 text-sm rounded-md transition-colors",
+                        reviewSubTab === tab
+                          ? "bg-muted font-medium"
+                          : "text-muted-foreground hover:bg-muted/50",
+                      )}
+                      onClick={() => {
+                        setReviewSubTab(tab);
+                        if (tab === "original" && !originalPreview) {
+                          onLoadOriginalPreview(currentResult);
+                        }
+                      }}
+                    >
+                      {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {reviewSubTab === "original" && (
+                  <DataTable
+                    columns={originalPreview?.columns ?? []}
+                    rows={
+                      originalPreview?.rows.slice(0, originalVisibleCount) ??
+                      []
+                    }
+                    totalRows={originalPreview?.totalRows}
+                    loading={originalPreviewLoading}
+                    loadingMessage="Loading original data..."
+                    emptyMessage="No preview available."
+                    onLoadMore={onLoadMoreOriginal}
+                  />
+                )}
+
+                {reviewSubTab === "modified" && (
+                  <div className="space-y-4">
+                    <div className="flex items-end gap-2">
+                      <Textarea
+                        placeholder="Describe how to modify this data (e.g. 'Remove all rows where amount is 0', 'Combine first and last name columns')..."
+                        value={modifyPrompt}
+                        onChange={(e) =>
+                          onModifyPromptChange(e.target.value)
+                        }
+                        className="flex-4"
+                        rows={2}
+                        disabled={showModifyLoading}
+                      />
+                      <Button
+                        onClick={() => onModifyWithAI(currentResult)}
+                        disabled={
+                          !modifyPrompt.trim() ||
+                          anySheetProcessing ||
+                          currentSheetSubmitting
+                        }
+                        className="rainbow-border rounded-md border-0 bg-white px-3 text-xs font-medium text-foreground hover:bg-gradient-to-r hover:from-fuchsia-500 hover:via-violet-500 hover:to-cyan-500 hover:text-white min-h-[80px] flex-1 shrink-0 self-end"
+                      >
+                        {showModifyLoading ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="mr-2 h-4 w-4" />
+                        )}
+                        Modify using AI
+                      </Button>
+                    </div>
+
+                    {currentSheetProcessing && (
+                      <div className="flex items-center justify-between gap-2 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                          AI Data Cleanser is re-processing this sheet...
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={onStopModify}
+                        >
+                          <Square className="mr-1.5 h-3.5 w-3.5" />
+                          Stop
+                        </Button>
+                      </div>
+                    )}
+
+                    <DataTable
+                      columns={transformedCols}
+                      rows={transformedRows.slice(0, modifiedVisibleCount)}
+                      totalRows={transformedRows.length}
+                      onLoadMore={() =>
+                        setModifiedVisibleCount(
+                          (prev) => prev + PREVIEW_ROWS,
+                        )
+                      }
+                    />
+                  </div>
+                )}
+
+                {reviewSubTab === "transformations" && (
+                  <TransformationStepList iterations={mappingIterations} />
+                )}
+
+                {reviewSubTab === "mapping" &&
+                  iterationPipelines.length > 0 && (
+                    <div className="overflow-auto">
+                      <MappingFlow pipelines={iterationPipelines} />
+                    </div>
+                  )}
+                {reviewSubTab === "mapping" &&
+                  iterationPipelines.length === 0 &&
+                  pipeline && (
+                    <div className="overflow-auto">
+                      <MappingFlow pipeline={pipeline} />
+                    </div>
+                  )}
+                {reviewSubTab === "mapping" &&
+                  iterationPipelines.length === 0 &&
+                  !pipeline && (
+                    <p className="text-muted-foreground text-center py-4">
+                      No pipeline data available.
+                    </p>
+                  )}
+              </CardContent>
+            </Card>
+          );
+        })()}
+    </div>
+  );
+}

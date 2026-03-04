@@ -2,85 +2,27 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import dynamic from "next/dynamic";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import {
   useSchemaStore,
   flattenFields,
-  type PipelineDescriptor,
   type SheetSelection,
   type SheetJobResult,
   type TransformationMappingEntry,
 } from "@/lib/schema-store";
 import { extractExcelGridTopBottom } from "@/lib/parse-excel-preview";
 import { parseExcelToRows } from "@/lib/parse-excel";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  Database,
-  Download,
-  FileSpreadsheet,
-  Loader2,
-  Sparkles,
-  Square,
-  XCircle,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
 import ExcelJS from "exceljs";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-
-const MappingFlow = dynamic<{
-  pipeline?: PipelineDescriptor;
-  pipelines?: PipelineDescriptor[];
-  className?: string;
-}>(() => import("@/components/MappingFlow"), { ssr: false });
+import { StepIndicator, STEPS, type Step } from "@/components/datasets/StepIndicator";
+import { UploadStep } from "@/components/datasets/UploadStep";
+import { ProcessingStep } from "@/components/datasets/ProcessingStep";
+import { ReviewStep } from "@/components/datasets/ReviewStep";
+import { ExportStep } from "@/components/datasets/ExportStep";
 
 const PREVIEW_ROWS = 100;
 const POLL_INTERVAL_MS = 1500;
-
-type Step = "upload" | "processing" | "review" | "export";
-
-const STEPS: { key: Step; label: string; number: number }[] = [
-  { key: "upload", label: "Upload Raw Data", number: 1 },
-  { key: "processing", label: "Processing", number: 2 },
-  { key: "review", label: "Review", number: 3 },
-  { key: "export", label: "Export", number: 4 },
-];
 
 interface PreviewState {
   columns: string[];
@@ -92,6 +34,23 @@ interface PreviewState {
 interface UploadedSheetRef {
   sheetId: string;
   filePath: string;
+}
+
+function escapeCsvCell(value: unknown): string {
+  const text = String(value ?? "");
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replace(/"/g, "\"\"")}"`;
+  }
+  return text;
+}
+
+function rowsToCsv(columns: string[], rows: Record<string, unknown>[]): string {
+  const lines: string[] = [];
+  lines.push(columns.map((col) => escapeCsvCell(col)).join(","));
+  for (const row of rows) {
+    lines.push(columns.map((col) => escapeCsvCell(row[col])).join(","));
+  }
+  return lines.join("\n");
 }
 
 function isSameTransformationIteration(
@@ -145,119 +104,6 @@ function mergeJobResultWithIterationHistory(
   };
 }
 
-function buildPipelineFromIteration(
-  iteration: TransformationMappingEntry[],
-  iterationIndex: number,
-): PipelineDescriptor {
-  const iterationTag = `Iteration ${iterationIndex + 1}`;
-  const sourceId = `iteration-${iterationIndex}-source`;
-  const targetId = `iteration-${iterationIndex}-target`;
-
-  const nodes: PipelineDescriptor["nodes"] = [
-    {
-      id: sourceId,
-      type: "source",
-      label: `${iterationTag} Input`,
-      data: {},
-    },
-    ...iteration.map((entry, idx) => ({
-      id: `iteration-${iterationIndex}-step-${idx}`,
-      type: "map" as const,
-      label: `${entry.step}. ${entry.tool}`,
-      data: {
-        ...entry.params,
-        phase: entry.phase,
-        rowCountBefore: entry.rowCountBefore,
-        rowCountAfter: entry.rowCountAfter,
-      },
-    })),
-    {
-      id: targetId,
-      type: "target",
-      label: `${iterationTag} Output`,
-      data: {},
-    },
-  ];
-
-  const edges: PipelineDescriptor["edges"] = [];
-  const firstStepId = iteration.length > 0 ? `iteration-${iterationIndex}-step-0` : targetId;
-  edges.push({
-    id: `iteration-${iterationIndex}-edge-source`,
-    source: sourceId,
-    target: firstStepId,
-  });
-
-  for (let idx = 0; idx < iteration.length - 1; idx += 1) {
-    edges.push({
-      id: `iteration-${iterationIndex}-edge-${idx}`,
-      source: `iteration-${iterationIndex}-step-${idx}`,
-      target: `iteration-${iterationIndex}-step-${idx + 1}`,
-    });
-  }
-
-  if (iteration.length > 0) {
-    edges.push({
-      id: `iteration-${iterationIndex}-edge-target`,
-      source: `iteration-${iterationIndex}-step-${iteration.length - 1}`,
-      target: targetId,
-    });
-  }
-
-  return { nodes, edges };
-}
-
-function escapeCsvCell(value: unknown): string {
-  const text = String(value ?? "");
-  if (/[",\n\r]/.test(text)) {
-    return `"${text.replace(/"/g, "\"\"")}"`;
-  }
-  return text;
-}
-
-function rowsToCsv(columns: string[], rows: Record<string, unknown>[]): string {
-  const lines: string[] = [];
-  lines.push(columns.map((col) => escapeCsvCell(col)).join(","));
-  for (const row of rows) {
-    lines.push(columns.map((col) => escapeCsvCell(row[col])).join(","));
-  }
-  return lines.join("\n");
-}
-
-function StepIndicator({ currentStep }: { currentStep: Step }) {
-  const currentIndex = STEPS.findIndex((s) => s.key === currentStep);
-  return (
-    <div className="flex items-center gap-2 mb-6">
-      {STEPS.map((step, i) => (
-        <div key={step.key} className="flex items-center gap-2">
-          <div
-            className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-colors",
-              i < currentIndex
-                ? "bg-primary text-primary-foreground"
-                : i === currentIndex
-                  ? "bg-primary text-primary-foreground ring-2 ring-primary/30 ring-offset-2"
-                  : "bg-muted text-muted-foreground",
-            )}
-          >
-            {i < currentIndex ? <Check className="h-4 w-4" /> : step.number}
-          </div>
-          <span
-            className={cn(
-              "text-sm font-medium hidden sm:inline",
-              i === currentIndex ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {step.label}
-          </span>
-          {i < STEPS.length - 1 && (
-            <div className={cn("h-px w-8", i < currentIndex ? "bg-primary" : "bg-border")} />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function NewDatasetPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -284,22 +130,15 @@ function NewDatasetPageContent() {
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   const hasManuallyToggledSheets = useRef(false);
 
-  // Preview state
   const [previewSheet, setPreviewSheet] = useState<SheetSelection | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewTopRows, setPreviewTopRows] = useState(PREVIEW_ROWS);
 
-  // Processing state
   const [jobResults, setJobResults] = useState<SheetJobResult[]>(datasetWorkflow.jobResults);
   const [uploadedSheetRefs, setUploadedSheetRefs] = useState<Record<string, UploadedSheetRef>>({});
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Review state
-  const [reviewSheetIndex, setReviewSheetIndex] = useState(0);
-  const [reviewSubTab, setReviewSubTab] = useState<"original" | "modified" | "transformations" | "mapping">("modified");
-  const [expandedTransformStep, setExpandedTransformStep] = useState<string | null>(null);
-  const [transformPreviewMode, setTransformPreviewMode] = useState<"before" | "after">("after");
   const [modifyPrompt, setModifyPrompt] = useState("");
   const modifyPollingRef = useRef<NodeJS.Timeout | null>(null);
   const modifyJobIdRef = useRef<string | null>(null);
@@ -308,10 +147,8 @@ function NewDatasetPageContent() {
   const [originalPreviewLoading, setOriginalPreviewLoading] = useState(false);
   const allOriginalRowsRef = useRef<Record<string, unknown>[]>([]);
   const [originalVisibleCount, setOriginalVisibleCount] = useState(PREVIEW_ROWS);
-  const [modifiedVisibleCount, setModifiedVisibleCount] = useState(PREVIEW_ROWS);
   const [downloadingExcel, setDownloadingExcel] = useState(false);
 
-  // Export state
   const [exportTargetDatasetId, setExportTargetDatasetId] = useState<string>(
     datasetIdParam ?? datasetWorkflow.exportTargetDatasetId ?? "__new",
   );
@@ -320,6 +157,9 @@ function NewDatasetPageContent() {
   const [exporting, setExporting] = useState(false);
 
   const files = datasetWorkflow.files;
+
+  // --- Navigation ---
+
   const handleHeaderBack = useCallback(() => {
     const currentIndex = STEPS.findIndex((candidate) => candidate.key === step);
     const previousStep = currentIndex > 0 ? STEPS[currentIndex - 1]?.key : null;
@@ -329,6 +169,8 @@ function NewDatasetPageContent() {
     }
     router.push("/datasets");
   }, [router, step]);
+
+  // --- Sheet upload helper ---
 
   const uploadSheetCsv = useCallback(async (
     args: {
@@ -344,73 +186,51 @@ function NewDatasetPageContent() {
       body: JSON.stringify({
         name: args.sheetName,
         type: args.type,
-        dimensions: {
-          rowCount: args.rows.length,
-          columnCount: args.columns.length,
-        },
+        dimensions: { rowCount: args.rows.length, columnCount: args.columns.length },
       }),
     });
     const presignData = await presignRes.json();
-    if (!presignRes.ok) {
-      throw new Error(presignData.error ?? "Failed to request sheet upload URL");
-    }
+    if (!presignRes.ok) throw new Error(presignData.error ?? "Failed to request sheet upload URL");
 
     const csvPayload = rowsToCsv(args.columns, args.rows);
     const uploadRes = await fetch(String(presignData.uploadUrl), {
       method: "PUT",
-      headers: {
-        "Content-Type": "text/csv",
-      },
+      headers: { "Content-Type": "text/csv" },
       body: csvPayload,
     });
-    if (!uploadRes.ok) {
-      throw new Error("Failed to upload sheet CSV to S3");
-    }
+    if (!uploadRes.ok) throw new Error("Failed to upload sheet CSV to S3");
 
-    return {
-      sheetId: String(presignData.sheetId),
-      filePath: String(presignData.filePath),
-    };
+    return { sheetId: String(presignData.sheetId), filePath: String(presignData.filePath) };
   }, []);
 
-  // Auto-expand files
+  // --- Auto-expand / auto-select effects ---
+
   useEffect(() => {
     if (files.length > 0 && expandedFiles.size === 0) {
       setExpandedFiles(new Set(files.map((f) => f.fileId)));
     }
   }, [files]);
 
-  // Auto-select all sheets initially (only on first load, not after manual deselect)
   useEffect(() => {
     if (selectedSheets.length === 0 && files.length > 0 && !hasManuallyToggledSheets.current) {
       const allSheets: SheetSelection[] = [];
       for (const file of files) {
         for (let i = 0; i < file.sheetNames.length; i++) {
-          allSheets.push({
-            fileId: file.fileId,
-            fileName: file.fileName,
-            sheetIndex: i,
-            sheetName: file.sheetNames[i],
-          });
+          allSheets.push({ fileId: file.fileId, fileName: file.fileName, sheetIndex: i, sheetName: file.sheetNames[i] });
         }
       }
       setSelectedSheets(allSheets);
     }
   }, [files, selectedSheets.length]);
 
-  // Default preview to the first sheet
   useEffect(() => {
     if (!previewSheet && files.length > 0 && files[0].sheetNames.length > 0) {
-      setPreviewSheet({
-        fileId: files[0].fileId,
-        fileName: files[0].fileName,
-        sheetIndex: 0,
-        sheetName: files[0].sheetNames[0],
-      });
+      setPreviewSheet({ fileId: files[0].fileId, fileName: files[0].fileName, sheetIndex: 0, sheetName: files[0].sheetNames[0] });
     }
   }, [files, previewSheet]);
 
-  // Load preview for selected sheet
+  // --- Preview loading ---
+
   useEffect(() => {
     setPreviewTopRows(PREVIEW_ROWS);
   }, [previewSheet?.fileId, previewSheet?.sheetIndex]);
@@ -425,20 +245,12 @@ function NewDatasetPageContent() {
 
     (async () => {
       try {
-        const result = await extractExcelGridTopBottom(
-          file.buffer,
-          previewTopRows,
-          0,
-          100,
-          previewSheet.sheetIndex,
-        );
+        const result = await extractExcelGridTopBottom(file.buffer, previewTopRows, 0, 100, previewSheet.sheetIndex);
         if (cancelled) return;
         const columns = result.rows.length > 0 ? result.rows[0].data.map((_: string, i: number) => `Column ${i + 1}`) : [];
         const rows = result.rows.map((r: { originalIndex: number; data: string[] }) => {
           const row: Record<string, unknown> = {};
-          r.data.forEach((cell: string, i: number) => {
-            row[columns[i]] = cell;
-          });
+          r.data.forEach((cell: string, i: number) => { row[columns[i]] = cell; });
           return row;
         });
         setPreview({ columns, rows, totalRows: result.totalRows, visibleRows: rows.length });
@@ -452,15 +264,13 @@ function NewDatasetPageContent() {
     return () => { cancelled = true; };
   }, [previewSheet, files, previewTopRows]);
 
-  // Persist workflow state
+  // --- Persist workflow state ---
+
   useEffect(() => {
-    setDatasetWorkflow({
-      step,
-      selectedSheets,
-      jobResults,
-      confirmedSheetIds: [],
-    });
+    setDatasetWorkflow({ step, selectedSheets, jobResults, confirmedSheetIds: [] });
   }, [step, selectedSheets, jobResults]);
+
+  // --- Sheet selection ---
 
   const toggleSheet = (sheet: SheetSelection) => {
     hasManuallyToggledSheets.current = true;
@@ -476,105 +286,36 @@ function NewDatasetPageContent() {
     hasManuallyToggledSheets.current = true;
     const file = files.find((f) => f.fileId === fileId);
     if (!file) return;
-
     const fileSheets: SheetSelection[] = file.sheetNames.map((sheetName, sheetIndex) => ({
-      fileId: file.fileId,
-      fileName: file.fileName,
-      sheetIndex,
-      sheetName,
+      fileId: file.fileId, fileName: file.fileName, sheetIndex, sheetName,
     }));
-
     setSelectedSheets((prev) => {
       const allSelected = fileSheets.every((sheet) =>
         prev.some((s) => s.fileId === sheet.fileId && s.sheetIndex === sheet.sheetIndex),
       );
-
-      if (allSelected) {
-        return prev.filter((s) => s.fileId !== file.fileId);
-      }
-
+      if (allSelected) return prev.filter((s) => s.fileId !== file.fileId);
       const existingKeys = new Set(prev.map((s) => `${s.fileId}:${s.sheetIndex}`));
-      const missingSheets = fileSheets.filter(
-        (sheet) => !existingKeys.has(`${sheet.fileId}:${sheet.sheetIndex}`),
-      );
+      const missingSheets = fileSheets.filter((sheet) => !existingKeys.has(`${sheet.fileId}:${sheet.sheetIndex}`));
       return [...prev, ...missingSheets];
+    });
+  };
+
+  const toggleFile = (fileId: string) => {
+    setExpandedFiles((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileId)) next.delete(fileId);
+      else next.add(fileId);
+      return next;
     });
   };
 
   const isSheetSelected = (fileId: string, sheetIndex: number) =>
     selectedSheets.some((s) => s.fileId === fileId && s.sheetIndex === sheetIndex);
 
-  // Step 2: Submit jobs
-  const submitJobs = useCallback(async () => {
-    if (!schemaId || selectedSheets.length === 0) return;
+  // --- Job submission & polling ---
 
-    setStep("processing");
-    const results: SheetJobResult[] = [];
-    const nextUploadedRefs: Record<string, UploadedSheetRef> = {};
-
-    for (const sheet of selectedSheets) {
-      const file = files.find((f) => f.fileId === sheet.fileId);
-      if (!file) continue;
-
-      try {
-        const parsed = await parseExcelToRows(file.buffer, {
-          headerRowIndex: 0,
-          dataStartRowIndex: 1,
-          sheetIndex: sheet.sheetIndex,
-        });
-        const uploaded = await uploadSheetCsv({
-          sheetName: sheet.sheetName,
-          columns: parsed.columns,
-          rows: parsed.rows,
-          type: "raw",
-        });
-        nextUploadedRefs[`${sheet.fileId}:${sheet.sheetIndex}`] = uploaded;
-
-        const res = await fetch("/api/jobs", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type: "data_cleanse",
-            sheetId: uploaded.sheetId,
-            payload: {
-              filePath: uploaded.filePath,
-              targetPaths,
-              sheetName: sheet.sheetName,
-            },
-          }),
-        });
-
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? "Failed to create job");
-
-        results.push({
-          jobId: data.jobId,
-          sheet,
-          status: "pending",
-        });
-      } catch (err) {
-        results.push({
-          jobId: "",
-          sheet,
-          status: "failed",
-          error: err instanceof Error ? err.message : "Failed to create job",
-        });
-      }
-    }
-
-    setUploadedSheetRefs((prev) => ({ ...prev, ...nextUploadedRefs }));
-    setJobResults(results);
-
-    // Trigger job processing
-    fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
-
-    // Start polling
-    startPolling(results);
-  }, [schemaId, selectedSheets, files, targetPaths, uploadSheetCsv]);
-
-  const startPolling = (initialResults: SheetJobResult[]) => {
+  const startPolling = useCallback((initialResults: SheetJobResult[]) => {
     if (pollingRef.current) clearInterval(pollingRef.current);
-
     const jobIds = initialResults.filter((r) => r.jobId).map((r) => r.jobId);
     if (jobIds.length === 0) return;
 
@@ -585,87 +326,82 @@ function NewDatasetPageContent() {
         if (!res.ok) return;
 
         const jobMap = new Map<string, { status: string; result?: unknown; error?: string }>();
-        for (const job of data.jobs ?? []) {
-          jobMap.set(job.id, job);
-        }
+        for (const job of data.jobs ?? []) jobMap.set(job.id, job);
 
         setJobResults((prev) => {
           const updated = prev.map((r) => {
             const job = jobMap.get(r.jobId);
             if (!job) return r;
             const nextStatus = job.status as SheetJobResult["status"];
-            const merged = mergeJobResultWithIterationHistory(
-              r,
-              job.result as SheetJobResult["result"] | undefined,
-              nextStatus,
-              r.jobId,
-            );
-            return {
-              ...r,
-              status: nextStatus,
-              result: merged.result,
-              transformationIterationJobIds: merged.transformationIterationJobIds,
-              error: job.error,
-            };
+            const merged = mergeJobResultWithIterationHistory(r, job.result as SheetJobResult["result"] | undefined, nextStatus, r.jobId);
+            return { ...r, status: nextStatus, result: merged.result, transformationIterationJobIds: merged.transformationIterationJobIds, error: job.error };
           });
 
-          const allDone = updated.every(
-            (r) => r.status === "completed" || r.status === "failed" || !r.jobId,
-          );
-
+          const allDone = updated.every((r) => r.status === "completed" || r.status === "failed" || !r.jobId);
           if (allDone) {
-            if (pollingRef.current) {
-              clearInterval(pollingRef.current);
-              pollingRef.current = null;
-            }
-            // Re-trigger processing for any pending jobs
-            const hasPending = updated.some((r) => r.status === "pending");
-            if (hasPending) {
+            if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
+            if (updated.some((r) => r.status === "pending")) {
               fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
             }
           }
-
           return updated;
         });
 
-        // Retrigger processing periodically
         fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
-      } catch {
-        // ignore polling errors
-      }
+      } catch { /* ignore */ }
     }, POLL_INTERVAL_MS);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
   }, []);
+
+  const submitJobs = useCallback(async () => {
+    if (!schemaId || selectedSheets.length === 0) return;
+    setStep("processing");
+    const results: SheetJobResult[] = [];
+    const nextUploadedRefs: Record<string, UploadedSheetRef> = {};
+
+    for (const sheet of selectedSheets) {
+      const file = files.find((f) => f.fileId === sheet.fileId);
+      if (!file) continue;
+      try {
+        const parsed = await parseExcelToRows(file.buffer, { headerRowIndex: 0, dataStartRowIndex: 1, sheetIndex: sheet.sheetIndex });
+        const uploaded = await uploadSheetCsv({ sheetName: sheet.sheetName, columns: parsed.columns, rows: parsed.rows, type: "raw" });
+        nextUploadedRefs[`${sheet.fileId}:${sheet.sheetIndex}`] = uploaded;
+
+        const res = await fetch("/api/jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "data_cleanse", sheetId: uploaded.sheetId, payload: { filePath: uploaded.filePath, targetPaths, sheetName: sheet.sheetName } }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Failed to create job");
+        results.push({ jobId: data.jobId, sheet, status: "pending" });
+      } catch (err) {
+        results.push({ jobId: "", sheet, status: "failed", error: err instanceof Error ? err.message : "Failed to create job" });
+      }
+    }
+
+    setUploadedSheetRefs((prev) => ({ ...prev, ...nextUploadedRefs }));
+    setJobResults(results);
+    fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
+    startPolling(results);
+  }, [schemaId, selectedSheets, files, targetPaths, uploadSheetCsv, startPolling]);
+
+  useEffect(() => { return () => { if (pollingRef.current) clearInterval(pollingRef.current); }; }, []);
 
   const allJobsDone = jobResults.length > 0 && jobResults.every(
     (r) => r.status === "completed" || r.status === "failed" || !r.jobId,
   );
 
-  // Load original data for review tab
+  // --- Review: original preview ---
+
   const loadOriginalPreview = useCallback(async (sheetResult: SheetJobResult) => {
     const file = files.find((f) => f.fileId === sheetResult.sheet.fileId);
     if (!file) return;
-
     setOriginalPreviewLoading(true);
     try {
-      const parsed = await parseExcelToRows(file.buffer, {
-        headerRowIndex: 0,
-        dataStartRowIndex: 1,
-        sheetIndex: sheetResult.sheet.sheetIndex,
-      });
+      const parsed = await parseExcelToRows(file.buffer, { headerRowIndex: 0, dataStartRowIndex: 1, sheetIndex: sheetResult.sheet.sheetIndex });
       allOriginalRowsRef.current = parsed.rows;
       setOriginalVisibleCount(PREVIEW_ROWS);
-      setOriginalPreview({
-        columns: parsed.columns,
-        rows: parsed.rows,
-        totalRows: parsed.rows.length,
-        visibleRows: parsed.rows.length,
-      });
+      setOriginalPreview({ columns: parsed.columns, rows: parsed.rows, totalRows: parsed.rows.length, visibleRows: parsed.rows.length });
     } catch {
       setOriginalPreview(null);
     } finally {
@@ -673,13 +409,13 @@ function NewDatasetPageContent() {
     }
   }, [files]);
 
-  // Any sheet currently being re-processed (globally blocks nav)
   const anySheetProcessing = useMemo(
     () => jobResults.some((r) => r.status === "pending" || r.status === "running"),
     [jobResults],
   );
 
-  // Start polling for modify job
+  // --- Modify with AI ---
+
   const startModifyPolling = useCallback((jobId: string) => {
     if (modifyPollingRef.current) clearInterval(modifyPollingRef.current);
     modifyJobIdRef.current = jobId;
@@ -689,7 +425,6 @@ function NewDatasetPageContent() {
         const res = await fetch(`/api/jobs?ids=${jobId}`);
         const data = await res.json();
         if (!res.ok) return;
-
         const job = data.jobs?.[0];
         if (!job) return;
 
@@ -697,46 +432,24 @@ function NewDatasetPageContent() {
           prev.map((r) => {
             if (r.jobId !== jobId) return r;
             const nextStatus = job.status as SheetJobResult["status"];
-            const merged = mergeJobResultWithIterationHistory(
-              r,
-              (job.result as SheetJobResult["result"] | undefined) ?? r.result,
-              nextStatus,
-              jobId,
-            );
-            return {
-              ...r,
-              status: nextStatus,
-              result: merged.result,
-              transformationIterationJobIds: merged.transformationIterationJobIds,
-              error: job.error,
-            };
+            const merged = mergeJobResultWithIterationHistory(r, (job.result as SheetJobResult["result"] | undefined) ?? r.result, nextStatus, jobId);
+            return { ...r, status: nextStatus, result: merged.result, transformationIterationJobIds: merged.transformationIterationJobIds, error: job.error };
           }),
         );
 
         if (job.status === "completed" || job.status === "failed") {
-          if (modifyPollingRef.current) {
-            clearInterval(modifyPollingRef.current);
-            modifyPollingRef.current = null;
-          }
+          if (modifyPollingRef.current) { clearInterval(modifyPollingRef.current); modifyPollingRef.current = null; }
           modifyJobIdRef.current = null;
         }
-
         fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
-      } catch {
-        // ignore polling errors
-      }
+      } catch { /* ignore */ }
     }, POLL_INTERVAL_MS);
   }, []);
 
-  // Stop/cancel the modify job polling
   const handleStopModify = useCallback(() => {
-    if (modifyPollingRef.current) {
-      clearInterval(modifyPollingRef.current);
-      modifyPollingRef.current = null;
-    }
+    if (modifyPollingRef.current) { clearInterval(modifyPollingRef.current); modifyPollingRef.current = null; }
     const stoppedJobId = modifyJobIdRef.current;
     modifyJobIdRef.current = null;
-
     if (stoppedJobId) {
       setJobResults((prev) =>
         prev.map((r) =>
@@ -748,23 +461,15 @@ function NewDatasetPageContent() {
     }
   }, []);
 
-  // Clean up modify polling on unmount
-  useEffect(() => {
-    return () => {
-      if (modifyPollingRef.current) clearInterval(modifyPollingRef.current);
-    };
-  }, []);
+  useEffect(() => { return () => { if (modifyPollingRef.current) clearInterval(modifyPollingRef.current); }; }, []);
 
-  // Modify with AI Data Cleanser - creates a job and polls
   const handleModifyWithAI = useCallback(async (sheetResult: SheetJobResult) => {
     if (!modifyPrompt.trim() || !schemaId) return;
-
     const currentSheetKey = `${sheetResult.sheet.fileId}:${sheetResult.sheet.sheetIndex}`;
     setModifySubmittingSheetKey(currentSheetKey);
 
     try {
       if (!sheetResult.result) throw new Error("No modified sheet is available yet for this tab.");
-
       const modifiedColumns = sheetResult.result.transformedColumns;
       const modifiedRows = sheetResult.result.transformedRows;
       const originalRef = uploadedSheetRefs[currentSheetKey];
@@ -781,17 +486,9 @@ function NewDatasetPageContent() {
         body: JSON.stringify({
           type: "data_cleanse",
           sheetId: originalRef?.sheetId,
-          payload: {
-            filePath: uploadedModified.filePath,
-            targetPaths,
-            sheetName: sheetResult.sheet.sheetName,
-            userDirective: modifyPrompt.trim(),
-            originalFilePath: originalRef?.filePath,
-            modifiedFilePath: uploadedModified.filePath,
-          },
+          payload: { filePath: uploadedModified.filePath, targetPaths, sheetName: sheetResult.sheet.sheetName, userDirective: modifyPrompt.trim(), originalFilePath: originalRef?.filePath, modifiedFilePath: uploadedModified.filePath },
         }),
       });
-
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to create job");
 
@@ -805,11 +502,7 @@ function NewDatasetPageContent() {
 
       setModifyPrompt("");
       setModifySubmittingSheetKey(null);
-      setUploadedSheetRefs((prev) => ({
-        ...prev,
-        [currentSheetKey]: uploadedModified,
-      }));
-
+      setUploadedSheetRefs((prev) => ({ ...prev, [currentSheetKey]: uploadedModified }));
       fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
       startModifyPolling(data.jobId);
     } catch (err) {
@@ -818,15 +511,14 @@ function NewDatasetPageContent() {
     }
   }, [modifyPrompt, schemaId, targetPaths, startModifyPolling, uploadedSheetRefs, uploadSheetCsv]);
 
-  // Export step
+  // --- Export ---
+
   useEffect(() => {
     if (step !== "export" || !schemaId) return;
     fetch(`/api/datasets?schemaId=${schemaId}&limit=50`)
       .then((res) => res.json())
       .then((data) => {
-        setExistingDatasets(
-          (data.datasets ?? []).map((d: { id: string; name: string }) => ({ id: d.id, name: d.name })),
-        );
+        setExistingDatasets((data.datasets ?? []).map((d: { id: string; name: string }) => ({ id: d.id, name: d.name })));
       })
       .catch(() => {});
   }, [step, schemaId]);
@@ -834,15 +526,11 @@ function NewDatasetPageContent() {
   const handleExport = useCallback(async () => {
     if (!schemaId) return;
     setExporting(true);
-
     try {
       const exportableResults = jobResults.filter((r) => r.status === "completed" && r.result);
-
       const allRows: Record<string, unknown>[] = [];
       for (const r of exportableResults) {
-        if (r.result?.transformedRows) {
-          allRows.push(...r.result.transformedRows);
-        }
+        if (r.result?.transformedRows) allRows.push(...r.result.transformedRows);
       }
 
       if (exportTargetDatasetId === "__new") {
@@ -851,9 +539,7 @@ function NewDatasetPageContent() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            schemaId,
-            name,
-            rows: allRows,
+            schemaId, name, rows: allRows,
             mappingSnapshot: {
               toolsUsed: exportableResults.map((r) => r.result?.toolsUsed ?? []),
               transformations: exportableResults.map((r) => {
@@ -892,25 +578,17 @@ function NewDatasetPageContent() {
     setDownloadingExcel(true);
     try {
       const exportableResults = jobResults.filter((r) => r.status === "completed" && r.result);
-
       const allCols = exportableResults[0]?.result?.transformedColumns ?? [];
       const allRows: Record<string, unknown>[] = [];
       for (const r of exportableResults) {
-        if (r.result?.transformedRows) {
-          allRows.push(...r.result.transformedRows);
-        }
+        if (r.result?.transformedRows) allRows.push(...r.result.transformedRows);
       }
-
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet("Data");
       sheet.addRow(allCols);
-      for (const row of allRows) {
-        sheet.addRow(allCols.map((c) => row[c] ?? ""));
-      }
+      for (const row of allRows) sheet.addRow(allCols.map((c) => row[c] ?? ""));
       const buffer = await workbook.xlsx.writeBuffer();
-      const blob = new Blob([buffer], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -924,14 +602,14 @@ function NewDatasetPageContent() {
     }
   }, [jobResults, newDatasetName]);
 
+  // --- Render ---
+
   if (!schemaId || !schema) {
     return (
       <DashboardLayout>
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <p className="text-muted-foreground text-lg">No schema selected.</p>
-          <Button className="mt-4" onClick={() => router.push("/datasets")}>
-            Back to Datasets
-          </Button>
+          <Button className="mt-4" onClick={() => router.push("/datasets")}>Back to Datasets</Button>
         </div>
       </DashboardLayout>
     );
@@ -941,7 +619,6 @@ function NewDatasetPageContent() {
     (r) => (r.status === "completed" || r.status === "pending" || r.status === "running") && Boolean(r.result),
   );
   const exportableResults = jobResults.filter((r) => r.status === "completed" && r.result);
-  const exportableCount = exportableResults.length;
 
   return (
     <DashboardLayout>
@@ -960,785 +637,67 @@ function NewDatasetPageContent() {
 
         <StepIndicator currentStep={step} />
 
-        {/* Step 1: Upload */}
         {step === "upload" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-3 flex justify-end gap-2">
-              <Button variant="outline" onClick={() => router.push("/datasets")}>
-                Cancel
-              </Button>
-              <Button
-                onClick={submitJobs}
-                disabled={selectedSheets.length === 0}
-              >
-                Next: Process {selectedSheets.length} sheet{selectedSheets.length !== 1 ? "s" : ""}
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </div>
-            <Card className="lg:col-span-1">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Files & Sheets</CardTitle>
-                <CardDescription>Select sheets to process</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-1">
-                  {files.map((file) => (
-                    <div key={file.fileId}>
-                      {(() => {
-                        const allFileSheetsSelected =
-                          file.sheetNames.length > 0 &&
-                          file.sheetNames.every((_, idx) => isSheetSelected(file.fileId, idx));
-                        const someFileSheetsSelected =
-                          file.sheetNames.some((_, idx) => isSheetSelected(file.fileId, idx));
-
-                        return (
-                          <div className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted">
-                            <button
-                              type="button"
-                              className="flex items-center justify-center shrink-0"
-                              onClick={() => {
-                                setExpandedFiles((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(file.fileId)) next.delete(file.fileId);
-                                  else next.add(file.fileId);
-                                  return next;
-                                });
-                              }}
-                            >
-                              {expandedFiles.has(file.fileId) ? (
-                                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
-                              ) : (
-                                <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-                              )}
-                            </button>
-                            <input
-                              type="checkbox"
-                              checked={allFileSheetsSelected}
-                              ref={(el) => {
-                                if (el) el.indeterminate = !allFileSheetsSelected && someFileSheetsSelected;
-                              }}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                toggleAllSheetsForFile(file.fileId);
-                              }}
-                              className="rounded"
-                            />
-                            <button
-                              type="button"
-                              className="flex items-center gap-2 flex-1 text-sm text-left min-w-0"
-                              onClick={() => {
-                                setExpandedFiles((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(file.fileId)) next.delete(file.fileId);
-                                  else next.add(file.fileId);
-                                  return next;
-                                });
-                              }}
-                            >
-                              <FileSpreadsheet className="h-4 w-4 shrink-0 text-muted-foreground" />
-                              <span className="truncate font-medium">{file.fileName}</span>
-                            </button>
-                          </div>
-                        );
-                      })()}
-                      {expandedFiles.has(file.fileId) && (
-                        <div className="ml-6 space-y-0.5">
-                          {file.sheetNames.map((name, idx) => {
-                            const selected = isSheetSelected(file.fileId, idx);
-                            const sheet: SheetSelection = {
-                              fileId: file.fileId,
-                              fileName: file.fileName,
-                              sheetIndex: idx,
-                              sheetName: name,
-                            };
-                            return (
-                              <div
-                                key={idx}
-                                className={cn(
-                                  "flex items-center gap-2 px-2 py-1 rounded text-sm",
-                                  selected ? "bg-primary/10" : "hover:bg-muted",
-                                  previewSheet?.fileId === file.fileId && previewSheet?.sheetIndex === idx && "ring-1 ring-primary",
-                                )}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={selected}
-                                  onChange={() => toggleSheet(sheet)}
-                                  className="rounded"
-                                />
-                                <span className="flex-1 truncate">{name || `Sheet ${idx + 1}`}</span>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 px-2 text-xs"
-                                  onClick={() => setPreviewSheet(sheet)}
-                                >
-                                  Preview
-                                </Button>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                {files.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    No files uploaded. Go back and add files.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="lg:col-span-2">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Preview</CardTitle>
-                <CardDescription>
-                  {previewSheet
-                    ? `${previewSheet.fileName} / ${previewSheet.sheetName}`
-                    : "Select a sheet to preview"}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {previewLoading ? (
-                  <div className="flex items-center gap-2 justify-center py-10 text-muted-foreground">
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                    Loading preview...
-                  </div>
-                ) : preview ? (
-                  <div className="w-full rounded-md border overflow-auto max-h-[700px]">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
-                          {preview.columns.map((col) => (
-                            <TableHead key={col} className="whitespace-nowrap bg-background">{col}</TableHead>
-                          ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {preview.rows.map((row, i) => (
-                          <TableRow key={i}>
-                            <TableCell className="text-muted-foreground">{i + 1}</TableCell>
-                            {preview.columns.map((col) => (
-                              <TableCell key={col} className="whitespace-nowrap max-w-[200px] truncate">
-                                {String(row[col] ?? "")}
-                              </TableCell>
-                            ))}
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center py-10 text-muted-foreground">
-                    Click a sheet on the left to preview its contents.
-                  </div>
-                )}
-                {preview && preview.totalRows > preview.visibleRows && (
-                  <div className="mt-2 flex flex-col items-center gap-2">
-                    <p className="text-xs text-muted-foreground text-center">
-                      Showing {preview.visibleRows} of {preview.totalRows} rows
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPreviewTopRows((prev) => prev + PREVIEW_ROWS)}
-                      disabled={previewLoading}
-                    >
-                      {previewLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
-                      Load more
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+          <UploadStep
+            files={files}
+            selectedSheets={selectedSheets}
+            expandedFiles={expandedFiles}
+            previewSheet={previewSheet}
+            preview={preview}
+            previewLoading={previewLoading}
+            onToggleFile={toggleFile}
+            onToggleSheet={toggleSheet}
+            onToggleAllSheetsForFile={toggleAllSheetsForFile}
+            onPreviewSheet={setPreviewSheet}
+            onLoadMorePreview={() => setPreviewTopRows((prev) => prev + PREVIEW_ROWS)}
+            onCancel={() => router.push("/datasets")}
+            onSubmit={submitJobs}
+            isSheetSelected={isSheetSelected}
+          />
         )}
 
-        {/* Step 2: Processing */}
         {step === "processing" && (
-          <Card>
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Sparkles className="h-5 w-5 text-primary" />
-                    AI Data Cleanser is Processing
-                  </CardTitle>
-                  <CardDescription className="mt-1.5">
-                    Each sheet is being analyzed and transformed by the AI agent.
-                  </CardDescription>
-                </div>
-                <Button
-                  onClick={() => setStep("review")}
-                  disabled={!allJobsDone}
-                  className="shrink-0"
-                >
-                  {!allJobsDone ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      Continue to Review
-                      <ArrowRight className="ml-2 h-4 w-4" />
-                    </>
-                  )}
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {jobResults.map((r, i) => (
-                  <div key={i} className="flex items-center gap-3 p-3 rounded-lg border">
-                    {r.status === "pending" || r.status === "running" ? (
-                      <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
-                    ) : r.status === "completed" ? (
-                      <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0" />
-                    ) : (
-                      <XCircle className="h-5 w-5 text-destructive shrink-0" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">
-                        {r.sheet.fileName} / {r.sheet.sheetName}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {r.status === "pending" && "Waiting..."}
-                        {r.status === "running" && "Processing..."}
-                        {r.status === "completed" && `Done - ${r.result?.transformedRows?.length ?? 0} rows`}
-                        {r.status === "failed" && (r.error ?? "Failed")}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          <ProcessingStep
+            jobResults={jobResults}
+            allJobsDone={allJobsDone}
+            onContinue={() => setStep("review")}
+          />
         )}
 
-        {/* Step 3: Review */}
         {step === "review" && (
-          <div className="space-y-4">
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep("upload")} disabled={anySheetProcessing}>
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back
-              </Button>
-              <Button
-                onClick={() => setStep("export")}
-                disabled={exportableCount === 0 || anySheetProcessing}
-              >
-                Next: Export {exportableCount} sheet{exportableCount !== 1 ? "s" : ""}
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </div>
-
-            {/* Sheet tabs */}
-            <div className="flex flex-wrap gap-2 border-b pb-2">
-              {reviewableResults.map((r, i) => {
-                const key = `${r.sheet.fileId}:${r.sheet.sheetIndex}`;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    className={cn(
-                      "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm border transition-colors bg-background",
-                      reviewSheetIndex === i
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "border-border text-muted-foreground hover:bg-muted",
-                    )}
-                    onClick={() => {
-                      setReviewSheetIndex(i);
-                      setReviewSubTab("modified");
-                      setOriginalVisibleCount(PREVIEW_ROWS);
-                      setModifiedVisibleCount(PREVIEW_ROWS);
-                      setOriginalPreview(null);
-                      setExpandedTransformStep(null);
-                    }}
-                  >
-                    {r.sheet.sheetName}
-                  </button>
-                );
-              })}
-            </div>
-
-            {reviewableResults.length > 0 && reviewableResults[reviewSheetIndex] && (() => {
-              const currentResult = reviewableResults[reviewSheetIndex];
-              const transformedRows = currentResult.result?.transformedRows ?? [];
-              const transformedCols = currentResult.result?.transformedColumns ?? [];
-              const pipeline = currentResult.result?.pipeline;
-              const mappingIterations = currentResult.result?.mappingIterations
-                ?? (currentResult.result?.mapping ? [currentResult.result.mapping] : []);
-              const iterationPipelines = mappingIterations.map((iteration, iterationIdx) =>
-                buildPipelineFromIteration(iteration, iterationIdx),
-              );
-              const currentSheetProcessing = currentResult.status === "pending" || currentResult.status === "running";
-              const currentSheetKey = `${currentResult.sheet.fileId}:${currentResult.sheet.sheetIndex}`;
-              const currentSheetSubmitting = modifySubmittingSheetKey === currentSheetKey;
-              const showModifyLoading = currentSheetProcessing || currentSheetSubmitting;
-
-              return (
-                <Card>
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <CardTitle className="text-base">
-                          {currentResult.sheet.fileName} / {currentResult.sheet.sheetName}
-                        </CardTitle>
-                        <CardDescription>
-                          {transformedRows.length} rows, {transformedCols.length} columns
-                        </CardDescription>
-                      </div>
-                    </div>
-
-                    {/* Sub-tabs */}
-                    <div className="flex gap-1 mt-3">
-                      {(["original", "modified", "transformations", "mapping"] as const).map((tab) => (
-                        <button
-                          key={tab}
-                          type="button"
-                          className={cn(
-                            "px-3 py-1.5 text-sm rounded-md transition-colors",
-                            reviewSubTab === tab
-                              ? "bg-muted font-medium"
-                              : "text-muted-foreground hover:bg-muted/50",
-                          )}
-                          onClick={() => {
-                            setReviewSubTab(tab);
-                            if (tab === "original" && !originalPreview) {
-                              loadOriginalPreview(currentResult);
-                            }
-                          }}
-                        >
-                          {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                        </button>
-                      ))}
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    {reviewSubTab === "original" && (
-                      <>
-                        {originalPreviewLoading ? (
-                          <div className="flex items-center gap-2 justify-center py-10 text-muted-foreground">
-                            <Loader2 className="h-5 w-5 animate-spin" />
-                            Loading original data...
-                          </div>
-                        ) : originalPreview ? (
-                          <div className="space-y-3">
-                            <div className="w-full rounded-md border overflow-auto max-h-[700px]">
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
-                                    {originalPreview.columns.map((col) => (
-                                      <TableHead key={col} className="whitespace-nowrap bg-background">{col}</TableHead>
-                                    ))}
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {originalPreview.rows.slice(0, originalVisibleCount).map((row, i) => (
-                                    <TableRow key={i}>
-                                      <TableCell className="text-muted-foreground">{i + 1}</TableCell>
-                                      {originalPreview.columns.map((col) => (
-                                        <TableCell key={col} className="whitespace-nowrap max-w-[200px] truncate">
-                                          {String(row[col] ?? "")}
-                                        </TableCell>
-                                      ))}
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                            </div>
-                            {originalPreview.totalRows > originalVisibleCount && (
-                              <div className="flex flex-col items-center gap-2">
-                                <p className="text-xs text-muted-foreground">
-                                  Showing {Math.min(originalVisibleCount, originalPreview.totalRows)} of {originalPreview.totalRows} rows
-                                </p>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => setOriginalVisibleCount((prev) => prev + PREVIEW_ROWS)}
-                                >
-                                  Load more
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <p className="text-muted-foreground text-center py-4">No preview available.</p>
-                        )}
-                      </>
-                    )}
-
-                    {reviewSubTab === "modified" && (
-                      <div className="space-y-4">
-                        <div className="flex items-end gap-2">
-                          <Textarea
-                            placeholder="Describe how to modify this data (e.g. 'Remove all rows where amount is 0', 'Combine first and last name columns')..."
-                            value={modifyPrompt}
-                            onChange={(e) => setModifyPrompt(e.target.value)}
-                            className="flex-4"
-                            rows={2}
-                            disabled={showModifyLoading}
-                          />
-                          <Button
-                            onClick={() => handleModifyWithAI(currentResult)}
-                            disabled={!modifyPrompt.trim() || anySheetProcessing || currentSheetSubmitting}
-                            className="rainbow-border rounded-md border-0 bg-white px-3 text-xs font-medium text-foreground hover:bg-gradient-to-r hover:from-fuchsia-500 hover:via-violet-500 hover:to-cyan-500 hover:text-white min-h-[80px] flex-1 shrink-0 self-end"
-                          >
-                            {showModifyLoading ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                              <Sparkles className="mr-2 h-4 w-4" />
-                            )}
-                            Modify using AI
-                          </Button>
-                        </div>
-
-                        {currentSheetProcessing && (
-                          <div className="flex items-center justify-between gap-2 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                            <div className="flex items-center gap-2">
-                              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                              AI Data Cleanser is re-processing this sheet...
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={handleStopModify}
-                            >
-                              <Square className="mr-1.5 h-3.5 w-3.5" />
-                              Stop
-                            </Button>
-                          </div>
-                        )}
-
-                        <div className="w-full rounded-md border overflow-auto max-h-[700px]">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
-                                {transformedCols.map((col) => (
-                                  <TableHead key={col} className="whitespace-nowrap bg-background">{col}</TableHead>
-                                ))}
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {transformedRows.slice(0, modifiedVisibleCount).map((row, i) => (
-                                <TableRow key={i}>
-                                  <TableCell className="text-muted-foreground">{i + 1}</TableCell>
-                                  {transformedCols.map((col) => (
-                                    <TableCell key={col} className="whitespace-nowrap max-w-[200px] truncate">
-                                      {String(row[col] ?? "")}
-                                    </TableCell>
-                                  ))}
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
-                        {transformedRows.length > modifiedVisibleCount && (
-                          <div className="flex flex-col items-center gap-2">
-                            <p className="text-xs text-muted-foreground text-center">
-                              Showing {Math.min(modifiedVisibleCount, transformedRows.length)} of {transformedRows.length} rows
-                            </p>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setModifiedVisibleCount((prev) => prev + PREVIEW_ROWS)}
-                            >
-                              Load more
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {reviewSubTab === "transformations" && (() => {
-                      if (mappingIterations.length === 0) {
-                        return (
-                          <p className="text-muted-foreground text-center py-4">
-                            No transformation data available.
-                          </p>
-                        );
-                      }
-
-                      return (
-                        <div className="space-y-3">
-                          <p className="text-sm text-muted-foreground">
-                            The AI agent ran {mappingIterations.length} iteration{mappingIterations.length !== 1 ? "s" : ""} for this sheet.
-                          </p>
-                          <div className="space-y-4">
-                            {mappingIterations.map((iteration, iterationIdx) => (
-                              <div key={iterationIdx} className="space-y-2 rounded-md border p-3">
-                                <div className="flex items-center justify-between">
-                                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                                    Iteration {iterationIdx + 1}
-                                  </p>
-                                  <span className="text-xs text-muted-foreground">
-                                    {iteration.length} transformation{iteration.length !== 1 ? "s" : ""}
-                                  </span>
-                                </div>
-                                {iteration.length === 0 ? (
-                                  <p className="text-sm text-muted-foreground py-2">
-                                    No transformations were applied in this iteration.
-                                  </p>
-                                ) : iteration.map((entry: TransformationMappingEntry, idx: number) => {
-                                  const stepKey = `${iterationIdx}:${idx}`;
-                                  const isExpanded = expandedTransformStep === stepKey;
-                                  const snapshot = transformPreviewMode === "before" ? entry.before : entry.after;
-                                  const rowDelta = entry.rowCountAfter - entry.rowCountBefore;
-                                  const colDelta = entry.outputColumns.length - entry.inputColumns.length;
-
-                              return (
-                                <div
-                                  key={stepKey}
-                                  className="rounded-lg border overflow-hidden"
-                                >
-                                  <button
-                                    type="button"
-                                    className="flex items-center gap-3 w-full px-4 py-3 text-left hover:bg-muted/50 transition-colors"
-                                    onClick={() => {
-                                      setExpandedTransformStep(isExpanded ? null : stepKey);
-                                      setTransformPreviewMode("after");
-                                    }}
-                                  >
-                                    <div className={cn(
-                                      "flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium shrink-0",
-                                      entry.phase === "cleansing"
-                                        ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
-                                        : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
-                                    )}>
-                                      {entry.step}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-sm font-medium">
-                                          {entry.tool.charAt(0).toUpperCase() + entry.tool.slice(1)}
-                                        </span>
-                                        <span className={cn(
-                                          "text-[10px] font-medium px-1.5 py-0.5 rounded-full uppercase tracking-wider",
-                                          entry.phase === "cleansing"
-                                            ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
-                                            : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
-                                        )}>
-                                          {entry.phase}
-                                        </span>
-                                      </div>
-                                      {entry.reasoning && (
-                                        <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                                          {entry.reasoning}
-                                        </p>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
-                                      <span className={cn(
-                                        rowDelta > 0 ? "text-green-600" : rowDelta < 0 ? "text-orange-600" : "",
-                                      )}>
-                                        {entry.rowCountBefore} → {entry.rowCountAfter} rows
-                                      </span>
-                                      {colDelta !== 0 && (
-                                        <span className={cn(
-                                          colDelta > 0 ? "text-green-600" : "text-orange-600",
-                                        )}>
-                                          {colDelta > 0 ? "+" : ""}{colDelta} col{Math.abs(colDelta) !== 1 ? "s" : ""}
-                                        </span>
-                                      )}
-                                      {isExpanded ? (
-                                        <ChevronDown className="h-4 w-4" />
-                                      ) : (
-                                        <ChevronRight className="h-4 w-4" />
-                                      )}
-                                    </div>
-                                  </button>
-
-                                  {isExpanded && (
-                                    <div className="border-t px-4 py-3 space-y-3">
-                                      <div className="flex items-center gap-2">
-                                        <div className="flex gap-1 rounded-md border p-0.5">
-                                          <button
-                                            type="button"
-                                            className={cn(
-                                              "px-3 py-1 text-xs rounded transition-colors",
-                                              transformPreviewMode === "before"
-                                                ? "bg-muted font-medium"
-                                                : "text-muted-foreground hover:bg-muted/50",
-                                            )}
-                                            onClick={() => setTransformPreviewMode("before")}
-                                          >
-                                            Before
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className={cn(
-                                              "px-3 py-1 text-xs rounded transition-colors",
-                                              transformPreviewMode === "after"
-                                                ? "bg-muted font-medium"
-                                                : "text-muted-foreground hover:bg-muted/50",
-                                            )}
-                                            onClick={() => setTransformPreviewMode("after")}
-                                          >
-                                            After
-                                          </button>
-                                        </div>
-                                        <span className="text-xs text-muted-foreground">
-                                          {snapshot
-                                            ? `${snapshot.sampleRows.length} of ${snapshot.totalRows} rows (${snapshot.columns.length} columns)`
-                                            : "No preview available"}
-                                        </span>
-                                      </div>
-
-                                      {snapshot && snapshot.sampleRows.length > 0 && (
-                                        <div className="w-full rounded-md border overflow-auto max-h-[400px]">
-                                          <Table>
-                                            <TableHeader>
-                                              <TableRow>
-                                                <TableHead className="w-14 whitespace-nowrap bg-background">#</TableHead>
-                                                {snapshot.columns.map((col) => (
-                                                  <TableHead key={col} className="whitespace-nowrap bg-background text-xs">{col}</TableHead>
-                                                ))}
-                                              </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                              {snapshot.sampleRows.map((row, ri) => (
-                                                <TableRow key={ri}>
-                                                  <TableCell className="text-muted-foreground text-xs">{ri + 1}</TableCell>
-                                                  {snapshot.columns.map((col) => (
-                                                    <TableCell key={col} className="whitespace-nowrap max-w-[180px] truncate text-xs">
-                                                      {String((row as Record<string, unknown>)[col] ?? "")}
-                                                    </TableCell>
-                                                  ))}
-                                                </TableRow>
-                                              ))}
-                                            </TableBody>
-                                          </Table>
-                                        </div>
-                                      )}
-
-                                      {snapshot && snapshot.totalRows > snapshot.sampleRows.length && (
-                                        <p className="text-xs text-muted-foreground text-center">
-                                          Showing {snapshot.sampleRows.length} of {snapshot.totalRows} rows
-                                        </p>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                                })}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {reviewSubTab === "mapping" && iterationPipelines.length > 0 && (
-                      <div className="overflow-auto">
-                        <MappingFlow pipelines={iterationPipelines} />
-                      </div>
-                    )}
-                    {reviewSubTab === "mapping" && iterationPipelines.length === 0 && pipeline && (
-                      <div className="overflow-auto">
-                        <MappingFlow pipeline={pipeline} />
-                      </div>
-                    )}
-                    {reviewSubTab === "mapping" && iterationPipelines.length === 0 && !pipeline && (
-                      <p className="text-muted-foreground text-center py-4">
-                        No pipeline data available.
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })()}
-
-          </div>
+          <ReviewStep
+            reviewableResults={reviewableResults}
+            exportableCount={exportableResults.length}
+            anySheetProcessing={anySheetProcessing}
+            modifyPrompt={modifyPrompt}
+            onModifyPromptChange={setModifyPrompt}
+            onModifyWithAI={handleModifyWithAI}
+            onStopModify={handleStopModify}
+            modifySubmittingSheetKey={modifySubmittingSheetKey}
+            originalPreview={originalPreview}
+            originalPreviewLoading={originalPreviewLoading}
+            onLoadOriginalPreview={loadOriginalPreview}
+            originalVisibleCount={originalVisibleCount}
+            onLoadMoreOriginal={() => setOriginalVisibleCount((prev) => prev + PREVIEW_ROWS)}
+            onBack={() => setStep("upload")}
+            onNext={() => setStep("export")}
+          />
         )}
 
-        {/* Step 4: Export */}
         {step === "export" && (
-          <Card>
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <div>
-                  <CardTitle>Export Dataset</CardTitle>
-                  <CardDescription className="mt-1.5">
-                    Choose where to save {exportableCount} processed sheet{exportableCount !== 1 ? "s" : ""}.
-                  </CardDescription>
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  <Button variant="outline" onClick={() => setStep("review")}>
-                    <ArrowLeft className="mr-2 h-4 w-4" />
-                    Back
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={handleDownloadExcel}
-                    disabled={downloadingExcel || exportableCount === 0}
-                  >
-                    {downloadingExcel ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Download className="mr-2 h-4 w-4" />
-                    )}
-                    Download Excel
-                  </Button>
-                  <Button onClick={handleExport} disabled={exporting}>
-                    {exporting ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : null}
-                    {exportTargetDatasetId === "__new" ? "Create Dataset" : "Add to Dataset"}
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Destination</label>
-                <Select value={exportTargetDatasetId} onValueChange={setExportTargetDatasetId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select destination..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__new">Create new dataset</SelectItem>
-                    {existingDatasets.map((d) => (
-                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {exportTargetDatasetId === "__new" && (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Dataset Name</label>
-                  <Input
-                    value={newDatasetName}
-                    onChange={(e) => setNewDatasetName(e.target.value)}
-                    placeholder={`Dataset ${new Date().toLocaleDateString()}`}
-                  />
-                </div>
-              )}
-
-              <div className="rounded-lg border p-4 space-y-2">
-                <p className="text-sm font-medium">Summary</p>
-                {exportableResults.map((r) => (
-                    <div key={`${r.sheet.fileId}:${r.sheet.sheetIndex}`} className="flex items-center gap-2 text-sm">
-                      <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-                      <span className="truncate">
-                        {r.sheet.fileName} / {r.sheet.sheetName}
-                      </span>
-                      <span className="text-muted-foreground ml-auto shrink-0">
-                        {r.result?.transformedRows?.length ?? 0} rows
-                      </span>
-                    </div>
-                  ))}
-              </div>
-
-            </CardContent>
-          </Card>
+          <ExportStep
+            exportableResults={exportableResults}
+            exportTargetDatasetId={exportTargetDatasetId}
+            onExportTargetChange={setExportTargetDatasetId}
+            newDatasetName={newDatasetName}
+            onNewDatasetNameChange={setNewDatasetName}
+            existingDatasets={existingDatasets}
+            exporting={exporting}
+            downloadingExcel={downloadingExcel}
+            onExport={handleExport}
+            onDownloadExcel={handleDownloadExcel}
+            onBack={() => setStep("review")}
+          />
         )}
       </div>
     </DashboardLayout>
