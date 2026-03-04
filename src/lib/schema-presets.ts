@@ -59,6 +59,13 @@ const fixedInstrumentFields: SchemaField[] = [
   makeField("classification", 18),
 ];
 
+const unstructuredDataFields: SchemaField[] = [
+  makeField("tags", 1),
+  makeField("name", 2),
+  makeField("filename", 3),
+  makeField("raw_context", 4),
+];
+
 const repoShareFields: SchemaField[] = [
   makeField("kode_nasabah", 1),
   makeField("nama_nasabah", 2),
@@ -118,5 +125,11 @@ export const SCHEMA_PRESETS: SchemaPreset[] = [
     name: "Repo Shares",
     description: "Repurchase agreement tracking with settlement dates, returns, coupons, and bond details.",
     fields: repoShareFields,
+  },
+  {
+    id: "unstructured_data",
+    name: "Unstructured Data",
+    description: "Flexible schema for unstructured data with tags, naming, file references, and raw context.",
+    fields: unstructuredDataFields,
   },
 ];
