@@ -184,9 +184,17 @@ export default function DatasetPage() {
     return t as TransformationMappingEntry[][][];
   }, [dataset]);
 
-  const hasTransformations = allTransformations.some((sheetIterations) =>
-    sheetIterations.some((iteration) => iteration.length > 0),
-  );
+  const datasetTransformations = useMemo(() => {
+    if (!dataset?.mappingSnapshot) return [];
+    const dt = (dataset.mappingSnapshot as Record<string, unknown>).datasetTransformations;
+    if (!Array.isArray(dt)) return [];
+    return dt as TransformationMappingEntry[][];
+  }, [dataset]);
+
+  const hasTransformations =
+    allTransformations.some((sheetIterations) =>
+      sheetIterations.some((iteration) => iteration.length > 0),
+    ) || datasetTransformations.some((iteration) => iteration.length > 0);
 
   // --- Data fetching ---
 
@@ -514,14 +522,18 @@ export default function DatasetPage() {
       const nextRows = Array.isArray(finalResult.transformedRows) ? finalResult.transformedRows : [];
       const existingSnapshot = (dataset.mappingSnapshot ?? {}) as Record<string, unknown>;
       const existingToolsUsed = Array.isArray(existingSnapshot.toolsUsed) ? existingSnapshot.toolsUsed : [];
-      const nextTransformations = allTransformations.length > 0 ? [...allTransformations] : [[]];
-      if (!nextTransformations[0]) nextTransformations[0] = [];
-      nextTransformations[0] = [...nextTransformations[0], Array.isArray(finalResult.mapping) ? finalResult.mapping : []];
+      const existingDatasetTransformations = Array.isArray(existingSnapshot.datasetTransformations)
+        ? (existingSnapshot.datasetTransformations as TransformationMappingEntry[][])
+        : [];
+      const nextDatasetTransformations = [
+        ...existingDatasetTransformations,
+        Array.isArray(finalResult.mapping) ? finalResult.mapping : [],
+      ];
 
       const patchRes = await fetch(`/api/datasets/${dataset.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ replaceRows: nextRows, mappingSnapshot: { ...existingSnapshot, toolsUsed: [...existingToolsUsed, finalResult.toolsUsed ?? []], transformations: nextTransformations } }),
+        body: JSON.stringify({ replaceRows: nextRows, mappingSnapshot: { ...existingSnapshot, toolsUsed: [...existingToolsUsed, finalResult.toolsUsed ?? []], datasetTransformations: nextDatasetTransformations } }),
       });
       const patchData = await patchRes.json().catch(() => ({}));
       if (!patchRes.ok) throw new Error(patchData.error ?? "Failed to save cleansed dataset");
@@ -783,7 +795,10 @@ export default function DatasetPage() {
         )}
 
         {activeTab === "transformations" && (
-          <TransformationsTab allTransformations={allTransformations} />
+          <TransformationsTab
+            allTransformations={allTransformations}
+            datasetTransformations={datasetTransformations}
+          />
         )}
 
         {activeTab === "activity" && (
