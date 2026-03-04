@@ -145,7 +145,7 @@ Keep data to ≤50 rows for readability; aggregate in SQL if needed.`,
     async (input) => {
       const client = new Anthropic();
       try {
-        const response = await client.messages.create({
+        const response = await (client.messages.create as Function)({
           model: "claude-sonnet-4-20250514",
           max_tokens: 4096,
           tools: [
@@ -161,7 +161,7 @@ Keep data to ≤50 rows for readability; aggregate in SQL if needed.`,
               content: `Search the web for: ${input.query}\n\nProvide a summary of the most relevant and recent information you find.`,
             },
           ],
-        } as Parameters<typeof client.messages.create>[0]);
+        }) as Anthropic.Message;
 
         const outputLines: string[] = [`**Web Search Results for '${input.query}':**\n`];
         const citations: { title: string; url: string }[] = [];
@@ -170,8 +170,9 @@ Keep data to ≤50 rows for readability; aggregate in SQL if needed.`,
           if (block.type === "text") {
             outputLines.push(block.text);
 
-            if ((block as Record<string, unknown>).citations && Array.isArray((block as Record<string, unknown>).citations)) {
-              for (const citation of (block as Record<string, unknown>).citations as Array<{ url?: string; title?: string }>) {
+            const blockAny = block as unknown as Record<string, unknown>;
+            if (blockAny.citations && Array.isArray(blockAny.citations)) {
+              for (const citation of blockAny.citations as Array<{ url?: string; title?: string }>) {
                 if (citation.url && !citations.some(c => c.url === citation.url)) {
                   citations.push({
                     title: citation.title || citation.url,
@@ -182,10 +183,11 @@ Keep data to ≤50 rows for readability; aggregate in SQL if needed.`,
             }
           }
 
-          if (block.type === "web_search_tool_result") {
-            const content = (block as Anthropic.WebSearchToolResultBlock).content;
+          const blockAny = block as unknown as Record<string, unknown>;
+          if (blockAny.type === "web_search_tool_result") {
+            const content = blockAny.content;
             if (Array.isArray(content)) {
-              for (const item of content) {
+              for (const item of content as Array<{ type?: string; url?: string; title?: string }>) {
                 if (item.type === "web_search_result" && item.url) {
                   if (!citations.some(c => c.url === item.url)) {
                     citations.push({
