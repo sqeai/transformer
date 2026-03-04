@@ -76,7 +76,7 @@ function fmtCell(value: unknown): string {
 }
 
 const fmtAxis = (v: number) => v.toLocaleString("en-US");
-const fmtTooltip = (v: number, name: string): [string, string] => [v.toLocaleString("en-US"), name];
+const fmtTooltip = (v: number | undefined, name: string): [string, string] => [typeof v === "number" && !Number.isNaN(v) ? v.toLocaleString("en-US") : "", String(name)];
 
 function WaterfallView({
   data,

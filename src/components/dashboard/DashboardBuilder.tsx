@@ -47,9 +47,6 @@ const DASHBOARD_STORAGE_KEY = "dashboard-chat-history";
 const DASHBOARD_PANELS_KEY = "dashboard-panels";
 const DASHBOARD_SOURCES_KEY = "dashboard-selected-sources";
 const PANEL_REGEX = /<!-- DASHBOARD_PANEL:(.*?) -->/g;
-const THINKING_START = "<!-- THINKING_START -->";
-const THINKING_END = "<!-- THINKING_END -->";
-
 interface PanelAction {
   action: "add" | "update" | "remove";
   panel?: DashboardPanel;
@@ -74,24 +71,34 @@ function stripDelimiters(text: string): string {
   return text.replace(PANEL_REGEX, "").trim();
 }
 
-function parseThinking(text: string): { thinking: string; response: string } {
-  const startIdx = text.indexOf(THINKING_START);
-  const endIdx = text.indexOf(THINKING_END);
+function parseThinkingFromParts(
+  parts: unknown[],
+): { thinking: string; response: string } {
+  const stopIdx = parts.findIndex((p) => {
+    const pt = p as Record<string, unknown>;
+    return pt.type === "tool-stop_thinking";
+  });
 
-  if (startIdx === -1 && endIdx === -1) {
-    return { thinking: "", response: stripDelimiters(text) };
+  const thinking: string[] = [];
+  const response: string[] = [];
+
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i] as Record<string, unknown>;
+    if (p.type !== "text") continue;
+    const text = (p.text as string) ?? "";
+    if (stopIdx === -1) {
+      thinking.push(text);
+    } else if (i < stopIdx) {
+      thinking.push(text);
+    } else if (i > stopIdx) {
+      response.push(text);
+    }
   }
 
-  const thinkingFrom = startIdx === -1 ? 0 : startIdx + THINKING_START.length;
-  const thinkingTo = endIdx === -1 ? text.length : endIdx;
-  const thinking = text.substring(thinkingFrom, thinkingTo).trim();
-
-  let response = "";
-  if (endIdx !== -1) {
-    response = text.substring(endIdx + THINKING_END.length);
-  }
-
-  return { thinking, response: stripDelimiters(response) };
+  return {
+    thinking: thinking.join("").trim(),
+    response: stripDelimiters(response.join("").trim()),
+  };
 }
 
 function MarkdownContent({
@@ -608,23 +615,20 @@ export function DashboardBuilder() {
                   );
                 }
 
-                const textParts = (msg.parts ?? []).filter(
-                  (p): p is { type: "text"; text: string } =>
-                    p.type === "text",
-                );
-                const fullText = textParts.map((p) => p.text).join("");
+                const allParts = msg.parts ?? [];
 
-                const toolParts = (msg.parts ?? []).filter((p) => {
+                const toolParts = allParts.filter((p) => {
                   const pt = p as Record<string, unknown>;
                   return (
                     typeof pt.type === "string" &&
                     (pt.type.startsWith("tool-") ||
                       pt.type === "dynamic-tool" ||
-                      pt.type === "tool-invocation")
+                      pt.type === "tool-invocation") &&
+                    pt.type !== "tool-stop_thinking"
                   );
                 });
 
-                const { thinking, response } = parseThinking(fullText);
+                const { thinking, response } = parseThinkingFromParts(allParts);
                 const hasThinking = thinking.trim().length > 0;
                 const hasResponse = response.trim().length > 0;
                 const hasTools = toolParts.length > 0;

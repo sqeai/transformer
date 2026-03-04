@@ -43,27 +43,34 @@ import type { VisualizationPayload } from "@/lib/agents/analyst-agent/tools";
 
 const ANALYST_STORAGE_KEY = "analyst-chat-history";
 const ANALYST_SOURCES_KEY = "analyst-selected-sources";
-const THINKING_START = "<!-- THINKING_START -->";
-const THINKING_END = "<!-- THINKING_END -->";
+function parseThinkingFromParts(
+  parts: unknown[],
+): { thinking: string; response: string } {
+  const stopIdx = parts.findIndex((p) => {
+    const pt = p as Record<string, unknown>;
+    return pt.type === "tool-stop_thinking";
+  });
 
-function parseThinking(text: string): { thinking: string; response: string } {
-  const startIdx = text.indexOf(THINKING_START);
-  const endIdx = text.indexOf(THINKING_END);
+  const thinking: string[] = [];
+  const response: string[] = [];
 
-  if (startIdx === -1 && endIdx === -1) {
-    return { thinking: "", response: text.trim() };
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i] as Record<string, unknown>;
+    if (p.type !== "text") continue;
+    const text = (p.text as string) ?? "";
+    if (stopIdx === -1) {
+      thinking.push(text);
+    } else if (i < stopIdx) {
+      thinking.push(text);
+    } else if (i > stopIdx) {
+      response.push(text);
+    }
   }
 
-  const thinkingFrom = startIdx === -1 ? 0 : startIdx + THINKING_START.length;
-  const thinkingTo = endIdx === -1 ? text.length : endIdx;
-  const thinking = text.substring(thinkingFrom, thinkingTo).trim();
-
-  let response = "";
-  if (endIdx !== -1) {
-    response = text.substring(endIdx + THINKING_END.length);
-  }
-
-  return { thinking, response: response.trim() };
+  return {
+    thinking: thinking.join("").trim(),
+    response: response.join("").trim(),
+  };
 }
 
 const VISUALIZATION_PREFIX = "<!-- VISUALIZATION:";
@@ -665,23 +672,20 @@ export function AnalystChat() {
               );
             }
 
-            const textParts = (msg.parts ?? []).filter(
-              (p): p is { type: "text"; text: string } =>
-                p.type === "text",
-            );
-            const fullText = textParts.map((p) => p.text).join("");
+            const allParts = msg.parts ?? [];
 
-            const toolParts = (msg.parts ?? []).filter((p) => {
+            const toolParts = allParts.filter((p) => {
               const pt = p as Record<string, unknown>;
               return (
                 typeof pt.type === "string" &&
                 (pt.type.startsWith("tool-") ||
                   pt.type === "dynamic-tool" ||
-                  pt.type === "tool-invocation")
+                  pt.type === "tool-invocation") &&
+                pt.type !== "tool-stop_thinking"
               );
             });
 
-            const { thinking, response } = parseThinking(fullText);
+            const { thinking, response } = parseThinkingFromParts(allParts);
             const visualizations = extractVisualizations(toolParts);
             const hasThinking = thinking.trim().length > 0;
             const hasResponse = response.trim().length > 0;

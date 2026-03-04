@@ -25,6 +25,16 @@ function wrapDelimiter(tag: string, payload: object): string {
   return `<!-- ${tag}:${JSON.stringify(payload)} -->`;
 }
 
+const stopThinkingTool = tool(
+  async () => "",
+  {
+    name: "stop_thinking",
+    description:
+      "MANDATORY — call this exactly once on EVERY response. This separates your hidden thinking from the visible answer. All text before this call is hidden; all text after is shown to the user. If you forget to call this, the user sees nothing.",
+    schema: z.object({}),
+  },
+);
+
 export function createDashboardTools(
   dataSources: DataSourceContext[],
   queryFn: (dataSourceId: string, sql: string) => Promise<{ rows: Record<string, unknown>[]; rowCount: number; error?: string }>,
@@ -141,5 +151,5 @@ export function createDashboardTools(
     },
   );
 
-  return [queryDatabaseTool, listTablesTool, addPanelTool, updatePanelTool, removePanelTool];
+  return [queryDatabaseTool, listTablesTool, addPanelTool, updatePanelTool, removePanelTool, stopThinkingTool];
 }
