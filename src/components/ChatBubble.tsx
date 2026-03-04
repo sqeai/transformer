@@ -194,8 +194,8 @@ function ThinkingIndicator() {
 interface AttachedFile {
   file: File;
   id: string;
-  status: "pending" | "processing" | "done" | "error";
-  extractedText?: string;
+  status: "pending" | "uploading" | "done" | "error";
+  filePath?: string;
   error?: string;
 }
 
@@ -211,18 +211,6 @@ const ACCEPTED_FILE_TYPES = [
 ];
 
 const ACCEPTED_EXTENSIONS = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".txt", ".docx", ".pptx"];
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      resolve(result.split(",")[1]);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 
 function isAcceptedFile(file: File): boolean {
   if (ACCEPTED_FILE_TYPES.includes(file.type)) return true;
@@ -242,7 +230,7 @@ export function ChatBubble() {
   const [input, setInput] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const { messages, sendMessage, setMessages, status } = useChatContext();
   const {
     schemas,
@@ -385,38 +373,47 @@ export function ChatBubble() {
     [addFiles],
   );
 
-  const processFilesWithOcr = useCallback(
+  const uploadFilesToS3 = useCallback(
     async (files: AttachedFile[]): Promise<AttachedFile[]> => {
       const results = await Promise.all(
         files.map(async (af) => {
           try {
             setAttachedFiles((prev) =>
-              prev.map((f) => (f.id === af.id ? { ...f, status: "processing" as const } : f)),
+              prev.map((f) => (f.id === af.id ? { ...f, status: "uploading" as const } : f)),
             );
 
-            const base64 = await fileToBase64(af.file);
-            const mimeType = af.file.type || "application/octet-stream";
+            const contentType = af.file.type || "application/octet-stream";
 
-            const res = await fetch("/api/ocr", {
+            const presignRes = await fetch("/api/chat-attachments/presign", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ base64, mimeType, fileName: af.file.name }),
+              body: JSON.stringify({ fileName: af.file.name, contentType }),
             });
 
-            if (!res.ok) {
-              const err = await res.json().catch(() => ({ error: "OCR failed" }));
-              throw new Error(err.error || "OCR failed");
+            if (!presignRes.ok) {
+              const err = await presignRes.json().catch(() => ({ error: "Failed to get upload URL" }));
+              throw new Error(err.error || "Failed to get upload URL");
             }
 
-            const result: { extractedText: string } = await res.json();
+            const { uploadUrl, filePath } = await presignRes.json();
 
-            const updated: AttachedFile = { ...af, status: "done", extractedText: result.extractedText };
+            const uploadRes = await fetch(uploadUrl, {
+              method: "PUT",
+              headers: { "Content-Type": contentType },
+              body: af.file,
+            });
+
+            if (!uploadRes.ok) {
+              throw new Error("Failed to upload file to storage");
+            }
+
+            const updated: AttachedFile = { ...af, status: "done", filePath };
             setAttachedFiles((prev) =>
               prev.map((f) => (f.id === af.id ? updated : f)),
             );
             return updated;
           } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : "OCR failed";
+            const errorMsg = err instanceof Error ? err.message : "Upload failed";
             const updated: AttachedFile = { ...af, status: "error", error: errorMsg };
             setAttachedFiles((prev) =>
               prev.map((f) => (f.id === af.id ? updated : f)),
@@ -433,49 +430,55 @@ export function ChatBubble() {
   const onSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
-      if ((!input.trim() && attachedFiles.length === 0) || isLoading || isOcrProcessing) return;
+      if ((!input.trim() && attachedFiles.length === 0) || isLoading || isUploading) return;
 
       const workspaceContext = buildWorkspaceContext();
 
       if (attachedFiles.length > 0) {
-        setIsOcrProcessing(true);
+        setIsUploading(true);
         try {
           const pendingFiles = attachedFiles.filter((f) => f.status === "pending" || f.status === "error");
           const alreadyDone = attachedFiles.filter((f) => f.status === "done");
 
-          const processed = pendingFiles.length > 0
-            ? await processFilesWithOcr(pendingFiles)
+          const uploaded = pendingFiles.length > 0
+            ? await uploadFilesToS3(pendingFiles)
             : [];
 
-          const allProcessed = [...alreadyDone, ...processed];
-          const successFiles = allProcessed.filter((f) => f.status === "done" && f.extractedText);
+          const allUploaded = [...alreadyDone, ...uploaded];
+          const successFiles = allUploaded.filter((f) => f.status === "done" && f.filePath);
 
           if (successFiles.length === 0 && !input.trim()) {
-            toast.error("Could not extract text from any files");
-            setIsOcrProcessing(false);
+            toast.error("Could not upload any files");
+            setIsUploading(false);
             return;
           }
 
-          const fileContextParts = successFiles.map(
-            (f) => `--- File: ${f.file.name} ---\n${f.extractedText}`,
-          );
-          const fileContext = fileContextParts.length > 0
-            ? `[Attached file content]\n${fileContextParts.join("\n\n")}\n[End of attached file content]\n\n`
+          const attachmentsMeta = successFiles.map((f) => ({
+            fileName: f.file.name,
+            filePath: f.filePath!,
+            mimeType: f.file.type || "application/octet-stream",
+          }));
+
+          const fileNames = successFiles.map((f) => f.file.name);
+          const fileLabel = fileNames.length > 0
+            ? `[Attached: ${fileNames.join(", ")}]\n\n`
             : "";
 
-          const messageText = `${fileContext}${input.trim()}`;
-          sendMessage({ text: messageText }, { body: { workspaceContext } });
+          sendMessage(
+            { text: `${fileLabel}${input.trim()}` },
+            { body: { workspaceContext, attachments: attachmentsMeta } },
+          );
           setInput("");
           setAttachedFiles([]);
         } finally {
-          setIsOcrProcessing(false);
+          setIsUploading(false);
         }
       } else {
         sendMessage({ text: input.trim() }, { body: { workspaceContext } });
         setInput("");
       }
     },
-    [input, attachedFiles, isLoading, isOcrProcessing, sendMessage, buildWorkspaceContext, processFilesWithOcr],
+    [input, attachedFiles, isLoading, isUploading, sendMessage, buildWorkspaceContext, uploadFilesToS3],
   );
 
   const onKeyDown = useCallback(
@@ -600,18 +603,23 @@ export function ChatBubble() {
               const text = textParts.map((p) => p.text).join("");
               if (!text) return null;
 
-              const fileBlockMatch = text.match(/\[Attached file content\]\n([\s\S]*?)\n\[End of attached file content\]\n\n/);
-              const userText = fileBlockMatch
-                ? text.replace(fileBlockMatch[0], "").trim()
-                : text;
-
               const attachedFileNames: string[] = [];
-              if (fileBlockMatch) {
-                const fileHeaders = fileBlockMatch[1].match(/--- File: (.+?) ---/g);
-                if (fileHeaders) {
-                  for (const h of fileHeaders) {
-                    const name = h.match(/--- File: (.+?) ---/)?.[1];
-                    if (name) attachedFileNames.push(name);
+              let userText = text;
+
+              const newFormatMatch = text.match(/^\[Attached: (.+?)\]\n\n/);
+              if (newFormatMatch) {
+                userText = text.replace(newFormatMatch[0], "").trim();
+                attachedFileNames.push(...newFormatMatch[1].split(", "));
+              } else {
+                const oldFormatMatch = text.match(/\[Attached file content\]\n([\s\S]*?)\n\[End of attached file content\]\n\n/);
+                if (oldFormatMatch) {
+                  userText = text.replace(oldFormatMatch[0], "").trim();
+                  const fileHeaders = oldFormatMatch[1].match(/--- File: (.+?) ---/g);
+                  if (fileHeaders) {
+                    for (const h of fileHeaders) {
+                      const name = h.match(/--- File: (.+?) ---/)?.[1];
+                      if (name) attachedFileNames.push(name);
+                    }
                   }
                 }
               }
@@ -715,14 +723,14 @@ export function ChatBubble() {
                       "flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs",
                       af.status === "error"
                         ? "border-destructive/50 bg-destructive/10 text-destructive"
-                        : af.status === "processing"
+                        : af.status === "uploading"
                           ? "border-primary/50 bg-primary/5 text-primary"
                           : af.status === "done"
                             ? "border-green-500/50 bg-green-500/10 text-green-700 dark:text-green-400"
                             : "border-border bg-muted/50 text-foreground",
                     )}
                   >
-                    {af.status === "processing" ? (
+                    {af.status === "uploading" ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
                     ) : (
                       <Icon className="h-3 w-3 shrink-0" />
@@ -732,7 +740,7 @@ export function ChatBubble() {
                       type="button"
                       onClick={() => removeFile(af.id)}
                       className="ml-0.5 rounded-full p-0.5 hover:bg-foreground/10"
-                      disabled={af.status === "processing"}
+                      disabled={af.status === "uploading"}
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -757,7 +765,7 @@ export function ChatBubble() {
               size="icon"
               className="h-10 w-10 shrink-0 rounded-xl text-muted-foreground hover:text-foreground"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isLoading || isOcrProcessing}
+              disabled={isLoading || isUploading}
               title="Attach files"
             >
               <Paperclip className="h-4 w-4" />
@@ -775,15 +783,15 @@ export function ChatBubble() {
                 "max-h-[120px] min-h-[40px]",
               )}
               style={{ fieldSizing: "content" } as React.CSSProperties}
-              disabled={isLoading || isOcrProcessing}
+              disabled={isLoading || isUploading}
             />
             <Button
               type="submit"
               size="icon"
               className="h-10 w-10 shrink-0 rounded-xl"
-              disabled={(!input.trim() && attachedFiles.length === 0) || isLoading || isOcrProcessing}
+              disabled={(!input.trim() && attachedFiles.length === 0) || isLoading || isUploading}
             >
-              {isLoading || isOcrProcessing ? (
+              {isLoading || isUploading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Send className="h-4 w-4" />

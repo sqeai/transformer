@@ -7,6 +7,7 @@ import type { DataSourceType } from "@/lib/connectors";
 import { type BaseMessage } from "@langchain/core/messages";
 import { toUIMessageStream, toBaseMessages } from "@ai-sdk/langchain";
 import { createUIMessageStreamResponse, type UIMessage } from "ai";
+import { resolveAttachments, type ChatAttachment } from "@/lib/chat-attachments";
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,6 +25,12 @@ export async function POST(req: NextRequest) {
     const selectedDataSourceIds: string[] = body.dataSourceIds ?? [];
     const dataSourceContexts: DataSourceContext[] =
       body.dataSourceContexts ?? [];
+    const attachments: ChatAttachment[] = Array.isArray(body.attachments) ? body.attachments : [];
+
+    let attachmentContext = "";
+    if (attachments.length > 0) {
+      attachmentContext = await resolveAttachments(attachments);
+    }
 
     const filteredMessages = (body.messages ?? []).filter(
       (message: Record<string, unknown>) =>
@@ -56,6 +63,13 @@ export async function POST(req: NextRequest) {
     );
 
     const messages: BaseMessage[] = await toBaseMessages(rawMessages);
+
+    if (attachmentContext && messages.length > 0) {
+      const last = messages[messages.length - 1];
+      if (last._getType() === "human" && typeof last.content === "string") {
+        last.content = attachmentContext + last.content;
+      }
+    }
 
     const agent = getAnalystAgent();
     if (!agent) {

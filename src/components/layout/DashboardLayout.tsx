@@ -31,7 +31,7 @@ const nav = [
   { name: "Schemas", href: "/schemas", icon: FileStack },
   { name: "Data Sources", href: "/data-sources", icon: Cable },
   { name: "Assistant", href: "/assistant", icon: MessageSquare },
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  // { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
 ];
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";

@@ -23,6 +23,11 @@ import {
   Brain,
   PanelRightClose,
   PanelRightOpen,
+  Paperclip,
+  FileText,
+  FileImage,
+  File as FileIcon,
+  X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -64,6 +69,39 @@ function parseThinking(text: string): { thinking: string; response: string } {
   }
 
   return { thinking, response: response.trim() };
+}
+
+interface AttachedFile {
+  file: File;
+  id: string;
+  status: "pending" | "uploading" | "done" | "error";
+  filePath?: string;
+  error?: string;
+}
+
+const ACCEPTED_FILE_TYPES = [
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "text/plain",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+];
+
+const ACCEPTED_EXTENSIONS = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".txt", ".docx", ".pptx"];
+
+function isAcceptedFile(file: File): boolean {
+  if (ACCEPTED_FILE_TYPES.includes(file.type)) return true;
+  const ext = "." + file.name.split(".").pop()?.toLowerCase();
+  return ACCEPTED_EXTENSIONS.includes(ext);
+}
+
+function getFileIcon(file: File) {
+  if (file.type.startsWith("image/")) return FileImage;
+  if (file.type === "application/pdf" || file.name.endsWith(".pdf")) return FileText;
+  return FileIcon;
 }
 
 const VISUALIZATION_PREFIX = "<!-- VISUALIZATION:";
@@ -467,8 +505,13 @@ export function AnalystChat() {
       }
     },
   );
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragCounter = useRef(0);
 
   const transport = useRef(
     new DefaultChatTransport({ api: "/api/analyst-chat" }),
@@ -531,10 +574,129 @@ export function AnalystChat() {
     localStorage.removeItem(ANALYST_STORAGE_KEY);
   }, [setMessages]);
 
-  const onSubmit = useCallback(
-    (e: FormEvent) => {
+  const addFiles = useCallback((files: File[]) => {
+    const accepted = files.filter(isAcceptedFile);
+    if (accepted.length < files.length) {
+      toast.error("Some files were skipped", {
+        description: `Supported: ${ACCEPTED_EXTENSIONS.join(", ")}`,
+      });
+    }
+    if (accepted.length === 0) return;
+
+    const newAttachments: AttachedFile[] = accepted.map((file) => ({
+      file,
+      id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      status: "pending",
+    }));
+    setAttachedFiles((prev) => [...prev, ...newAttachments]);
+  }, []);
+
+  const removeFile = useCallback((id: string) => {
+    setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
+  }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.types.includes("Files")) {
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
       e.preventDefault();
-      if (!input.trim() || isLoading) return;
+      e.stopPropagation();
+      setIsDragging(false);
+      dragCounter.current = 0;
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) addFiles(files);
+    },
+    [addFiles],
+  );
+
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      if (files.length > 0) addFiles(files);
+      e.target.value = "";
+    },
+    [addFiles],
+  );
+
+  const uploadFilesToS3 = useCallback(
+    async (files: AttachedFile[]): Promise<AttachedFile[]> => {
+      const results = await Promise.all(
+        files.map(async (af) => {
+          try {
+            setAttachedFiles((prev) =>
+              prev.map((f) => (f.id === af.id ? { ...f, status: "uploading" as const } : f)),
+            );
+
+            const contentType = af.file.type || "application/octet-stream";
+
+            const presignRes = await fetch("/api/chat-attachments/presign", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ fileName: af.file.name, contentType }),
+            });
+
+            if (!presignRes.ok) {
+              const err = await presignRes.json().catch(() => ({ error: "Failed to get upload URL" }));
+              throw new Error(err.error || "Failed to get upload URL");
+            }
+
+            const { uploadUrl, filePath } = await presignRes.json();
+
+            const uploadRes = await fetch(uploadUrl, {
+              method: "PUT",
+              headers: { "Content-Type": contentType },
+              body: af.file,
+            });
+
+            if (!uploadRes.ok) {
+              throw new Error("Failed to upload file to storage");
+            }
+
+            const updated: AttachedFile = { ...af, status: "done", filePath };
+            setAttachedFiles((prev) =>
+              prev.map((f) => (f.id === af.id ? updated : f)),
+            );
+            return updated;
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "Upload failed";
+            const updated: AttachedFile = { ...af, status: "error", error: errorMsg };
+            setAttachedFiles((prev) =>
+              prev.map((f) => (f.id === af.id ? updated : f)),
+            );
+            return updated;
+          }
+        }),
+      );
+      return results;
+    },
+    [],
+  );
+
+  const onSubmit = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      if ((!input.trim() && attachedFiles.length === 0) || isLoading || isUploading) return;
 
       const dataSourceIds = selectedSources.map((s) => s.id);
       const dataSourceContexts = selectedSources.map((s) => ({
@@ -544,13 +706,54 @@ export function AnalystChat() {
         tables: s.tables,
       }));
 
-      sendMessage(
-        { text: input.trim() },
-        { body: { dataSourceIds, dataSourceContexts } },
-      );
-      setInput("");
+      if (attachedFiles.length > 0) {
+        setIsUploading(true);
+        try {
+          const pendingFiles = attachedFiles.filter((f) => f.status === "pending" || f.status === "error");
+          const alreadyDone = attachedFiles.filter((f) => f.status === "done");
+
+          const uploaded = pendingFiles.length > 0
+            ? await uploadFilesToS3(pendingFiles)
+            : [];
+
+          const allUploaded = [...alreadyDone, ...uploaded];
+          const successFiles = allUploaded.filter((f) => f.status === "done" && f.filePath);
+
+          if (successFiles.length === 0 && !input.trim()) {
+            toast.error("Could not upload any files");
+            setIsUploading(false);
+            return;
+          }
+
+          const attachmentsMeta = successFiles.map((f) => ({
+            fileName: f.file.name,
+            filePath: f.filePath!,
+            mimeType: f.file.type || "application/octet-stream",
+          }));
+
+          const fileNames = successFiles.map((f) => f.file.name);
+          const fileLabel = fileNames.length > 0
+            ? `[Attached: ${fileNames.join(", ")}]\n\n`
+            : "";
+
+          sendMessage(
+            { text: `${fileLabel}${input.trim()}` },
+            { body: { dataSourceIds, dataSourceContexts, attachments: attachmentsMeta } },
+          );
+          setInput("");
+          setAttachedFiles([]);
+        } finally {
+          setIsUploading(false);
+        }
+      } else {
+        sendMessage(
+          { text: input.trim() },
+          { body: { dataSourceIds, dataSourceContexts } },
+        );
+        setInput("");
+      }
     },
-    [input, isLoading, sendMessage, selectedSources],
+    [input, attachedFiles, isLoading, isUploading, sendMessage, selectedSources, uploadFilesToS3],
   );
 
   const onKeyDown = useCallback(
@@ -566,7 +769,13 @@ export function AnalystChat() {
   return (
     <div className="flex h-[calc(100%+3rem)] -m-6 overflow-hidden">
       {/* Chat area */}
-      <div className="flex flex-1 flex-col min-w-0">
+      <div
+        className={cn("flex flex-1 flex-col min-w-0 relative", isDragging && "ring-2 ring-primary ring-inset")}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border bg-card/80 backdrop-blur-sm px-6 py-3">
           <div className="flex items-center gap-3">
@@ -653,10 +862,44 @@ export function AnalystChat() {
               const text = textParts.map((p) => p.text).join("");
               if (!text) return null;
 
+              const attachedFileNames: string[] = [];
+              let userText = text;
+
+              const newFormatMatch = text.match(/^\[Attached: (.+?)\]\n\n/);
+              if (newFormatMatch) {
+                userText = text.replace(newFormatMatch[0], "").trim();
+                attachedFileNames.push(...newFormatMatch[1].split(", "));
+              } else {
+                const oldFormatMatch = text.match(/\[Attached file content\]\n([\s\S]*?)\n\[End of attached file content\]\n\n/);
+                if (oldFormatMatch) {
+                  userText = text.replace(oldFormatMatch[0], "").trim();
+                  const fileHeaders = oldFormatMatch[1].match(/--- File: (.+?) ---/g);
+                  if (fileHeaders) {
+                    for (const h of fileHeaders) {
+                      const name = h.match(/--- File: (.+?) ---/)?.[1];
+                      if (name) attachedFileNames.push(name);
+                    }
+                  }
+                }
+              }
+
               return (
                 <div key={msg.id} className="flex gap-2 justify-end">
                   <div className="max-w-[75%] rounded-2xl rounded-br-md bg-primary text-primary-foreground px-4 py-3 text-sm leading-relaxed">
-                    <p className="whitespace-pre-wrap break-words">{text}</p>
+                    {attachedFileNames.length > 0 && (
+                      <div className="mb-1.5 flex flex-wrap gap-1">
+                        {attachedFileNames.map((name) => (
+                          <span
+                            key={name}
+                            className="inline-flex items-center gap-1 rounded-md bg-primary-foreground/20 px-1.5 py-0.5 text-xs"
+                          >
+                            <Paperclip className="h-3 w-3" />
+                            {name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {userText && <p className="whitespace-pre-wrap break-words">{userText}</p>}
                   </div>
                   <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20">
                     <User className="h-4 w-4 text-primary" />
@@ -716,21 +959,92 @@ export function AnalystChat() {
           )}
         </div>
 
+        {/* Drag overlay */}
+        {isDragging && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-primary/5 backdrop-blur-[1px]">
+            <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-primary/50 bg-card/90 px-8 py-6">
+              <Paperclip className="h-8 w-8 text-primary/60" />
+              <p className="text-sm font-medium text-primary">Drop files here</p>
+              <p className="text-xs text-muted-foreground">PDF, images, TXT, DOCX, PPTX</p>
+            </div>
+          </div>
+        )}
+
         {/* Input */}
         <form
           onSubmit={onSubmit}
           className="border-t border-border bg-card/80 backdrop-blur-sm p-4"
         >
+          {/* File chips */}
+          {attachedFiles.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5 max-w-4xl mx-auto">
+              {attachedFiles.map((af) => {
+                const Icon = getFileIcon(af.file);
+                return (
+                  <div
+                    key={af.id}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs",
+                      af.status === "error"
+                        ? "border-destructive/50 bg-destructive/10 text-destructive"
+                        : af.status === "uploading"
+                          ? "border-primary/50 bg-primary/5 text-primary"
+                          : af.status === "done"
+                            ? "border-green-500/50 bg-green-500/10 text-green-700 dark:text-green-400"
+                            : "border-border bg-muted/50 text-foreground",
+                    )}
+                  >
+                    {af.status === "uploading" ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Icon className="h-3 w-3 shrink-0" />
+                    )}
+                    <span className="max-w-[120px] truncate">{af.file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeFile(af.id)}
+                      className="ml-0.5 rounded-full p-0.5 hover:bg-foreground/10"
+                      disabled={af.status === "uploading"}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           <div className="flex items-end gap-3 max-w-4xl mx-auto">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={ACCEPTED_EXTENSIONS.join(",")}
+              onChange={handleFileInputChange}
+              className="hidden"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11 shrink-0 rounded-xl text-muted-foreground hover:text-foreground"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading || isUploading}
+              title="Attach files"
+            >
+              <Paperclip className="h-4 w-4" />
+            </Button>
             <textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
               placeholder={
-                selectedSources.length > 0
-                  ? "Ask a question about your data..."
-                  : "Select tables from the right panel first..."
+                attachedFiles.length > 0
+                  ? "Add a message about these files..."
+                  : selectedSources.length > 0
+                    ? "Ask a question about your data..."
+                    : "Select tables from the right panel first..."
               }
               rows={1}
               className={cn(
@@ -739,15 +1053,15 @@ export function AnalystChat() {
                 "max-h-[150px] min-h-[44px]",
               )}
               style={{ fieldSizing: "content" } as React.CSSProperties}
-              disabled={isLoading}
+              disabled={isLoading || isUploading}
             />
             <Button
               type="submit"
               size="icon"
               className="h-11 w-11 shrink-0 rounded-xl"
-              disabled={!input.trim() || isLoading}
+              disabled={(!input.trim() && attachedFiles.length === 0) || isLoading || isUploading}
             >
-              {isLoading ? (
+              {isLoading || isUploading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Send className="h-4 w-4" />
