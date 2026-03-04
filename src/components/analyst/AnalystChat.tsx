@@ -38,6 +38,8 @@ import {
   DataSourcePanel,
   type SelectedDataSource,
 } from "./DataSourcePanel";
+import { InlineChart } from "./InlineChart";
+import type { VisualizationPayload } from "@/lib/agents/analyst-agent/tools";
 
 const ANALYST_STORAGE_KEY = "analyst-chat-history";
 const ANALYST_SOURCES_KEY = "analyst-selected-sources";
@@ -62,6 +64,38 @@ function parseThinking(text: string): { thinking: string; response: string } {
   }
 
   return { thinking, response: response.trim() };
+}
+
+const VISUALIZATION_PREFIX = "<!-- VISUALIZATION:";
+const VISUALIZATION_SUFFIX = " -->";
+
+function extractVisualizations(toolParts: unknown[]): VisualizationPayload[] {
+  const visualizations: VisualizationPayload[] = [];
+  for (const part of toolParts) {
+    const p = part as Record<string, unknown>;
+    if (p.toolName !== "visualize_data") continue;
+
+    const output = p.output;
+    let raw = "";
+    if (output && typeof output === "object" && "kwargs" in (output as Record<string, unknown>)) {
+      raw = ((output as Record<string, unknown>).kwargs as Record<string, unknown>)?.content as string ?? "";
+    } else if (typeof output === "string") {
+      raw = output;
+    }
+
+    const startIdx = raw.indexOf(VISUALIZATION_PREFIX);
+    if (startIdx === -1) continue;
+    const jsonStart = startIdx + VISUALIZATION_PREFIX.length;
+    const endIdx = raw.indexOf(VISUALIZATION_SUFFIX, jsonStart);
+    const jsonStr = endIdx === -1 ? raw.slice(jsonStart) : raw.slice(jsonStart, endIdx);
+
+    try {
+      visualizations.push(JSON.parse(jsonStr) as VisualizationPayload);
+    } catch {
+      // skip malformed payloads
+    }
+  }
+  return visualizations;
 }
 
 function MarkdownContent({
@@ -250,6 +284,7 @@ function AssistantMessage({
   thinking,
   response,
   toolParts,
+  visualizations,
   hasThinking,
   hasResponse,
   hasTools,
@@ -257,6 +292,7 @@ function AssistantMessage({
   thinking: string;
   response: string;
   toolParts: unknown[];
+  visualizations: VisualizationPayload[];
   hasThinking: boolean;
   hasResponse: boolean;
   hasTools: boolean;
@@ -395,6 +431,14 @@ function AssistantMessage({
               </div>
             </CollapsibleContent>
           </Collapsible>
+        )}
+
+        {visualizations.length > 0 && (
+          <div className="space-y-2">
+            {visualizations.map((viz, i) => (
+              <InlineChart key={`viz-${i}`} visualization={viz} />
+            ))}
+          </div>
         )}
 
         {hasResponse && (
@@ -638,11 +682,13 @@ export function AnalystChat() {
             });
 
             const { thinking, response } = parseThinking(fullText);
+            const visualizations = extractVisualizations(toolParts);
             const hasThinking = thinking.trim().length > 0;
             const hasResponse = response.trim().length > 0;
             const hasTools = toolParts.length > 0;
+            const hasVisualizations = visualizations.length > 0;
 
-            if (!hasThinking && !hasResponse && !hasTools) return null;
+            if (!hasThinking && !hasResponse && !hasTools && !hasVisualizations) return null;
 
             return (
               <AssistantMessage
@@ -650,6 +696,7 @@ export function AnalystChat() {
                 thinking={thinking}
                 response={response}
                 toolParts={toolParts}
+                visualizations={visualizations}
                 hasThinking={hasThinking}
                 hasResponse={hasResponse}
                 hasTools={hasTools}

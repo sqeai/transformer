@@ -182,11 +182,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </TooltipProvider>
         <main
           className={cn(
-            "flex-1 min-w-0 overflow-y-auto transition-[padding-left] duration-200 h-screen",
+            "flex-1 min-w-0 overflow-auto transition-[padding-left] duration-200 h-screen",
             collapsed ? "pl-16" : "pl-64",
           )}
         >
-          <div className="h-screen p-6">{children}</div>
+          <div className="h-full p-6">{children}</div>
         </main>
       </div>
     </ProtectedRoute>

@@ -8,6 +8,17 @@ export interface DataSourceContext {
   tables: { schema: string; name: string; columns: { name: string; type: string }[] }[];
 }
 
+export type VisualizationChartType = "bar" | "line" | "pie" | "scatter" | "waterfall";
+
+export interface VisualizationPayload {
+  title: string;
+  chartType: VisualizationChartType;
+  data: Record<string, unknown>[];
+  labelKey: string;
+  valueKeys: string[];
+  sql?: string;
+}
+
 export function createAnalystTools(
   dataSources: DataSourceContext[],
   queryFn: (dataSourceId: string, sql: string) => Promise<{ rows: Record<string, unknown>[]; rowCount: number; error?: string }>,
@@ -79,5 +90,53 @@ export function createAnalystTools(
     },
   );
 
-  return [queryDatabaseTool, listAvailableTablesTool];
+  const visualizeDataTool = tool(
+    async (input) => {
+      const payload: VisualizationPayload = {
+        title: input.title,
+        chartType: input.chartType as VisualizationChartType,
+        data: input.data,
+        labelKey: input.labelKey,
+        valueKeys: input.valueKeys,
+        sql: input.sql,
+      };
+      return `<!-- VISUALIZATION:${JSON.stringify(payload)} -->`;
+    },
+    {
+      name: "visualize_data",
+      description: `Create an inline chart visualization from data. Use this after querying data to present results visually. The frontend renders an interactive chart with tabs to switch between bar, line, pie, scatter, waterfall, and a raw table view. The user can freely switch between all views — the same data powers every one.
+
+Provide chart-agnostic data with a labelKey (the categorical/label column) and valueKeys (one or more numeric columns). The frontend maps these universally:
+- Bar/Line/Waterfall: labelKey → x-axis, valueKeys → y-axis series
+- Pie: labelKey → slice names, first valueKey → slice values
+- Scatter: first valueKey → x-axis, second valueKey → y-axis (falls back to first if only one)
+- Table: shows all columns as raw tabular data
+
+Always include the sql parameter with the SQL query you used to produce the data, so the user can see it.
+
+Use this tool when:
+- The user asks to "show", "plot", "chart", "visualize", or "graph" data
+- Query results would benefit from visual representation (trends, comparisons, distributions)
+- There are numeric values that can be meaningfully charted
+
+Choose the best default chartType for the data shape:
+- Categorical comparisons → "bar"
+- Time series / trends → "line"
+- Proportions / distributions → "pie"
+- Correlations between two numeric fields → "scatter"
+- Cumulative changes / financial flows → "waterfall"
+
+Keep data to ≤50 rows for readability; aggregate in SQL if needed.`,
+      schema: z.object({
+        title: z.string().describe("Chart title displayed above the visualization"),
+        chartType: z.enum(["bar", "line", "pie", "scatter", "waterfall"]).describe("Recommended default chart type"),
+        data: z.array(z.record(z.string(), z.unknown())).describe("Array of data objects to chart"),
+        labelKey: z.string().describe("The key in each data object used as the label/category (e.g. 'month', 'customer_name', 'category')"),
+        valueKeys: z.array(z.string()).describe("One or more keys in each data object that hold numeric values to chart (e.g. ['revenue'] or ['revenue', 'cost'])"),
+        sql: z.string().optional().describe("The SQL query used to produce this data (displayed to the user)"),
+      }),
+    },
+  );
+
+  return [queryDatabaseTool, listAvailableTablesTool, visualizeDataTool];
 }
