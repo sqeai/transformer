@@ -57,5 +57,6 @@ export interface Connector {
   listTables(): Promise<TableInfo[]>;
   getColumns(schema: string, table: string): Promise<ColumnInfo[]>;
   previewData(schema: string, table: string, limit?: number): Promise<Record<string, unknown>[]>;
+  query(sql: string): Promise<Record<string, unknown>[]>;
   close(): Promise<void>;
 }

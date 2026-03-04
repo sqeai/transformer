@@ -11,6 +11,8 @@ import {
   Cable,
   PanelLeftClose,
   PanelLeftOpen,
+  MessageSquare,
+  LayoutDashboard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -28,6 +30,8 @@ const nav = [
   { name: "Datasets", href: "/datasets", icon: Database },
   { name: "Schemas", href: "/schemas", icon: FileStack },
   { name: "Data Sources", href: "/data-sources", icon: Cable },
+  { name: "Assistant", href: "/assistant", icon: MessageSquare },
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
 ];
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
@@ -178,11 +182,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </TooltipProvider>
         <main
           className={cn(
-            "flex-1 min-w-0 overflow-y-auto transition-[padding-left] duration-200",
+            "flex-1 min-w-0 overflow-y-auto transition-[padding-left] duration-200 h-screen",
             collapsed ? "pl-16" : "pl-64",
           )}
         >
-          <div className="min-h-screen p-6">{children}</div>
+          <div className="h-screen p-6">{children}</div>
         </main>
       </div>
     </ProtectedRoute>

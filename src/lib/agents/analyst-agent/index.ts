@@ -1,0 +1,139 @@
+import { ChatAnthropic } from "@langchain/anthropic";
+import { createAgent } from "langchain";
+import { AIMessage, type BaseMessage } from "@langchain/core/messages";
+import { createAnalystTools, type DataSourceContext } from "./tools";
+
+const SYSTEM_PROMPT = `You are an intelligent Data Analyst Assistant. You help users explore, query, and understand their databases to answer financial and analytical questions.
+
+You have access to the following tools:
+
+1. **list_available_tables** — List all available tables and columns across selected data sources. Always call this first to understand the schema.
+2. **query_database** — Execute read-only SQL queries against connected databases. Use this to fetch data and answer questions.
+
+## How to Help Users
+
+- **Understanding data:** When asked about what data is available, call list_available_tables and explain the schema clearly.
+- **Answering questions:** Write SQL queries to answer the user's questions. Always check the schema first, then write appropriate queries.
+- **Financial analysis:** You excel at financial questions — revenue analysis, cost breakdowns, trends, comparisons, ratios, forecasting, etc.
+- **Data exploration:** Help users discover patterns, anomalies, and insights in their data.
+
+## Response Format
+
+Structure EVERY response using these delimiters:
+
+1. Wrap your reasoning/analysis in thinking delimiters:
+   <!-- THINKING_START -->
+   Your analysis, query planning, etc.
+   <!-- THINKING_END -->
+
+2. After THINKING_END, write your user-facing response with clear explanations and formatted results.
+
+## Guidelines
+
+- ALWAYS call list_available_tables before writing your first query in a conversation to understand the schema.
+- Write efficient SQL — use appropriate JOINs, aggregations, and filters.
+- Format numerical results clearly (currency, percentages, etc.).
+- When presenting tabular data, use markdown tables.
+- If a query fails, explain the error and try an alternative approach.
+- If the user's question is ambiguous, ask for clarification.
+- Suggest follow-up analyses when relevant.
+- Be mindful of query performance — use LIMIT when exploring large tables.
+- Adapt SQL dialect to the database type (PostgreSQL, MySQL, BigQuery, Redshift).`;
+
+export interface AnalystAgentConfig {
+  apiKey: string;
+}
+
+export interface AnalystInvokeOptions {
+  messages: BaseMessage[];
+  dataSources: DataSourceContext[];
+  queryFn: (dataSourceId: string, sql: string) => Promise<{ rows: Record<string, unknown>[]; rowCount: number; error?: string }>;
+}
+
+function createAnalystAgent(
+  config: AnalystAgentConfig,
+  dataSources: DataSourceContext[],
+  queryFn: AnalystInvokeOptions["queryFn"],
+) {
+  const llm = new ChatAnthropic({
+    model: "claude-sonnet-4-20250514",
+    anthropicApiKey: config.apiKey,
+    temperature: 0,
+  });
+
+  const tools = createAnalystTools(dataSources, queryFn);
+
+  return createAgent({
+    model: llm,
+    tools,
+    systemPrompt: SYSTEM_PROMPT,
+  });
+}
+
+export class AnalystAgentGraph {
+  private config: AnalystAgentConfig;
+
+  constructor(config: AnalystAgentConfig) {
+    this.config = config;
+  }
+
+  async streamEvents(
+    inputs: AnalystInvokeOptions,
+    config?: Record<string, unknown>,
+  ) {
+    const agent = createAnalystAgent(
+      this.config,
+      inputs.dataSources,
+      inputs.queryFn,
+    );
+    return agent.streamEvents({ messages: inputs.messages }, config);
+  }
+
+  async invoke(
+    inputs: AnalystInvokeOptions,
+    config?: { recursionLimit?: number },
+  ) {
+    try {
+      const agent = createAnalystAgent(
+        this.config,
+        inputs.dataSources,
+        inputs.queryFn,
+      );
+      const result = await agent.invoke(
+        { messages: inputs.messages },
+        config,
+      );
+
+      if (result && typeof result === "object" && "messages" in result) {
+        return { messages: result.messages as BaseMessage[] };
+      }
+      return { messages: [new AIMessage(JSON.stringify(result))] };
+    } catch (error) {
+      return {
+        messages: [new AIMessage(`Error: ${(error as Error).message}`)],
+      };
+    }
+  }
+}
+
+let analystAgent: AnalystAgentGraph | null = null;
+
+export function getAnalystAgent(): AnalystAgentGraph | null {
+  if (analystAgent) return analystAgent;
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    console.error("ANTHROPIC_API_KEY environment variable is required");
+    return null;
+  }
+
+  try {
+    analystAgent = new AnalystAgentGraph({ apiKey });
+    return analystAgent;
+  } catch (error) {
+    console.error(`Failed to create analyst agent: ${(error as Error).message}`);
+    return null;
+  }
+}
+
+export type { DataSourceContext };

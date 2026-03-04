@@ -77,6 +77,12 @@ export function createMySQLConnector(config: MySQLConfig): Connector {
       return rows as Record<string, unknown>[];
     },
 
+    async query(sql: string) {
+      const p = getPool();
+      const [rows] = await p.query<mysql.RowDataPacket[]>(sql);
+      return rows as Record<string, unknown>[];
+    },
+
     async close() {
       if (pool) {
         await pool.end();

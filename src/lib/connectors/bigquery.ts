@@ -51,6 +51,11 @@ export function createBigQueryConnector(config: BigQueryConfig): Connector {
       return rows as Record<string, unknown>[];
     },
 
+    async query(sql: string) {
+      const [rows] = await client.query({ query: sql });
+      return rows as Record<string, unknown>[];
+    },
+
     async close() {
       // BigQuery client doesn't need explicit close
     },
