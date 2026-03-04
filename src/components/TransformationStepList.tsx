@@ -9,9 +9,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { ChevronDown, ChevronRight, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TransformationMappingEntry } from "@/lib/schema-store";
+import {
+  getTransformationDescription,
+  getPhaseDescription,
+} from "@/lib/transformation-descriptions";
 
 interface TransformationStepListProps {
   iterations: TransformationMappingEntry[][];
@@ -83,19 +92,34 @@ export function TransformationStepList({
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium">
-                            {entry.tool.charAt(0).toUpperCase() + entry.tool.slice(1)}
-                          </span>
-                          <span
-                            className={cn(
-                              "text-[10px] font-medium px-1.5 py-0.5 rounded-full uppercase tracking-wider",
-                              entry.phase === "cleansing"
-                                ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
-                                : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
-                            )}
-                          >
-                            {entry.phase}
-                          </span>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="text-sm font-medium inline-flex items-center gap-1 cursor-help">
+                                {getTransformationDescription(entry.tool).label}
+                                <Info className="h-3 w-3 text-muted-foreground" />
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-xs">
+                              <p className="text-xs">{getTransformationDescription(entry.tool).description}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span
+                                className={cn(
+                                  "text-[10px] font-medium px-1.5 py-0.5 rounded-full uppercase tracking-wider cursor-help",
+                                  entry.phase === "cleansing"
+                                    ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                                    : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
+                                )}
+                              >
+                                {entry.phase}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-xs">
+                              <p className="text-xs">{getPhaseDescription(entry.phase).description}</p>
+                            </TooltipContent>
+                          </Tooltip>
                         </div>
                         {entry.reasoning && (
                           <p className="text-xs text-muted-foreground mt-0.5 truncate">

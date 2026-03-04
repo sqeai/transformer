@@ -18,6 +18,12 @@ import "@xyflow/react/dist/style.css";
 import type { PipelineDescriptor } from "@/lib/schema-store";
 import { cn } from "@/lib/utils";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { getTransformationDescription } from "@/lib/transformation-descriptions";
+import {
   Database,
   Filter,
   Columns3,
@@ -55,13 +61,22 @@ function PipelineNode({ data }: { data: { label: string; nodeType: string; param
     ([key]) => !["resultRowCount", "removedCount", "groupCount"].includes(key),
   );
 
+  const desc = getTransformationDescription(data.nodeType);
+
   return (
     <div className={cn("rounded-lg border-2 px-4 py-3 min-w-[180px] max-w-[280px] shadow-sm", colorClass)}>
       <Handle type="target" position={Position.Left} className="!bg-border !w-3 !h-3" />
-      <div className="flex items-center gap-2 mb-1">
-        <Icon className="h-4 w-4 shrink-0" />
-        <span className="text-sm font-semibold">{data.label}</span>
-      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex items-center gap-2 mb-1 cursor-help">
+            <Icon className="h-4 w-4 shrink-0" />
+            <span className="text-sm font-semibold">{data.label}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs">
+          <p className="text-xs">{desc.description}</p>
+        </TooltipContent>
+      </Tooltip>
       {paramEntries.length > 0 && (
         <div className="mt-2 space-y-1 text-xs text-muted-foreground">
           {paramEntries.slice(0, 4).map(([key, value]) => (

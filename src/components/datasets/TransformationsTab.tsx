@@ -8,9 +8,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { TransformationStepList } from "@/components/TransformationStepList";
 import { cn } from "@/lib/utils";
+import { Info } from "lucide-react";
 import type { TransformationMappingEntry } from "@/lib/schema-store";
+import {
+  TRANSFORMATION_DESCRIPTIONS,
+  PHASE_DESCRIPTIONS,
+} from "@/lib/transformation-descriptions";
 
 interface TransformationsTabProps {
   allTransformations: TransformationMappingEntry[][][];
@@ -32,12 +42,43 @@ export function TransformationsTab({
     (iteration) => iteration.length > 0,
   );
 
+  const availableTransformationsTooltip = (
+    <div className="space-y-2">
+      {Object.entries(PHASE_DESCRIPTIONS).map(([key, phase]) => (
+        <div key={key}>
+          <p className="font-medium text-xs">{phase.label}</p>
+          <p className="text-xs text-muted-foreground">{phase.description}</p>
+        </div>
+      ))}
+      <hr className="border-border" />
+      <p className="font-medium text-xs">Available transformations:</p>
+      <ul className="space-y-1">
+        {Object.entries(TRANSFORMATION_DESCRIPTIONS).map(([key, t]) => (
+          <li key={key} className="text-xs">
+            <span className="font-medium">{t.label}</span>
+            <span className="text-muted-foreground"> — {t.description}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       {hasDatasetTransformations && (
         <Card>
           <CardHeader>
-            <CardTitle>Dataset-Level Transformations</CardTitle>
+            <div className="flex items-center gap-2">
+              <CardTitle>Dataset-Level Transformations</CardTitle>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="h-4 w-4 text-muted-foreground cursor-help shrink-0" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-sm max-h-80 overflow-y-auto">
+                  {availableTransformationsTooltip}
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <CardDescription>
               Transformations applied to the dataset after initial creation
               via the AI Data Cleanser.
@@ -52,7 +93,17 @@ export function TransformationsTab({
       {hasSheetTransformations && (
         <Card>
           <CardHeader>
-            <CardTitle>Sheet-Level Transformations</CardTitle>
+            <div className="flex items-center gap-2">
+              <CardTitle>Sheet-Level Transformations</CardTitle>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="h-4 w-4 text-muted-foreground cursor-help shrink-0" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-sm max-h-80 overflow-y-auto">
+                  {availableTransformationsTooltip}
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <CardDescription>
               The AI agent&apos;s thought process and transformations applied
               to each source sheet during dataset creation.
