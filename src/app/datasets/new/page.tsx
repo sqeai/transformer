@@ -777,6 +777,7 @@ function NewDatasetPageContent() {
           <ProcessingStep
             jobResults={jobResults}
             allJobsDone={allJobsDone}
+            onBack={() => setStep("upload")}
             onContinue={() => setStep("review")}
           />
         )}

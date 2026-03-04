@@ -78,18 +78,27 @@ export function UploadStep({
   }, [previewFileKey]);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <div className="lg:col-span-3 flex justify-end gap-2">
-        <Button variant="outline" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button onClick={onSubmit} disabled={selectedFiles.length === 0}>
-          Next: Process {selectedFiles.length} file
-          {selectedFiles.length !== 1 ? "s" : ""}
-          <ArrowRight className="ml-2 h-4 w-4" />
-        </Button>
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold">Select Data</h2>
+          <p className="text-sm text-muted-foreground">
+            Choose which files and worksheets to process.
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Button variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button onClick={onSubmit} disabled={selectedFiles.length === 0}>
+            Next: Process {selectedFiles.length} file
+            {selectedFiles.length !== 1 ? "s" : ""}
+            <ArrowRight className="ml-2 h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <Card className="lg:col-span-1">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Files</CardTitle>
@@ -312,6 +321,7 @@ export function UploadStep({
           })()}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

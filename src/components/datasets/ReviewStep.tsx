@@ -169,23 +169,31 @@ export function ReviewStep({
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between">
-        <Button
-          variant="outline"
-          onClick={onBack}
-          disabled={anySheetProcessing}
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back
-        </Button>
-        <Button
-          onClick={onNext}
-          disabled={exportableCount === 0 || anySheetProcessing}
-        >
-          Next: Export {exportableCount} file
-          {exportableCount !== 1 ? "s" : ""}
-          <ArrowRight className="ml-2 h-4 w-4" />
-        </Button>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold">Transform Dataset</h2>
+          <p className="text-sm text-muted-foreground">
+            Review and refine the transformed data before exporting.
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Button
+            variant="outline"
+            onClick={onBack}
+            disabled={anySheetProcessing}
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back
+          </Button>
+          <Button
+            onClick={onNext}
+            disabled={exportableCount === 0 || anySheetProcessing}
+          >
+            Next: Export {exportableCount} file
+            {exportableCount !== 1 ? "s" : ""}
+            <ArrowRight className="ml-2 h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2 border-b pb-2">
