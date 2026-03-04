@@ -276,22 +276,25 @@ export function ReviewStep({
                         rows={2}
                         disabled={showModifyLoading}
                       />
-                      <Button
-                        onClick={() => onModifyWithAI(currentResult)}
-                        disabled={
-                          !modifyPrompt.trim() ||
-                          anySheetProcessing ||
-                          currentSheetSubmitting
-                        }
-                        className="rainbow-border rounded-md border-0 bg-white px-3 text-xs font-medium text-foreground hover:bg-gradient-to-r hover:from-fuchsia-500 hover:via-violet-500 hover:to-cyan-500 hover:text-white min-h-[80px] flex-1 shrink-0 self-end"
-                      >
-                        {showModifyLoading ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <Sparkles className="mr-2 h-4 w-4" />
-                        )}
-                        Modify using AI
-                      </Button>
+                      <div className="rounded-md bg-[linear-gradient(90deg,#f59e0b,#ef4444,#8b5cf6,#3b82f6,#10b981)] p-[1px]">
+                        <Button
+                          onClick={() => onModifyWithAI(currentResult)}
+                          disabled={
+                            !modifyPrompt.trim() ||
+                            anySheetProcessing ||
+                            currentSheetSubmitting
+                          }
+                          variant="outline"
+                          className="border-0 bg-background hover:bg-muted min-h-[80px] disabled:text-gray disabled:opacity-100"
+                        >
+                          {showModifyLoading ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Sparkles className="mr-2 h-4 w-4" />
+                          )}
+                          Modify using AI
+                        </Button>
+                      </div>
                     </div>
 
                     {currentSheetProcessing && (
