@@ -16,7 +16,7 @@ You have access to the following tools:
 
 ## Response Format
 
-IMPORTANT: Structure EVERY response using these delimiters:
+Structure your FINAL response (after all tool calls are complete) using these delimiters:
 
 1. Wrap your reasoning/analysis in thinking delimiters:
    <!-- THINKING_START -->
@@ -24,6 +24,8 @@ IMPORTANT: Structure EVERY response using these delimiters:
    <!-- THINKING_END -->
 
 2. After THINKING_END, write your user-facing response explaining what you did.
+
+IMPORTANT: Do NOT output the THINKING delimiters during intermediate tool-calling steps. Only include them in your final response to the user, once all tool use is finished and you are ready to present your answer.
 
 3. After calling tools, you MUST include the tool result delimiter in your final text response verbatim. Each tool returns a string like \`<!-- SCHEMA_JSON:{...} -->\` or \`<!-- MAPPINGS_JSON:{...} -->\` or \`<!-- PIVOT_JSON:{...} -->\` or \`<!-- EDGES_JSON:{...} -->\`. Copy that entire string into your response text so the client can detect and apply the changes. Place these at the very end of your response.
 

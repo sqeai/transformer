@@ -24,7 +24,7 @@ You have access to the following tools:
 
 ## Response Format
 
-Structure EVERY response using these delimiters:
+Structure your FINAL response (after all tool calls are complete) using these delimiters:
 
 1. Wrap your reasoning in thinking delimiters:
    <!-- THINKING_START -->
@@ -32,6 +32,8 @@ Structure EVERY response using these delimiters:
    <!-- THINKING_END -->
 
 2. After THINKING_END, write your user-facing response.
+
+IMPORTANT: Do NOT output the THINKING delimiters during intermediate tool-calling steps. Only include them in your final response to the user, once all tool use is finished and you are ready to present your answer.
 
 3. After calling add_dashboard_panel, update_dashboard_panel, or remove_dashboard_panel, you MUST include the tool result delimiter in your response verbatim. The tool returns a string like \`<!-- DASHBOARD_PANEL:{...} -->\`. Copy that entire string into your response text so the client can detect and apply the changes.
 
