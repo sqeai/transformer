@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import {
   ReactFlow,
   Background,
@@ -64,38 +64,37 @@ function PipelineNode({ data }: { data: { label: string; nodeType: string; param
   const desc = getTransformationDescription(data.nodeType);
 
   return (
-    <div className={cn("rounded-lg border-2 px-4 py-3 min-w-[180px] max-w-[280px] shadow-sm", colorClass)}>
+    <div className={cn("rounded-lg border-2 max-w-[260px] max-h-[260px] flex flex-col shadow-sm", colorClass)}>
       <Handle type="target" position={Position.Left} className="!bg-border !w-3 !h-3" />
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div className="flex items-center gap-2 mb-1 cursor-help">
-            <Icon className="h-4 w-4 shrink-0" />
-            <span className="text-sm font-semibold">{data.label}</span>
-          </div>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-xs">
-          <p className="text-xs">{desc.description}</p>
-        </TooltipContent>
-      </Tooltip>
-      {paramEntries.length > 0 && (
-        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-          {paramEntries.slice(0, 4).map(([key, value]) => (
-            <div key={key} className="flex gap-1">
-              <span className="font-medium shrink-0">{key}:</span>
-              <span className="truncate">
-                {Array.isArray(value)
-                  ? value.length > 3
-                    ? `[${value.slice(0, 3).join(", ")}... +${value.length - 3}]`
-                    : `[${value.join(", ")}]`
-                  : typeof value === "object"
-                    ? JSON.stringify(value).slice(0, 50)
-                    : String(value)}
-              </span>
+      <div className="px-4 pt-3 pb-1 shrink-0">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-2 cursor-help">
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className="text-sm font-semibold truncate">{data.label}</span>
             </div>
-          ))}
-          {paramEntries.length > 4 && (
-            <div className="text-muted-foreground/60">+{paramEntries.length - 4} more</div>
-          )}
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-xs">
+            <p className="text-xs">{desc.description}</p>
+          </TooltipContent>
+        </Tooltip>
+      </div>
+      {paramEntries.length > 0 && (
+        <div className="px-4 pb-3 overflow-y-auto flex-1 space-y-1 text-xs text-muted-foreground">
+          {paramEntries.map(([key, value]) => {
+            const formatValue = (v: unknown): string => {
+              if (v == null) return "null";
+              if (Array.isArray(v)) return `[${v.map(formatValue).join(", ")}]`;
+              if (typeof v === "object") return JSON.stringify(v);
+              return String(v);
+            };
+            return (
+              <div key={key} className="flex gap-1">
+                <span className="font-medium shrink-0">{key}:</span>
+                <span className="break-all">{formatValue(value)}</span>
+              </div>
+            );
+          })}
         </div>
       )}
       <Handle type="source" position={Position.Right} className="!bg-border !w-3 !h-3" />
@@ -123,7 +122,7 @@ export default function MappingFlow({ pipeline, pipelines, className }: MappingF
     () => {
       const nodes: Node[] = [];
       flowPipelines.forEach((singlePipeline, pipelineIdx) => {
-        const yOffset = pipelineIdx * 260;
+        const yOffset = pipelineIdx * 320;
         singlePipeline.nodes.forEach((node, nodeIdx) => {
           nodes.push({
             id: `pipeline-${pipelineIdx}-${node.id}`,
@@ -134,7 +133,7 @@ export default function MappingFlow({ pipeline, pipelines, className }: MappingF
               nodeType: node.type,
               params: node.data,
             },
-            draggable: true,
+            draggable: false,
           });
         });
       });
@@ -156,6 +155,25 @@ export default function MappingFlow({ pipeline, pipelines, className }: MappingF
             style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },
           });
         });
+
+        if (pipelineIdx < flowPipelines.length - 1) {
+          const lastNode = singlePipeline.nodes[singlePipeline.nodes.length - 1];
+          const nextFirstNode = flowPipelines[pipelineIdx + 1].nodes[0];
+          if (lastNode && nextFirstNode) {
+            edges.push({
+              id: `chain-${pipelineIdx}-to-${pipelineIdx + 1}`,
+              source: `pipeline-${pipelineIdx}-${lastNode.id}`,
+              target: `pipeline-${pipelineIdx + 1}-${nextFirstNode.id}`,
+              animated: true,
+              style: {
+                stroke: "hsl(var(--muted-foreground))",
+                strokeWidth: 2,
+                strokeDasharray: "6 3",
+              },
+              label: `Iter ${pipelineIdx + 1} → ${pipelineIdx + 2}`,
+            });
+          }
+        }
       });
       return edges;
     },
