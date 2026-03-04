@@ -136,7 +136,7 @@ export async function extractFileFromS3(
   mimeType: string,
   targetPaths?: string[],
 ): Promise<OcrResult> {
-  const { downloadS3FileToTmp } = await import("./s3-sheets");
+  const { downloadS3FileToTmp } = await import("./s3-files");
   const { promises: fs } = await import("fs");
 
   const tmpPath = await downloadS3FileToTmp(filePath);

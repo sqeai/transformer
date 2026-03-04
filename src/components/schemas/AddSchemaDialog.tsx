@@ -299,13 +299,13 @@ export function AddSchemaDialog({
                     <FileSpreadsheet className="h-4 w-4 shrink-0" />
                   )}
                   <span className="min-w-0 break-words">
-                    Upload from existing Excel
+                    Upload from existing file
                   </span>
                   <Sparkles className="h-3.5 w-3.5 ml-auto shrink-0 text-violet-500" />
                 </span>
                 <span className="w-full text-left text-muted-foreground text-sm font-normal break-words mt-1.5 block">
-                  Parse a header row from an Excel file into a schema you can
-                  configure.
+                  Parse a header row from an Excel or CSV file into a schema you
+                  can configure.
                 </span>
               </button>
               <button

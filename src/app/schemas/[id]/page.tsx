@@ -205,7 +205,7 @@ export default function SchemaDetailPage() {
         schemaId,
         step: "upload",
         files,
-        selectedSheets: [],
+        selectedFiles: [],
       });
       router.push(`/datasets/new?schemaId=${schemaId}`);
     },

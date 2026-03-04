@@ -137,7 +137,7 @@ function DatasetsPageContent() {
         schemaId,
         step: "upload",
         files,
-        selectedSheets: [],
+        selectedFiles: [],
       });
       router.push(`/datasets/new?schemaId=${schemaId}`);
     },

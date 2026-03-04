@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export interface JobRow {
   id: string;
   user_id: string;
-  sheet_id: string | null;
+  file_id: string | null;
   type: string;
   status: "pending" | "running" | "completed" | "failed";
   payload: unknown;
@@ -17,7 +17,7 @@ export interface JobRow {
 export interface CreateJobParams {
   type: string;
   payload: unknown;
-  sheetId?: string;
+  fileId?: string;
 }
 
 /**
@@ -35,7 +35,7 @@ export async function createJob(
       type: params.type,
       payload: params.payload,
       status: "pending",
-      ...(params.sheetId ? { sheet_id: params.sheetId } : {}),
+      ...(params.fileId ? { file_id: params.fileId } : {}),
     })
     .select("id")
     .single();

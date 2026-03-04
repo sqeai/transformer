@@ -8,7 +8,7 @@ import {
 } from "@/lib/jobs-db";
 import { AI_DATA_CLEANSER_MAX_CONCURRENCY } from "@/lib/jobs-config";
 import { runDataCleanser } from "@/lib/agents/data-cleanser";
-import { createSheetRecord } from "@/lib/sheets-db";
+import { createFileRecord } from "@/lib/files-db";
 
 export async function POST(_request: NextRequest) {
   return processJobs();
@@ -39,7 +39,7 @@ async function processJobs() {
           const payload = job.payload as {
             filePath?: string;
             targetPaths?: string[];
-            sheetName?: string;
+            fileName?: string;
             userDirective?: string;
             originalFilePath?: string;
             modifiedFilePath?: string;
@@ -53,20 +53,20 @@ async function processJobs() {
           const result = await runDataCleanser({
             filePath: payload.filePath,
             targetPaths: payload.targetPaths,
-            sheetName: payload.sheetName ?? "Sheet",
+            fileName: payload.fileName ?? "File",
             userDirective: payload.userDirective,
             originalFilePath: payload.originalFilePath,
             modifiedFilePath: payload.modifiedFilePath,
-            sheetId: job.sheet_id ?? undefined,
+            fileId: job.file_id ?? undefined,
             unstructuredMimeType: payload.unstructuredMimeType,
           });
 
-          if (typeof job.sheet_id === "string" && job.sheet_id) {
-            await createSheetRecord(supabase, {
+          if (typeof job.file_id === "string" && job.file_id) {
+            await createFileRecord(supabase, {
               userId: job.user_id,
-              sheetId: job.sheet_id,
+              fileId: job.file_id,
               storageUrl: result.outputFilePath,
-              name: payload.sheetName ?? "Sheet",
+              name: payload.fileName ?? "File",
               dimensions: {
                 rowCount: result.transformedRows.length,
                 columnCount: result.transformedColumns.length,

@@ -8,12 +8,13 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import {
   useSchemaStore,
   flattenFields,
-  type SheetSelection,
-  type SheetJobResult,
+  type FileSelection,
+  type FileJobResult,
   type TransformationMappingEntry,
 } from "@/lib/schema-store";
 import { extractExcelGridTopBottom } from "@/lib/parse-excel-preview";
 import { parseExcelToRows } from "@/lib/parse-excel";
+import { parseCsvContent } from "@/lib/utils/csv";
 import ExcelJS from "exceljs";
 import { StepIndicator, STEPS, type Step } from "@/components/datasets/StepIndicator";
 import { UploadStep } from "@/components/datasets/UploadStep";
@@ -44,8 +45,8 @@ interface PreviewState {
   visibleRows: number;
 }
 
-interface UploadedSheetRef {
-  sheetId: string;
+interface UploadedFileRef {
+  fileId: string;
   filePath: string;
 }
 
@@ -75,11 +76,11 @@ function isSameTransformationIteration(
 }
 
 function mergeJobResultWithIterationHistory(
-  previous: SheetJobResult,
-  incoming: SheetJobResult["result"] | undefined,
-  status: SheetJobResult["status"],
+  previous: FileJobResult,
+  incoming: FileJobResult["result"] | undefined,
+  status: FileJobResult["status"],
   jobId: string,
-): Pick<SheetJobResult, "result" | "transformationIterationJobIds"> {
+): Pick<FileJobResult, "result" | "transformationIterationJobIds"> {
   const fallbackResult = incoming ?? previous.result;
   if (!fallbackResult) {
     return {
@@ -139,18 +140,18 @@ function NewDatasetPageContent() {
   }, [schema]);
 
   const [step, setStep] = useState<Step>(datasetWorkflow.step || "upload");
-  const [selectedSheets, setSelectedSheets] = useState<SheetSelection[]>(datasetWorkflow.selectedSheets);
+  const [selectedFiles, setSelectedFiles] = useState<FileSelection[]>(datasetWorkflow.selectedFiles);
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
-  const hasManuallyToggledSheets = useRef(false);
+  const hasManuallyToggledFiles = useRef(false);
   const [aiInstructions, setAiInstructions] = useState<Record<string, string>>(datasetWorkflow.aiInstructions ?? {});
 
-  const [previewSheet, setPreviewSheet] = useState<SheetSelection | null>(null);
+  const [previewFile, setPreviewFile] = useState<FileSelection | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewTopRows, setPreviewTopRows] = useState(PREVIEW_ROWS);
 
-  const [jobResults, setJobResults] = useState<SheetJobResult[]>(datasetWorkflow.jobResults);
-  const [uploadedSheetRefs, setUploadedSheetRefs] = useState<Record<string, UploadedSheetRef>>({});
+  const [jobResults, setJobResults] = useState<FileJobResult[]>(datasetWorkflow.jobResults);
+  const [uploadedFileRefs, setUploadedFileRefs] = useState<Record<string, UploadedFileRef>>({});
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   const [modifyPrompt, setModifyPrompt] = useState("");
@@ -184,27 +185,27 @@ function NewDatasetPageContent() {
     router.push("/datasets");
   }, [router, step]);
 
-  // --- Sheet upload helper ---
+  // --- File upload helper ---
 
-  const uploadSheetCsv = useCallback(async (
+  const uploadFileCsv = useCallback(async (
     args: {
-      sheetName: string;
+      fileName: string;
       columns: string[];
       rows: Record<string, unknown>[];
       type: "raw" | "processed" | "intermediary";
     },
-  ): Promise<UploadedSheetRef> => {
-    const presignRes = await fetch("/api/sheets/presign", {
+  ): Promise<UploadedFileRef> => {
+    const presignRes = await fetch("/api/files/presign", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: args.sheetName,
+        name: args.fileName,
         type: args.type,
         dimensions: { rowCount: args.rows.length, columnCount: args.columns.length },
       }),
     });
     const presignData = await presignRes.json();
-    if (!presignRes.ok) throw new Error(presignData.error ?? "Failed to request sheet upload URL");
+    if (!presignRes.ok) throw new Error(presignData.error ?? "Failed to request file upload URL");
 
     const csvPayload = rowsToCsv(args.columns, args.rows);
     const uploadRes = await fetch(String(presignData.uploadUrl), {
@@ -212,9 +213,9 @@ function NewDatasetPageContent() {
       headers: { "Content-Type": "text/csv" },
       body: csvPayload,
     });
-    if (!uploadRes.ok) throw new Error("Failed to upload sheet CSV to S3");
+    if (!uploadRes.ok) throw new Error("Failed to upload CSV to S3");
 
-    return { sheetId: String(presignData.sheetId), filePath: String(presignData.filePath) };
+    return { fileId: String(presignData.fileId), filePath: String(presignData.filePath) };
   }, []);
 
   // --- Auto-expand / auto-select effects ---
@@ -226,32 +227,32 @@ function NewDatasetPageContent() {
   }, [files]);
 
   useEffect(() => {
-    if (selectedSheets.length === 0 && files.length > 0 && !hasManuallyToggledSheets.current) {
-      const allSheets: SheetSelection[] = [];
+    if (selectedFiles.length === 0 && files.length > 0 && !hasManuallyToggledFiles.current) {
+      const allSelections: FileSelection[] = [];
       for (const file of files) {
-        for (let i = 0; i < file.sheetNames.length; i++) {
-          allSheets.push({ fileId: file.fileId, fileName: file.fileName, sheetIndex: i, sheetName: file.sheetNames[i] });
+        for (let i = 0; i < file.worksheetNames.length; i++) {
+          allSelections.push({ fileId: file.fileId, fileName: file.fileName, worksheetIndex: i, worksheetName: file.worksheetNames[i] });
         }
       }
-      setSelectedSheets(allSheets);
+      setSelectedFiles(allSelections);
     }
-  }, [files, selectedSheets.length]);
+  }, [files, selectedFiles.length]);
 
   useEffect(() => {
-    if (!previewSheet && files.length > 0 && files[0].sheetNames.length > 0) {
-      setPreviewSheet({ fileId: files[0].fileId, fileName: files[0].fileName, sheetIndex: 0, sheetName: files[0].sheetNames[0] });
+    if (!previewFile && files.length > 0 && files[0].worksheetNames.length > 0) {
+      setPreviewFile({ fileId: files[0].fileId, fileName: files[0].fileName, worksheetIndex: 0, worksheetName: files[0].worksheetNames[0] });
     }
-  }, [files, previewSheet]);
+  }, [files, previewFile]);
 
   // --- Preview loading ---
 
   useEffect(() => {
     setPreviewTopRows(PREVIEW_ROWS);
-  }, [previewSheet?.fileId, previewSheet?.sheetIndex]);
+  }, [previewFile?.fileId, previewFile?.worksheetIndex]);
 
   useEffect(() => {
-    if (!previewSheet) return;
-    const file = files.find((f) => f.fileId === previewSheet.fileId);
+    if (!previewFile) return;
+    const file = files.find((f) => f.fileId === previewFile.fileId);
     if (!file) return;
 
     if (file.unstructuredType) {
@@ -265,15 +266,31 @@ function NewDatasetPageContent() {
 
     (async () => {
       try {
-        const result = await extractExcelGridTopBottom(file.buffer, previewTopRows, 0, 100, previewSheet.sheetIndex);
-        if (cancelled) return;
-        const columns = result.rows.length > 0 ? result.rows[0].data.map((_: string, i: number) => `Column ${i + 1}`) : [];
-        const rows = result.rows.map((r: { originalIndex: number; data: string[] }) => {
-          const row: Record<string, unknown> = {};
-          r.data.forEach((cell: string, i: number) => { row[columns[i]] = cell; });
-          return row;
-        });
-        setPreview({ columns, rows, totalRows: result.totalRows, visibleRows: rows.length });
+        const isCsv = file.fileName.toLowerCase().endsWith(".csv");
+        if (isCsv) {
+          const text = new TextDecoder().decode(file.buffer);
+          const parsed = parseCsvContent(text);
+          if (cancelled) return;
+          const headerRow = parsed[0] ?? [];
+          const columns = headerRow.map((h, i) => h.trim() || `Column ${i + 1}`);
+          const dataRows = parsed.slice(1, previewTopRows + 1);
+          const rows = dataRows.map((r) => {
+            const row: Record<string, unknown> = {};
+            columns.forEach((col, i) => { row[col] = r[i] ?? ""; });
+            return row;
+          });
+          setPreview({ columns, rows, totalRows: parsed.length - 1, visibleRows: rows.length });
+        } else {
+          const result = await extractExcelGridTopBottom(file.buffer, previewTopRows, 0, 100, previewFile.worksheetIndex);
+          if (cancelled) return;
+          const columns = result.rows.length > 0 ? result.rows[0].data.map((_: string, i: number) => `Column ${i + 1}`) : [];
+          const rows = result.rows.map((r: { originalIndex: number; data: string[] }) => {
+            const row: Record<string, unknown> = {};
+            r.data.forEach((cell: string, i: number) => { row[columns[i]] = cell; });
+            return row;
+          });
+          setPreview({ columns, rows, totalRows: result.totalRows, visibleRows: rows.length });
+        }
       } catch {
         setPreview(null);
       } finally {
@@ -282,45 +299,45 @@ function NewDatasetPageContent() {
     })();
 
     return () => { cancelled = true; };
-  }, [previewSheet, files, previewTopRows]);
+  }, [previewFile, files, previewTopRows]);
 
   // --- Persist workflow state ---
 
   useEffect(() => {
-    setDatasetWorkflow({ step, selectedSheets, jobResults, confirmedSheetIds: [], aiInstructions });
-  }, [step, selectedSheets, jobResults, aiInstructions]);
+    setDatasetWorkflow({ step, selectedFiles, jobResults, confirmedFileIds: [], aiInstructions });
+  }, [step, selectedFiles, jobResults, aiInstructions]);
 
-  // --- Sheet selection ---
+  // --- File selection ---
 
-  const toggleSheet = (sheet: SheetSelection) => {
-    hasManuallyToggledSheets.current = true;
-    const key = `${sheet.fileId}:${sheet.sheetIndex}`;
-    setSelectedSheets((prev) => {
-      const exists = prev.some((s) => `${s.fileId}:${s.sheetIndex}` === key);
-      if (exists) return prev.filter((s) => `${s.fileId}:${s.sheetIndex}` !== key);
-      return [...prev, sheet];
+  const toggleFileSelection = (selection: FileSelection) => {
+    hasManuallyToggledFiles.current = true;
+    const key = `${selection.fileId}:${selection.worksheetIndex}`;
+    setSelectedFiles((prev) => {
+      const exists = prev.some((s) => `${s.fileId}:${s.worksheetIndex}` === key);
+      if (exists) return prev.filter((s) => `${s.fileId}:${s.worksheetIndex}` !== key);
+      return [...prev, selection];
     });
   };
 
-  const toggleAllSheetsForFile = (fileId: string) => {
-    hasManuallyToggledSheets.current = true;
+  const toggleAllWorksheetsForFile = (fileId: string) => {
+    hasManuallyToggledFiles.current = true;
     const file = files.find((f) => f.fileId === fileId);
     if (!file) return;
-    const fileSheets: SheetSelection[] = file.sheetNames.map((sheetName, sheetIndex) => ({
-      fileId: file.fileId, fileName: file.fileName, sheetIndex, sheetName,
+    const fileSelections: FileSelection[] = file.worksheetNames.map((worksheetName, worksheetIndex) => ({
+      fileId: file.fileId, fileName: file.fileName, worksheetIndex, worksheetName,
     }));
-    setSelectedSheets((prev) => {
-      const allSelected = fileSheets.every((sheet) =>
-        prev.some((s) => s.fileId === sheet.fileId && s.sheetIndex === sheet.sheetIndex),
+    setSelectedFiles((prev) => {
+      const allSelected = fileSelections.every((sel) =>
+        prev.some((s) => s.fileId === sel.fileId && s.worksheetIndex === sel.worksheetIndex),
       );
       if (allSelected) return prev.filter((s) => s.fileId !== file.fileId);
-      const existingKeys = new Set(prev.map((s) => `${s.fileId}:${s.sheetIndex}`));
-      const missingSheets = fileSheets.filter((sheet) => !existingKeys.has(`${sheet.fileId}:${sheet.sheetIndex}`));
-      return [...prev, ...missingSheets];
+      const existingKeys = new Set(prev.map((s) => `${s.fileId}:${s.worksheetIndex}`));
+      const missing = fileSelections.filter((sel) => !existingKeys.has(`${sel.fileId}:${sel.worksheetIndex}`));
+      return [...prev, ...missing];
     });
   };
 
-  const toggleFile = (fileId: string) => {
+  const toggleFileExpand = (fileId: string) => {
     setExpandedFiles((prev) => {
       const next = new Set(prev);
       if (next.has(fileId)) next.delete(fileId);
@@ -329,12 +346,12 @@ function NewDatasetPageContent() {
     });
   };
 
-  const isSheetSelected = (fileId: string, sheetIndex: number) =>
-    selectedSheets.some((s) => s.fileId === fileId && s.sheetIndex === sheetIndex);
+  const isFileSelected = (fileId: string, worksheetIndex: number) =>
+    selectedFiles.some((s) => s.fileId === fileId && s.worksheetIndex === worksheetIndex);
 
   // --- Job submission & polling ---
 
-  const startPolling = useCallback((initialResults: SheetJobResult[]) => {
+  const startPolling = useCallback((initialResults: FileJobResult[]) => {
     if (pollingRef.current) clearInterval(pollingRef.current);
     const jobIds = initialResults.filter((r) => r.jobId).map((r) => r.jobId);
     if (jobIds.length === 0) return;
@@ -352,8 +369,8 @@ function NewDatasetPageContent() {
           const updated = prev.map((r) => {
             const job = jobMap.get(r.jobId);
             if (!job) return r;
-            const nextStatus = job.status as SheetJobResult["status"];
-            const merged = mergeJobResultWithIterationHistory(r, job.result as SheetJobResult["result"] | undefined, nextStatus, r.jobId);
+            const nextStatus = job.status as FileJobResult["status"];
+            const merged = mergeJobResultWithIterationHistory(r, job.result as FileJobResult["result"] | undefined, nextStatus, r.jobId);
             return { ...r, status: nextStatus, result: merged.result, transformationIterationJobIds: merged.transformationIterationJobIds, error: job.error };
           });
 
@@ -373,27 +390,27 @@ function NewDatasetPageContent() {
   }, []);
 
   const submitJobs = useCallback(async () => {
-    if (!schemaId || selectedSheets.length === 0) return;
+    if (!schemaId || selectedFiles.length === 0) return;
     setStep("processing");
-    const results: SheetJobResult[] = [];
-    const nextUploadedRefs: Record<string, UploadedSheetRef> = {};
+    const results: FileJobResult[] = [];
+    const nextUploadedRefs: Record<string, UploadedFileRef> = {};
 
-    for (const sheet of selectedSheets) {
-      const file = files.find((f) => f.fileId === sheet.fileId);
+    for (const selection of selectedFiles) {
+      const file = files.find((f) => f.fileId === selection.fileId);
       if (!file) continue;
       try {
-        let uploaded: UploadedSheetRef;
+        let uploaded: UploadedFileRef;
         let unstructuredMimeType: string | undefined;
 
         if (file.unstructuredType) {
           const mimeType = getMimeTypeForUnstructured(file.unstructuredType);
           unstructuredMimeType = mimeType;
 
-          const presignRes = await fetch("/api/sheets/presign", {
+          const presignRes = await fetch("/api/files/presign", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              name: sheet.sheetName,
+              name: selection.worksheetName,
               type: "raw",
               dimensions: { rowCount: 0, columnCount: 0 },
               contentType: mimeType,
@@ -410,21 +427,32 @@ function NewDatasetPageContent() {
           });
           if (!uploadRes.ok) throw new Error("Failed to upload file to S3");
 
-          uploaded = { sheetId: String(presignData.sheetId), filePath: String(presignData.filePath) };
+          uploaded = { fileId: String(presignData.fileId), filePath: String(presignData.filePath) };
+        } else if (file.fileName.toLowerCase().endsWith(".csv")) {
+          const text = new TextDecoder().decode(file.buffer);
+          const csvParsed = parseCsvContent(text);
+          const headerRow = csvParsed[0] ?? [];
+          const csvColumns = headerRow.map((h, i) => h.trim() || `Column ${i + 1}`);
+          const csvRows = csvParsed.slice(1).map((r) => {
+            const row: Record<string, unknown> = {};
+            csvColumns.forEach((col, i) => { row[col] = r[i] ?? ""; });
+            return row;
+          });
+          uploaded = await uploadFileCsv({ fileName: selection.worksheetName, columns: csvColumns, rows: csvRows, type: "raw" });
         } else {
-          const parsed = await parseExcelToRows(file.buffer, { headerRowIndex: 0, dataStartRowIndex: 1, sheetIndex: sheet.sheetIndex });
-          uploaded = await uploadSheetCsv({ sheetName: sheet.sheetName, columns: parsed.columns, rows: parsed.rows, type: "raw" });
+          const parsed = await parseExcelToRows(file.buffer, { headerRowIndex: 0, dataStartRowIndex: 1, sheetIndex: selection.worksheetIndex });
+          uploaded = await uploadFileCsv({ fileName: selection.worksheetName, columns: parsed.columns, rows: parsed.rows, type: "raw" });
         }
 
-        nextUploadedRefs[`${sheet.fileId}:${sheet.sheetIndex}`] = uploaded;
+        nextUploadedRefs[`${selection.fileId}:${selection.worksheetIndex}`] = uploaded;
 
-        const sheetKey = `${sheet.fileId}:${sheet.sheetIndex}`;
-        const sheetDirective = aiInstructions[sheetKey]?.trim() || undefined;
+        const fileKey = `${selection.fileId}:${selection.worksheetIndex}`;
+        const fileDirective = aiInstructions[fileKey]?.trim() || undefined;
         const jobPayload: Record<string, unknown> = {
           filePath: uploaded.filePath,
           targetPaths,
-          sheetName: sheet.sheetName,
-          userDirective: sheetDirective,
+          fileName: selection.worksheetName,
+          userDirective: fileDirective,
         };
         if (unstructuredMimeType) {
           jobPayload.unstructuredMimeType = unstructuredMimeType;
@@ -433,21 +461,21 @@ function NewDatasetPageContent() {
         const res = await fetch("/api/jobs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "data_cleanse", sheetId: uploaded.sheetId, payload: jobPayload }),
+          body: JSON.stringify({ type: "data_cleanse", fileId: uploaded.fileId, payload: jobPayload }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Failed to create job");
-        results.push({ jobId: data.jobId, sheet, status: "pending" });
+        results.push({ jobId: data.jobId, file: selection, status: "pending" });
       } catch (err) {
-        results.push({ jobId: "", sheet, status: "failed", error: err instanceof Error ? err.message : "Failed to create job" });
+        results.push({ jobId: "", file: selection, status: "failed", error: err instanceof Error ? err.message : "Failed to create job" });
       }
     }
 
-    setUploadedSheetRefs((prev) => ({ ...prev, ...nextUploadedRefs }));
+    setUploadedFileRefs((prev) => ({ ...prev, ...nextUploadedRefs }));
     setJobResults(results);
     fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
     startPolling(results);
-  }, [schemaId, selectedSheets, files, targetPaths, aiInstructions, uploadSheetCsv, startPolling]);
+  }, [schemaId, selectedFiles, files, targetPaths, aiInstructions, uploadFileCsv, startPolling]);
 
   useEffect(() => { return () => { if (pollingRef.current) clearInterval(pollingRef.current); }; }, []);
 
@@ -457,8 +485,8 @@ function NewDatasetPageContent() {
 
   // --- Review: original preview ---
 
-  const loadOriginalPreview = useCallback(async (sheetResult: SheetJobResult) => {
-    const file = files.find((f) => f.fileId === sheetResult.sheet.fileId);
+  const loadOriginalPreview = useCallback(async (fileResult: FileJobResult) => {
+    const file = files.find((f) => f.fileId === fileResult.file.fileId);
     if (!file) return;
     setOriginalPreviewLoading(true);
     try {
@@ -468,8 +496,21 @@ function NewDatasetPageContent() {
         allOriginalRowsRef.current = rows;
         setOriginalVisibleCount(PREVIEW_ROWS);
         setOriginalPreview({ columns: ["content"], rows, totalRows: rows.length, visibleRows: rows.length });
+      } else if (file.fileName.toLowerCase().endsWith(".csv")) {
+        const text = new TextDecoder().decode(file.buffer);
+        const csvParsed = parseCsvContent(text);
+        const headerRow = csvParsed[0] ?? [];
+        const csvColumns = headerRow.map((h, i) => h.trim() || `Column ${i + 1}`);
+        const csvRows = csvParsed.slice(1).map((r) => {
+          const row: Record<string, unknown> = {};
+          csvColumns.forEach((col, i) => { row[col] = r[i] ?? ""; });
+          return row;
+        });
+        allOriginalRowsRef.current = csvRows;
+        setOriginalVisibleCount(PREVIEW_ROWS);
+        setOriginalPreview({ columns: csvColumns, rows: csvRows, totalRows: csvRows.length, visibleRows: csvRows.length });
       } else {
-        const parsed = await parseExcelToRows(file.buffer, { headerRowIndex: 0, dataStartRowIndex: 1, sheetIndex: sheetResult.sheet.sheetIndex });
+        const parsed = await parseExcelToRows(file.buffer, { headerRowIndex: 0, dataStartRowIndex: 1, sheetIndex: fileResult.file.worksheetIndex });
         allOriginalRowsRef.current = parsed.rows;
         setOriginalVisibleCount(PREVIEW_ROWS);
         setOriginalPreview({ columns: parsed.columns, rows: parsed.rows, totalRows: parsed.rows.length, visibleRows: parsed.rows.length });
@@ -503,8 +544,8 @@ function NewDatasetPageContent() {
         setJobResults((prev) =>
           prev.map((r) => {
             if (r.jobId !== jobId) return r;
-            const nextStatus = job.status as SheetJobResult["status"];
-            const merged = mergeJobResultWithIterationHistory(r, (job.result as SheetJobResult["result"] | undefined) ?? r.result, nextStatus, jobId);
+            const nextStatus = job.status as FileJobResult["status"];
+            const merged = mergeJobResultWithIterationHistory(r, (job.result as FileJobResult["result"] | undefined) ?? r.result, nextStatus, jobId);
             return { ...r, status: nextStatus, result: merged.result, transformationIterationJobIds: merged.transformationIterationJobIds, error: job.error };
           }),
         );
@@ -535,18 +576,18 @@ function NewDatasetPageContent() {
 
   useEffect(() => { return () => { if (modifyPollingRef.current) clearInterval(modifyPollingRef.current); }; }, []);
 
-  const handleModifyWithAI = useCallback(async (sheetResult: SheetJobResult) => {
+  const handleModifyWithAI = useCallback(async (fileResult: FileJobResult) => {
     if (!modifyPrompt.trim() || !schemaId) return;
-    const currentSheetKey = `${sheetResult.sheet.fileId}:${sheetResult.sheet.sheetIndex}`;
-    setModifySubmittingSheetKey(currentSheetKey);
+    const currentFileKey = `${fileResult.file.fileId}:${fileResult.file.worksheetIndex}`;
+    setModifySubmittingSheetKey(currentFileKey);
 
     try {
-      if (!sheetResult.result) throw new Error("No modified sheet is available yet for this tab.");
-      const modifiedColumns = sheetResult.result.transformedColumns;
-      const modifiedRows = sheetResult.result.transformedRows;
-      const originalRef = uploadedSheetRefs[currentSheetKey];
-      const uploadedModified = await uploadSheetCsv({
-        sheetName: `${sheetResult.sheet.sheetName} (modified)`,
+      if (!fileResult.result) throw new Error("No modified data is available yet for this tab.");
+      const modifiedColumns = fileResult.result.transformedColumns;
+      const modifiedRows = fileResult.result.transformedRows;
+      const originalRef = uploadedFileRefs[currentFileKey];
+      const uploadedModified = await uploadFileCsv({
+        fileName: `${fileResult.file.worksheetName} (modified)`,
         columns: modifiedColumns,
         rows: modifiedRows,
         type: "intermediary",
@@ -557,8 +598,8 @@ function NewDatasetPageContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "data_cleanse",
-          sheetId: originalRef?.sheetId,
-          payload: { filePath: uploadedModified.filePath, targetPaths, sheetName: sheetResult.sheet.sheetName, userDirective: modifyPrompt.trim(), originalFilePath: originalRef?.filePath, modifiedFilePath: uploadedModified.filePath },
+          fileId: originalRef?.fileId,
+          payload: { filePath: uploadedModified.filePath, targetPaths, fileName: fileResult.file.worksheetName, userDirective: modifyPrompt.trim(), originalFilePath: originalRef?.filePath, modifiedFilePath: uploadedModified.filePath },
         }),
       });
       const data = await res.json();
@@ -566,7 +607,7 @@ function NewDatasetPageContent() {
 
       setJobResults((prev) =>
         prev.map((r) =>
-          r.sheet.fileId === sheetResult.sheet.fileId && r.sheet.sheetIndex === sheetResult.sheet.sheetIndex
+          r.file.fileId === fileResult.file.fileId && r.file.worksheetIndex === fileResult.file.worksheetIndex
             ? { ...r, jobId: data.jobId, status: "pending" as const, result: r.result, error: undefined }
             : r,
         ),
@@ -574,14 +615,14 @@ function NewDatasetPageContent() {
 
       setModifyPrompt("");
       setModifySubmittingSheetKey(null);
-      setUploadedSheetRefs((prev) => ({ ...prev, [currentSheetKey]: uploadedModified }));
+      setUploadedFileRefs((prev) => ({ ...prev, [currentFileKey]: uploadedModified }));
       fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
       startModifyPolling(data.jobId);
     } catch (err) {
       setModifySubmittingSheetKey(null);
       alert(err instanceof Error ? err.message : "Failed to modify");
     }
-  }, [modifyPrompt, schemaId, targetPaths, startModifyPolling, uploadedSheetRefs, uploadSheetCsv]);
+  }, [modifyPrompt, schemaId, targetPaths, startModifyPolling, uploadedFileRefs, uploadFileCsv]);
 
   // --- Export ---
 
@@ -712,23 +753,23 @@ function NewDatasetPageContent() {
         {step === "upload" && (
           <UploadStep
             files={files}
-            selectedSheets={selectedSheets}
+            selectedFiles={selectedFiles}
             expandedFiles={expandedFiles}
-            previewSheet={previewSheet}
+            previewFile={previewFile}
             preview={preview}
             previewLoading={previewLoading}
             aiInstructions={aiInstructions}
-            onAiInstructionsChange={(sheetKey, value) =>
-              setAiInstructions((prev) => ({ ...prev, [sheetKey]: value }))
+            onAiInstructionsChange={(fileKey, value) =>
+              setAiInstructions((prev) => ({ ...prev, [fileKey]: value }))
             }
-            onToggleFile={toggleFile}
-            onToggleSheet={toggleSheet}
-            onToggleAllSheetsForFile={toggleAllSheetsForFile}
-            onPreviewSheet={setPreviewSheet}
+            onToggleFileExpand={toggleFileExpand}
+            onToggleFileSelection={toggleFileSelection}
+            onToggleAllWorksheetsForFile={toggleAllWorksheetsForFile}
+            onPreviewFile={setPreviewFile}
             onLoadMorePreview={() => setPreviewTopRows((prev) => prev + PREVIEW_ROWS)}
             onCancel={() => router.push("/datasets")}
             onSubmit={submitJobs}
-            isSheetSelected={isSheetSelected}
+            isFileSelected={isFileSelected}
           />
         )}
 

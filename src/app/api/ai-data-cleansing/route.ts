@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json() as {
       columns?: unknown;
       rows?: unknown;
-      sheetName?: unknown;
+      fileName?: unknown;
       userInstructions?: unknown;
     };
     const columns = Array.isArray(body.columns) ? body.columns.map((value) => String(value)) : [];

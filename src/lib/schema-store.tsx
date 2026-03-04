@@ -44,18 +44,18 @@ export interface UploadedFileEntry {
   fileId: string;
   fileName: string;
   buffer: ArrayBuffer;
-  sheetNames: string[];
+  worksheetNames: string[];
   /** Set for unstructured files (PDF, PNG, TXT, DOCX, PPTX) */
   unstructuredType?: UnstructuredFileType;
   /** Text content extracted from unstructured files (for TXT, or after OCR) */
   extractedText?: string;
 }
 
-export interface SheetSelection {
+export interface FileSelection {
   fileId: string;
   fileName: string;
-  sheetIndex: number;
-  sheetName: string;
+  worksheetIndex: number;
+  worksheetName: string;
 }
 
 export interface TransformationSnapshot {
@@ -78,9 +78,9 @@ export interface TransformationMappingEntry {
   after: TransformationSnapshot;
 }
 
-export interface SheetJobResult {
+export interface FileJobResult {
   jobId: string;
-  sheet: SheetSelection;
+  file: FileSelection;
   status: "pending" | "running" | "completed" | "failed";
   transformationIterationJobIds?: string[];
   result?: {
@@ -133,9 +133,9 @@ export interface DatasetWorkflowState {
   schemaId: string | null;
   step: "upload" | "processing" | "review" | "export";
   files: UploadedFileEntry[];
-  selectedSheets: SheetSelection[];
-  jobResults: SheetJobResult[];
-  confirmedSheetIds: string[];
+  selectedFiles: FileSelection[];
+  jobResults: FileJobResult[];
+  confirmedFileIds: string[];
   exportTargetDatasetId: string | null;
   aiInstructions: Record<string, string>;
 }
@@ -144,9 +144,9 @@ const defaultDatasetWorkflow: DatasetWorkflowState = {
   schemaId: null,
   step: "upload",
   files: [],
-  selectedSheets: [],
+  selectedFiles: [],
   jobResults: [],
-  confirmedSheetIds: [],
+  confirmedFileIds: [],
   exportTargetDatasetId: null,
   aiInstructions: {},
 };

@@ -80,17 +80,24 @@ export function UploadDatasetDialog({
             fileId: crypto.randomUUID(),
             fileName: file.name,
             buffer,
-            sheetNames: [file.name],
+            worksheetNames: [file.name],
             unstructuredType,
             extractedText,
           });
-        } else if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
-          const sheetNames = (await getExcelSheetNames(buffer)) ?? [file.name];
+        } else if (name.endsWith(".csv")) {
           entries.push({
             fileId: crypto.randomUUID(),
             fileName: file.name,
             buffer,
-            sheetNames,
+            worksheetNames: [file.name],
+          });
+        } else if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+          const worksheetNames = (await getExcelSheetNames(buffer)) ?? [file.name];
+          entries.push({
+            fileId: crypto.randomUUID(),
+            fileName: file.name,
+            buffer,
+            worksheetNames,
           });
         }
       } catch {
@@ -154,8 +161,8 @@ export function UploadDatasetDialog({
           </DialogTitle>
           <DialogDescription>
             {isAddToDataset
-              ? "Upload files to process and add to this dataset. Supports Excel, PDF, images, text, Word, and PowerPoint."
-              : "Select a target schema and upload files to process. Supports Excel, PDF, images, text, Word, and PowerPoint."}
+              ? "Upload files to process and add to this dataset. Supports Excel, CSV, PDF, images, text, Word, and PowerPoint."
+              : "Select a target schema and upload files to process. Supports Excel, CSV, PDF, images, text, Word, and PowerPoint."}
           </DialogDescription>
         </DialogHeader>
 
@@ -206,7 +213,7 @@ export function UploadDatasetDialog({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg,.txt,.docx,.pptx"
+                accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.txt,.docx,.pptx"
                 multiple
                 className="hidden"
                 onChange={handleFileInput}
@@ -223,7 +230,7 @@ export function UploadDatasetDialog({
                 </button>
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Supports Excel (.xlsx, .xls), PDF, images (.png, .jpg), text (.txt), Word (.docx), and PowerPoint (.pptx).
+                Supports Excel (.xlsx, .xls), CSV (.csv), PDF, images (.png, .jpg), text (.txt), Word (.docx), and PowerPoint (.pptx).
               </p>
             </div>
           </div>
@@ -261,7 +268,7 @@ export function UploadDatasetDialog({
                       <p className="text-xs text-muted-foreground">
                         {f.unstructuredType
                           ? f.unstructuredType.toUpperCase()
-                          : `${f.sheetNames.length} sheet${f.sheetNames.length !== 1 ? "s" : ""}`}
+                          : `${f.worksheetNames.length} worksheet${f.worksheetNames.length !== 1 ? "s" : ""}`}
                       </p>
                     </div>
                     <Button
@@ -302,7 +309,7 @@ export function UploadDatasetDialog({
                 : uploading
                   ? "Uploading..."
                   : isAddToDataset
-                    ? "Continue to sheet preview"
+                    ? "Continue to file preview"
                     : "Upload"}
             </Button>
           </div>

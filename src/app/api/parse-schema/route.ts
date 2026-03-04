@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseExcelColumns } from "@/lib/parse-excel";
 import { detectHeaderRowValuesWithLLM, recommendFieldTypesWithLLM } from "@/lib/llm-schema";
+import { parseCsvContent } from "@/lib/utils/csv";
 
 function normalizeHeader(value: unknown): string {
   return (value ?? "")
@@ -49,8 +50,8 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
-    const sheetIndexRaw = formData.get("sheetIndex") as string | null;
-    const sheetIndex = sheetIndexRaw != null ? Number(sheetIndexRaw) || 0 : 0;
+    const worksheetIndexRaw = formData.get("sheetIndex") as string | null;
+    const sheetIndex = worksheetIndexRaw != null ? Number(worksheetIndexRaw) || 0 : 0;
     if (!file) {
       return NextResponse.json(
         { error: "No file provided" },
@@ -58,10 +59,34 @@ export async function POST(request: NextRequest) {
       );
     }
     const buffer = await file.arrayBuffer();
+    const isCsv = file.name.toLowerCase().endsWith(".csv");
+
+    if (isCsv) {
+      const text = new TextDecoder().decode(buffer);
+      const parsed = parseCsvContent(text);
+      const headerRow = parsed[0] ?? [];
+      const rawHeaders = headerRow.map((h) => h.trim()).filter(Boolean);
+      const deduped = uniqueHeaderValues(rawHeaders);
+      const snakeCaseFields = uniqueSnakeCaseValues(deduped);
+      let typeByPath: Record<string, string> = {};
+      try {
+        typeByPath = await recommendFieldTypesWithLLM(snakeCaseFields);
+      } catch {
+        typeByPath = {};
+      }
+      const fields = snakeCaseFields.map((name, order) => ({
+        id: crypto.randomUUID(),
+        name,
+        path: name,
+        level: 0,
+        order,
+        dataType: typeByPath[name] ?? "STRING",
+        children: [],
+      }));
+      return NextResponse.json({ fields });
+    }
 
     try {
-      // Use the LLM to detect header boundaries and build the best header list
-      // (including multi-row headers merged into a single label per column).
       const headerValues = await detectHeaderRowValuesWithLLM(buffer, sheetIndex);
       const deduped = uniqueHeaderValues(headerValues);
       const snakeCaseFields = uniqueSnakeCaseValues(deduped);

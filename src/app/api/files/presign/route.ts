@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
-import { createSheetUploadUrl } from "@/lib/s3-sheets";
-import { createSheetRecord, generateSheetId, type SheetType } from "@/lib/sheets-db";
+import { createFileUploadUrl } from "@/lib/s3-files";
+import { createFileRecord, generateFileId, type FileRecordType } from "@/lib/files-db";
 
 interface PresignBody {
   name?: unknown;
   dimensions?: unknown;
   type?: unknown;
-  sheetId?: unknown;
+  fileId?: unknown;
   contentType?: unknown;
   fileExtension?: unknown;
 }
@@ -25,8 +25,8 @@ export async function POST(request: NextRequest) {
 
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const dimensions = body.dimensions as { rowCount?: unknown; columnCount?: unknown } | undefined;
-  const type = body.type as SheetType | undefined;
-  const sheetId = typeof body.sheetId === "string" && body.sheetId.trim() ? body.sheetId.trim() : generateSheetId();
+  const type = body.type as FileRecordType | undefined;
+  const fileId = typeof body.fileId === "string" && body.fileId.trim() ? body.fileId.trim() : generateFileId();
 
   if (!name) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
@@ -46,10 +46,10 @@ export async function POST(request: NextRequest) {
   const fileExtension = typeof body.fileExtension === "string" ? body.fileExtension.trim() : undefined;
 
   try {
-    const upload = await createSheetUploadUrl(contentType, fileExtension);
-    const sheet = await createSheetRecord(auth.supabase!, {
+    const upload = await createFileUploadUrl(contentType, fileExtension);
+    const fileRecord = await createFileRecord(auth.supabase!, {
       userId: auth.userId!,
-      sheetId,
+      fileId,
       name,
       storageUrl: upload.filePath,
       dimensions: { rowCount, columnCount },
@@ -57,14 +57,14 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({
-      sheetId: sheet.sheet_id,
-      recordId: sheet.id,
-      filePath: sheet.storage_url,
+      fileId: fileRecord.file_id,
+      recordId: fileRecord.id,
+      filePath: fileRecord.storage_url,
       uploadUrl: upload.uploadUrl,
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create sheet upload URL" },
+      { error: error instanceof Error ? error.message : "Failed to create file upload URL" },
       { status: 500 },
     );
   }

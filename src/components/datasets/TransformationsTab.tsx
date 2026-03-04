@@ -31,12 +31,12 @@ export function TransformationsTab({
   allTransformations,
   datasetTransformations = [],
 }: TransformationsTabProps) {
-  const [activeSheetIdx, setActiveSheetIdx] = useState(0);
-  const currentSheetTransformations =
-    allTransformations[activeSheetIdx] ?? [];
+  const [activeFileIdx, setActiveFileIdx] = useState(0);
+  const currentFileTransformations =
+    allTransformations[activeFileIdx] ?? [];
 
-  const hasSheetTransformations = allTransformations.some((sheetIterations) =>
-    sheetIterations.some((iteration) => iteration.length > 0),
+  const hasFileTransformations = allTransformations.some((fileIterations) =>
+    fileIterations.some((iteration) => iteration.length > 0),
   );
   const hasDatasetTransformations = datasetTransformations.some(
     (iteration) => iteration.length > 0,
@@ -90,11 +90,11 @@ export function TransformationsTab({
         </Card>
       )}
 
-      {hasSheetTransformations && (
+      {hasFileTransformations && (
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
-              <CardTitle>Sheet-Level Transformations</CardTitle>
+              <CardTitle>File-Level Transformations</CardTitle>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Info className="h-4 w-4 text-muted-foreground cursor-help shrink-0" />
@@ -106,7 +106,7 @@ export function TransformationsTab({
             </div>
             <CardDescription>
               The AI agent&apos;s thought process and transformations applied
-              to each source sheet during dataset creation.
+              to each source file during dataset creation.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -118,32 +118,32 @@ export function TransformationsTab({
                     type="button"
                     className={cn(
                       "px-3 py-1.5 text-sm rounded-md border transition-colors",
-                      activeSheetIdx === idx
+                      activeFileIdx === idx
                         ? "bg-primary text-primary-foreground border-primary"
                         : "border-border text-muted-foreground hover:bg-muted",
                     )}
-                    onClick={() => setActiveSheetIdx(idx)}
+                    onClick={() => setActiveFileIdx(idx)}
                   >
-                    Sheet {idx + 1}
+                    File {idx + 1}
                   </button>
                 ))}
               </div>
             )}
 
-            {currentSheetTransformations.length === 0 ? (
+            {currentFileTransformations.length === 0 ? (
               <p className="text-muted-foreground text-center py-4">
-                No transformation data available for this sheet.
+                No transformation data available for this file.
               </p>
             ) : (
               <TransformationStepList
-                iterations={currentSheetTransformations}
+                iterations={currentFileTransformations}
               />
             )}
           </CardContent>
         </Card>
       )}
 
-      {!hasSheetTransformations && !hasDatasetTransformations && (
+      {!hasFileTransformations && !hasDatasetTransformations && (
         <Card>
           <CardHeader>
             <CardTitle>Transformations</CardTitle>

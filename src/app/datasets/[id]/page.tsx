@@ -177,10 +177,10 @@ export default function DatasetPage() {
     if (!dataset?.mappingSnapshot) return [];
     const t = (dataset.mappingSnapshot as Record<string, unknown>).transformations;
     if (!Array.isArray(t)) return [];
-    const isLegacyShape = t.every((sheetEntry) =>
-      Array.isArray(sheetEntry) && sheetEntry.every((entry) => !Array.isArray(entry)),
+    const isLegacyShape = t.every((fileEntry) =>
+      Array.isArray(fileEntry) && fileEntry.every((entry) => !Array.isArray(entry)),
     );
-    if (isLegacyShape) return (t as TransformationMappingEntry[][]).map((sheetEntries) => [sheetEntries]);
+    if (isLegacyShape) return (t as TransformationMappingEntry[][]).map((fileEntries) => [fileEntries]);
     return t as TransformationMappingEntry[][][];
   }, [dataset]);
 
@@ -192,8 +192,8 @@ export default function DatasetPage() {
   }, [dataset]);
 
   const hasTransformations =
-    allTransformations.some((sheetIterations) =>
-      sheetIterations.some((iteration) => iteration.length > 0),
+    allTransformations.some((fileIterations) =>
+      fileIterations.some((iteration) => iteration.length > 0),
     ) || datasetTransformations.some((iteration) => iteration.length > 0);
 
   // --- Data fetching ---
@@ -257,7 +257,7 @@ export default function DatasetPage() {
     (schemaId: string, files: UploadedFileEntry[]) => {
       if (!dataset) return;
       resetDatasetWorkflow();
-      setDatasetWorkflow({ schemaId, step: "upload", files, selectedSheets: [], exportTargetDatasetId: dataset.id });
+      setDatasetWorkflow({ schemaId, step: "upload", files, selectedFiles: [], exportTargetDatasetId: dataset.id });
       router.push(`/datasets/new?schemaId=${schemaId}&datasetId=${dataset.id}`);
     },
     [dataset, resetDatasetWorkflow, setDatasetWorkflow, router],
@@ -481,7 +481,7 @@ export default function DatasetPage() {
       const targetPaths = flattenFields(schemaFields).filter((field) => !field.children?.length).map((field) => field.path);
       if (targetPaths.length === 0) throw new Error("Schema does not contain any leaf fields");
 
-      const presignRes = await fetch("/api/sheets/presign", {
+      const presignRes = await fetch("/api/files/presign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: `${dataset.name} (dataset ai cleanse)`, type: "intermediary", dimensions: { rowCount: dataset.rows.length, columnCount: columns.length } }),
@@ -496,7 +496,7 @@ export default function DatasetPage() {
       const jobRes = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "data_cleanse", sheetId: String(presignData.sheetId), payload: { filePath: String(presignData.filePath), targetPaths, sheetName: dataset.name, userDirective: aiCleanserInstructions.trim() || undefined } }),
+        body: JSON.stringify({ type: "data_cleanse", fileId: String(presignData.fileId), payload: { filePath: String(presignData.filePath), targetPaths, fileName: dataset.name, userDirective: aiCleanserInstructions.trim() || undefined } }),
       });
       const jobData = await jobRes.json().catch(() => ({}));
       if (!jobRes.ok) throw new Error(jobData.error ?? "Failed to create AI cleanse job");

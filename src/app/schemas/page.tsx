@@ -46,7 +46,7 @@ export default function SchemasPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [addSchemaOpen, setAddSchemaOpen] = useState(false);
 
-  // Sheet picker state
+  // Worksheet picker state
   const [sheetPickerOpen, setSheetPickerOpen] = useState(false);
   const [sheetNames, setSheetNames] = useState<string[]>([]);
   const [activeSheetIndex, setActiveSheetIndex] = useState(0);
@@ -95,7 +95,7 @@ export default function SchemasPage() {
       const { fields } = await res.json();
       const schema: FinalSchema = {
         id: crypto.randomUUID(),
-        name: file.name.replace(/\.xlsx?$/i, "") || "New Schema",
+        name: file.name.replace(/\.(xlsx?|csv)$/i, "") || "New Schema",
         fields: fields.map((f: { id: string; name: string; path: string; level: number; order: number }) => ({
           ...f,
           children: [],
@@ -117,17 +117,21 @@ export default function SchemasPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const buffer = await file.arrayBuffer();
-      const names = await getExcelSheetNames(buffer);
-      if (!names || names.length <= 1) {
+      if (file.name.toLowerCase().endsWith(".csv")) {
         await createSchemaFromFile(file, 0);
       } else {
-        setSchemaUploadFile(file);
-        setSchemaUploadBuffer(buffer);
-        setSheetNames(names);
-        setActiveSheetIndex(0);
-        setSheetPickerOpen(true);
-        await loadSheetPreview(buffer, 0);
+        const buffer = await file.arrayBuffer();
+        const names = await getExcelSheetNames(buffer);
+        if (!names || names.length <= 1) {
+          await createSchemaFromFile(file, 0);
+        } else {
+          setSchemaUploadFile(file);
+          setSchemaUploadBuffer(buffer);
+          setSheetNames(names);
+          setActiveSheetIndex(0);
+          setSheetPickerOpen(true);
+          await loadSheetPreview(buffer, 0);
+        }
       }
     } catch (err) {
       alert(err instanceof Error ? err.message : "Upload failed");
@@ -156,7 +160,7 @@ export default function SchemasPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".xlsx,.xls"
+              accept=".xlsx,.xls,.csv"
               className="hidden"
               onChange={handleFileChange}
             />
@@ -181,7 +185,7 @@ export default function SchemasPage() {
             <CardHeader>
               <CardTitle>No schemas yet</CardTitle>
               <CardDescription>
-                Add a new schema by uploading from an existing Excel file or by defining fields manually.
+                Add a new schema by uploading from an existing Excel or CSV file, or by defining fields manually.
               </CardDescription>
             </CardHeader>
             <CardContent>

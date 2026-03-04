@@ -27,14 +27,14 @@ const guideSteps = [
   {
     title: "1. Upload & Prepare Data",
     description:
-      "Select multiple sheets and define boundaries so AI can clean and unify all selected inputs.",
+      "Select multiple files and define boundaries so AI can clean and unify all selected inputs.",
     image: "/guides/03-select-multiple-sheets.jpg",
-    alt: "Select multiple sheets and prepare raw data",
+    alt: "Select multiple files and prepare raw data",
   },
   {
     title: "2. Let AI Determine Mapping",
     description:
-      "Use Auto-map with AI and review suggested links for each sheet mapping.",
+      "Use Auto-map with AI and review suggested links for each file mapping.",
     image: "/guides/04-ai-mapping-determination.jpg",
     alt: "AI mapping determination screen",
   },

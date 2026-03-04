@@ -49,7 +49,7 @@ export function SheetPickerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-full max-w-[90vw] max-h-[85vh] flex flex-col">
         <DialogHeader className="shrink-0">
-          <DialogTitle>Select sheet for schema</DialogTitle>
+          <DialogTitle>Select worksheet for schema</DialogTitle>
           <DialogDescription>
             Choose which worksheet&apos;s header row should be used to build
             your final schema.
@@ -73,7 +73,7 @@ export function SheetPickerDialog({
                     : "border-border text-muted-foreground hover:bg-muted"
                 }`}
               >
-                {name || `Sheet ${index + 1}`}
+                {name || `Worksheet ${index + 1}`}
               </button>
             ))}
           </div>
@@ -113,7 +113,7 @@ export function SheetPickerDialog({
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">
-                No preview available for this sheet.
+                No preview available for this worksheet.
               </p>
             )}
           </div>
@@ -128,7 +128,7 @@ export function SheetPickerDialog({
                   Creating schema…
                 </>
               ) : (
-                "Use this sheet"
+                "Use this worksheet"
               )}
             </Button>
           </div>

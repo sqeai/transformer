@@ -23,17 +23,17 @@ function createS3Client() {
   return new S3Client({ region });
 }
 
-export interface PresignedSheetUpload {
+export interface PresignedFileUpload {
   key: string;
   filePath: string;
   uploadUrl: string;
 }
 
-export async function createSheetUploadUrl(contentType = "text/csv", fileExtension?: string): Promise<PresignedSheetUpload> {
+export async function createFileUploadUrl(contentType = "text/csv", fileExtension?: string): Promise<PresignedFileUpload> {
   const { bucket } = getS3Config();
   const s3 = createS3Client();
   const ext = fileExtension ?? "csv";
-  const key = `sheets/${randomUUID()}.${ext}`;
+  const key = `files/${randomUUID()}.${ext}`;
   const putCommand = new PutObjectCommand({
     Bucket: bucket,
     Key: key,
@@ -74,7 +74,7 @@ export async function downloadS3FileToTmp(filePath: string): Promise<string> {
   }
   const bytes = await body.transformToByteArray();
   const ext = path.extname(key) || ".csv";
-  const localPath = path.join("/tmp", `sheet-${randomUUID()}${ext}`);
+  const localPath = path.join("/tmp", `file-${randomUUID()}${ext}`);
   await fs.writeFile(localPath, Buffer.from(bytes));
   return localPath;
 }

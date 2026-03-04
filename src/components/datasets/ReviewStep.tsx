@@ -17,7 +17,7 @@ import { TransformationStepList } from "@/components/TransformationStepList";
 import { ArrowLeft, ArrowRight, Download, Loader2, Sparkles, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type {
-  SheetJobResult,
+  FileJobResult,
   PipelineDescriptor,
   TransformationMappingEntry,
   UploadedFileEntry,
@@ -88,12 +88,12 @@ function buildPipelineFromIteration(
 type ReviewSubTab = "original" | "modified" | "transformations" | "mapping";
 
 interface ReviewStepProps {
-  reviewableResults: SheetJobResult[];
+  reviewableResults: FileJobResult[];
   exportableCount: number;
   anySheetProcessing: boolean;
   modifyPrompt: string;
   onModifyPromptChange: (value: string) => void;
-  onModifyWithAI: (result: SheetJobResult) => void;
+  onModifyWithAI: (result: FileJobResult) => void;
   onStopModify: () => void;
   modifySubmittingSheetKey: string | null;
   originalPreview: {
@@ -103,7 +103,7 @@ interface ReviewStepProps {
     visibleRows: number;
   } | null;
   originalPreviewLoading: boolean;
-  onLoadOriginalPreview: (result: SheetJobResult) => void;
+  onLoadOriginalPreview: (result: FileJobResult) => void;
   originalVisibleCount: number;
   onLoadMoreOriginal: () => void;
   files: UploadedFileEntry[];
@@ -182,7 +182,7 @@ export function ReviewStep({
           onClick={onNext}
           disabled={exportableCount === 0 || anySheetProcessing}
         >
-          Next: Export {exportableCount} sheet
+          Next: Export {exportableCount} file
           {exportableCount !== 1 ? "s" : ""}
           <ArrowRight className="ml-2 h-4 w-4" />
         </Button>
@@ -190,7 +190,7 @@ export function ReviewStep({
 
       <div className="flex flex-wrap gap-2 border-b pb-2">
         {reviewableResults.map((r, i) => {
-          const key = `${r.sheet.fileId}:${r.sheet.sheetIndex}`;
+          const key = `${r.file.fileId}:${r.file.worksheetIndex}`;
           return (
             <button
               key={key}
@@ -207,7 +207,7 @@ export function ReviewStep({
                 setModifiedVisibleCount(PREVIEW_ROWS);
               }}
             >
-              {r.sheet.sheetName}
+              {r.file.worksheetName}
             </button>
           );
         })}
@@ -230,14 +230,14 @@ export function ReviewStep({
           const iterationPipelines = mappingIterations.map(
             (iteration, idx) => buildPipelineFromIteration(iteration, idx),
           );
-          const currentSheetProcessing =
+          const currentFileProcessing =
             currentResult.status === "pending" ||
             currentResult.status === "running";
-          const currentSheetKey = `${currentResult.sheet.fileId}:${currentResult.sheet.sheetIndex}`;
-          const currentSheetSubmitting =
-            modifySubmittingSheetKey === currentSheetKey;
+          const currentFileKey = `${currentResult.file.fileId}:${currentResult.file.worksheetIndex}`;
+          const currentFileSubmitting =
+            modifySubmittingSheetKey === currentFileKey;
           const showModifyLoading =
-            currentSheetProcessing || currentSheetSubmitting;
+            currentFileProcessing || currentFileSubmitting;
 
           return (
             <Card>
@@ -245,8 +245,8 @@ export function ReviewStep({
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle className="text-base">
-                      {currentResult.sheet.fileName} /{" "}
-                      {currentResult.sheet.sheetName}
+                      {currentResult.file.fileName} /{" "}
+                      {currentResult.file.worksheetName}
                     </CardTitle>
                     <CardDescription>
                       {transformedRows.length} rows,{" "}
@@ -277,7 +277,7 @@ export function ReviewStep({
                         setReviewSubTab(tab);
                         if (tab === "original" && !originalPreview) {
                           const file = files.find(
-                            (f) => f.fileId === currentResult.sheet.fileId,
+                            (f) => f.fileId === currentResult.file.fileId,
                           );
                           if (!file?.unstructuredType) {
                             onLoadOriginalPreview(currentResult);
@@ -293,7 +293,7 @@ export function ReviewStep({
               <CardContent>
                 {reviewSubTab === "original" && (() => {
                   const originalFile = files.find(
-                    (f) => f.fileId === currentResult.sheet.fileId,
+                    (f) => f.fileId === currentResult.file.fileId,
                   );
                   return (
                     <div className="space-y-4">
@@ -348,7 +348,7 @@ export function ReviewStep({
                           disabled={
                             !modifyPrompt.trim() ||
                             anySheetProcessing ||
-                            currentSheetSubmitting
+                            currentFileSubmitting
                           }
                           variant="outline"
                           className="border-0 bg-background hover:bg-muted min-h-[80px] disabled:text-gray disabled:opacity-100"
@@ -363,11 +363,11 @@ export function ReviewStep({
                       </div>
                     </div>
 
-                    {currentSheetProcessing && (
+                    {currentFileProcessing && (
                       <div className="flex items-center justify-between gap-2 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
                         <div className="flex items-center gap-2">
                           <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                          AI Data Cleanser is re-processing this sheet...
+                          AI Data Cleanser is re-processing this file...
                         </div>
                         <Button
                           variant="outline"

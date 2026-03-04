@@ -15,10 +15,10 @@ import {
   Sparkles,
   XCircle,
 } from "lucide-react";
-import type { SheetJobResult } from "@/lib/schema-store";
+import type { FileJobResult } from "@/lib/schema-store";
 
 interface ProcessingStepProps {
-  jobResults: SheetJobResult[];
+  jobResults: FileJobResult[];
   allJobsDone: boolean;
   onContinue: () => void;
 }
@@ -38,7 +38,7 @@ export function ProcessingStep({
               AI Data Cleanser is Processing
             </CardTitle>
             <CardDescription className="mt-1.5">
-              Each sheet is being analyzed and transformed by the AI agent.
+              Each file is being analyzed and transformed by the AI agent.
             </CardDescription>
           </div>
           <Button
@@ -76,7 +76,7 @@ export function ProcessingStep({
               )}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">
-                  {r.sheet.fileName} / {r.sheet.sheetName}
+                  {r.file.fileName} / {r.file.worksheetName}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {r.status === "pending" && "Waiting..."}

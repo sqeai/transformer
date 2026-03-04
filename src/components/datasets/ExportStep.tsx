@@ -22,10 +22,10 @@ import {
   Download,
   Loader2,
 } from "lucide-react";
-import type { SheetJobResult } from "@/lib/schema-store";
+import type { FileJobResult } from "@/lib/schema-store";
 
 interface ExportStepProps {
-  exportableResults: SheetJobResult[];
+  exportableResults: FileJobResult[];
   exportTargetDatasetId: string;
   onExportTargetChange: (value: string) => void;
   newDatasetName: string;
@@ -60,7 +60,7 @@ export function ExportStep({
           <div>
             <CardTitle>Export Dataset</CardTitle>
             <CardDescription className="mt-1.5">
-              Choose where to save {exportableCount} processed sheet
+              Choose where to save {exportableCount} processed file
               {exportableCount !== 1 ? "s" : ""}.
             </CardDescription>
           </div>
@@ -128,12 +128,12 @@ export function ExportStep({
           <p className="text-sm font-medium">Summary</p>
           {exportableResults.map((r) => (
             <div
-              key={`${r.sheet.fileId}:${r.sheet.sheetIndex}`}
+              key={`${r.file.fileId}:${r.file.worksheetIndex}`}
               className="flex items-center gap-2 text-sm"
             >
               <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
               <span className="truncate">
-                {r.sheet.fileName} / {r.sheet.sheetName}
+                {r.file.fileName} / {r.file.worksheetName}
               </span>
               <span className="text-muted-foreground ml-auto shrink-0">
                 {r.result?.transformedRows?.length ?? 0} rows

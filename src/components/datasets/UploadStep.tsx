@@ -23,7 +23,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { SheetSelection, UploadedFileEntry } from "@/lib/schema-store";
+import type { FileSelection, UploadedFileEntry } from "@/lib/schema-store";
 
 interface PreviewState {
   columns: string[];
@@ -34,48 +34,48 @@ interface PreviewState {
 
 interface UploadStepProps {
   files: UploadedFileEntry[];
-  selectedSheets: SheetSelection[];
+  selectedFiles: FileSelection[];
   expandedFiles: Set<string>;
-  previewSheet: SheetSelection | null;
+  previewFile: FileSelection | null;
   preview: PreviewState | null;
   previewLoading: boolean;
   aiInstructions: Record<string, string>;
-  onAiInstructionsChange: (sheetKey: string, value: string) => void;
-  onToggleFile: (fileId: string) => void;
-  onToggleSheet: (sheet: SheetSelection) => void;
-  onToggleAllSheetsForFile: (fileId: string) => void;
-  onPreviewSheet: (sheet: SheetSelection) => void;
+  onAiInstructionsChange: (fileKey: string, value: string) => void;
+  onToggleFileExpand: (fileId: string) => void;
+  onToggleFileSelection: (selection: FileSelection) => void;
+  onToggleAllWorksheetsForFile: (fileId: string) => void;
+  onPreviewFile: (selection: FileSelection) => void;
   onLoadMorePreview: () => void;
   onCancel: () => void;
   onSubmit: () => void;
-  isSheetSelected: (fileId: string, sheetIndex: number) => boolean;
+  isFileSelected: (fileId: string, worksheetIndex: number) => boolean;
 }
 
 export function UploadStep({
   files,
-  selectedSheets,
+  selectedFiles,
   expandedFiles,
-  previewSheet,
+  previewFile,
   preview,
   previewLoading,
   aiInstructions,
   onAiInstructionsChange,
-  onToggleFile,
-  onToggleSheet,
-  onToggleAllSheetsForFile,
-  onPreviewSheet,
+  onToggleFileExpand,
+  onToggleFileSelection,
+  onToggleAllWorksheetsForFile,
+  onPreviewFile,
   onLoadMorePreview,
   onCancel,
   onSubmit,
-  isSheetSelected,
+  isFileSelected,
 }: UploadStepProps) {
-  const previewSheetKey = previewSheet ? `${previewSheet.fileId}:${previewSheet.sheetIndex}` : "";
-  const currentInstructions = previewSheetKey ? (aiInstructions[previewSheetKey] ?? "") : "";
+  const previewFileKey = previewFile ? `${previewFile.fileId}:${previewFile.worksheetIndex}` : "";
+  const currentInstructions = previewFileKey ? (aiInstructions[previewFileKey] ?? "") : "";
   const [aiSectionOpen, setAiSectionOpen] = useState(currentInstructions.length > 0);
 
   useEffect(() => {
     setAiSectionOpen(currentInstructions.length > 0);
-  }, [previewSheetKey]);
+  }, [previewFileKey]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -83,28 +83,28 @@ export function UploadStep({
         <Button variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button onClick={onSubmit} disabled={selectedSheets.length === 0}>
-          Next: Process {selectedSheets.length} sheet
-          {selectedSheets.length !== 1 ? "s" : ""}
+        <Button onClick={onSubmit} disabled={selectedFiles.length === 0}>
+          Next: Process {selectedFiles.length} file
+          {selectedFiles.length !== 1 ? "s" : ""}
           <ArrowRight className="ml-2 h-4 w-4" />
         </Button>
       </div>
 
       <Card className="lg:col-span-1">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Files & Sheets</CardTitle>
-          <CardDescription>Select sheets to process</CardDescription>
+          <CardTitle className="text-base">Files</CardTitle>
+          <CardDescription>Select files to process</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-1">
             {files.map((file) => {
               const allSelected =
-                file.sheetNames.length > 0 &&
-                file.sheetNames.every((_, idx) =>
-                  isSheetSelected(file.fileId, idx),
+                file.worksheetNames.length > 0 &&
+                file.worksheetNames.every((_, idx) =>
+                  isFileSelected(file.fileId, idx),
                 );
-              const someSelected = file.sheetNames.some((_, idx) =>
-                isSheetSelected(file.fileId, idx),
+              const someSelected = file.worksheetNames.some((_, idx) =>
+                isFileSelected(file.fileId, idx),
               );
 
               const FileIcon = file.unstructuredType
@@ -119,11 +119,11 @@ export function UploadStep({
               return (
                 <div key={file.fileId}>
                   <div className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted">
-                    {!isUnstructured && (
+                    {!isUnstructured && file.worksheetNames.length > 1 && (
                       <button
                         type="button"
                         className="flex items-center justify-center shrink-0"
-                        onClick={() => onToggleFile(file.fileId)}
+                        onClick={() => onToggleFileExpand(file.fileId)}
                       >
                         {expandedFiles.has(file.fileId) ? (
                           <ChevronDown className="h-3.5 w-3.5 shrink-0" />
@@ -141,7 +141,7 @@ export function UploadStep({
                       }}
                       onChange={(e) => {
                         e.stopPropagation();
-                        onToggleAllSheetsForFile(file.fileId);
+                        onToggleAllWorksheetsForFile(file.fileId);
                       }}
                       className="rounded"
                     />
@@ -149,17 +149,17 @@ export function UploadStep({
                       type="button"
                       className="flex items-center gap-2 flex-1 text-sm text-left min-w-0"
                       onClick={() => {
-                        if (isUnstructured) {
-                          onToggleAllSheetsForFile(file.fileId);
-                          const sheet: SheetSelection = {
+                        if (isUnstructured || file.worksheetNames.length <= 1) {
+                          onToggleAllWorksheetsForFile(file.fileId);
+                          const selection: FileSelection = {
                             fileId: file.fileId,
                             fileName: file.fileName,
-                            sheetIndex: 0,
-                            sheetName: file.sheetNames[0] ?? file.fileName,
+                            worksheetIndex: 0,
+                            worksheetName: file.worksheetNames[0] ?? file.fileName,
                           };
-                          onPreviewSheet(sheet);
+                          onPreviewFile(selection);
                         } else {
-                          onToggleFile(file.fileId);
+                          onToggleFileExpand(file.fileId);
                         }
                       }}
                     >
@@ -174,15 +174,15 @@ export function UploadStep({
                       )}
                     </button>
                   </div>
-                  {expandedFiles.has(file.fileId) && (
+                  {expandedFiles.has(file.fileId) && file.worksheetNames.length > 1 && (
                     <div className="ml-6 space-y-0.5">
-                      {file.sheetNames.map((name, idx) => {
-                        const selected = isSheetSelected(file.fileId, idx);
-                        const sheet: SheetSelection = {
+                      {file.worksheetNames.map((name, idx) => {
+                        const selected = isFileSelected(file.fileId, idx);
+                        const selection: FileSelection = {
                           fileId: file.fileId,
                           fileName: file.fileName,
-                          sheetIndex: idx,
-                          sheetName: name,
+                          worksheetIndex: idx,
+                          worksheetName: name,
                         };
                         return (
                           <div
@@ -190,26 +190,26 @@ export function UploadStep({
                             className={cn(
                               "flex items-center gap-2 px-2 py-1 rounded text-sm",
                               selected ? "bg-primary/10" : "hover:bg-muted",
-                              previewSheet?.fileId === file.fileId &&
-                                previewSheet?.sheetIndex === idx &&
+                              previewFile?.fileId === file.fileId &&
+                                previewFile?.worksheetIndex === idx &&
                                 "ring-1 ring-primary",
                             )}
                           >
                             <input
                               type="checkbox"
                               checked={selected}
-                              onChange={() => onToggleSheet(sheet)}
+                              onChange={() => onToggleFileSelection(selection)}
                               className="rounded"
                             />
                             <span className="flex-1 truncate">
-                              {name || `Sheet ${idx + 1}`}
+                              {name || `Worksheet ${idx + 1}`}
                             </span>
                             <Button
                               type="button"
                               variant="ghost"
                               size="sm"
                               className="h-7 px-2 text-xs"
-                              onClick={() => onPreviewSheet(sheet)}
+                              onClick={() => onPreviewFile(selection)}
                             >
                               Preview
                             </Button>
@@ -234,13 +234,13 @@ export function UploadStep({
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Preview</CardTitle>
           <CardDescription>
-            {previewSheet
-              ? `${previewSheet.fileName} / ${previewSheet.sheetName}`
-              : "Select a sheet to preview"}
+            {previewFile
+              ? `${previewFile.fileName} / ${previewFile.worksheetName}`
+              : "Select a file to preview"}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {previewSheet && (
+          {previewFile && (
             <div className="rounded-md border p-3 space-y-2">
               <button
                 type="button"
@@ -261,12 +261,12 @@ export function UploadStep({
                   <Textarea
                     placeholder="e.g. Only include rows where the status is 'active'. Amounts should be in USD..."
                     value={currentInstructions}
-                    onChange={(e) => onAiInstructionsChange(previewSheetKey, e.target.value)}
+                    onChange={(e) => onAiInstructionsChange(previewFileKey, e.target.value)}
                     rows={3}
                     className="resize-y text-sm"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Instructions for this sheet will be passed to the AI agent as a high-priority directive.
+                    Instructions for this file will be passed to the AI agent as a high-priority directive.
                   </p>
                 </div>
               )}
@@ -274,11 +274,11 @@ export function UploadStep({
           )}
 
           {(() => {
-            const previewFile = previewSheet
-              ? files.find((f) => f.fileId === previewSheet.fileId)
+            const currentFile = previewFile
+              ? files.find((f) => f.fileId === previewFile.fileId)
               : null;
-            if (previewFile?.unstructuredType) {
-              return <UnstructuredPreview file={previewFile} />;
+            if (currentFile?.unstructuredType) {
+              return <UnstructuredPreview file={currentFile} />;
             }
             if (preview) {
               return (
@@ -288,7 +288,7 @@ export function UploadStep({
                   totalRows={preview.totalRows}
                   loading={previewLoading}
                   loadingMessage="Loading preview..."
-                  emptyMessage="Click a sheet on the left to preview its contents."
+                  emptyMessage="Click a file on the left to preview its contents."
                   onLoadMore={onLoadMorePreview}
                   loadMoreDisabled={previewLoading}
                 />
@@ -306,7 +306,7 @@ export function UploadStep({
             }
             return (
               <div className="flex items-center justify-center py-10 text-muted-foreground">
-                Click a file or sheet on the left to preview its contents.
+                Click a file on the left to preview its contents.
               </div>
             );
           })()}

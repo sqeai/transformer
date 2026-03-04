@@ -7,7 +7,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { z } from "zod";
 import type { PipelineDescriptor } from "../../schema-store";
-import { downloadS3FileToTmp, uploadBufferToS3 } from "../../s3-sheets";
+import { downloadS3FileToTmp, uploadBufferToS3 } from "../../s3-files";
 import {
   type FileData,
   type TransformationStep,
@@ -30,11 +30,11 @@ const SAMPLE_ROWS_FOR_JUDGE = 10;
 export interface DataCleanserInput {
   filePath: string;
   targetPaths: string[];
-  sheetName: string;
+  fileName: string;
   userDirective?: string;
   originalFilePath?: string;
   modifiedFilePath?: string;
-  sheetId?: string;
+  fileId?: string;
   /** When set, the file is unstructured and needs OCR before processing */
   unstructuredMimeType?: string;
 }
@@ -518,7 +518,7 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
 
-  const runId = input.sheetId ? input.sheetId.slice(0, 8) : randomUUID().slice(0, 8);
+  const runId = input.fileId ? input.fileId.slice(0, 8) : randomUUID().slice(0, 8);
 
   let rawTmpPath: string;
 
@@ -526,7 +526,7 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
     const { extractFileFromS3 } = await import("../../ocr");
     const ocrResult = await extractFileFromS3(
       input.filePath,
-      input.sheetName,
+      input.fileName,
       input.unstructuredMimeType,
       input.targetPaths,
     );
@@ -709,7 +709,7 @@ async function buildFinalResult(
   workingPath: string,
   rawBackupPath: string,
 ): Promise<DataCleanserResult> {
-  const outputKey = `sheets/${randomUUID()}.csv`;
+  const outputKey = `files/${randomUUID()}.csv`;
   const csvBuffer = Buffer.from(rowsToCsv(schemaColumns, normalizedRows), "utf8");
   const outputFilePath = await uploadBufferToS3(outputKey, csvBuffer, "text/csv");
 
