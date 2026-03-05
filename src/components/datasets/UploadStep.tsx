@@ -31,7 +31,6 @@ import {
   Image as ImageIcon,
   Settings2,
   Sparkles,
-  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { FileSelection, UploadedFileEntry } from "@/lib/schema-store";
@@ -89,12 +88,6 @@ export function UploadStep({
   const [aiSectionOpen, setAiSectionOpen] = useState(currentInstructions.length > 0);
   const [globalInstructionsOpen, setGlobalInstructionsOpen] = useState(false);
   const [draftGlobalInstructions, setDraftGlobalInstructions] = useState(globalAiInstructions);
-  const [inlinePreviewFileId, setInlinePreviewFileId] = useState<string | null>(null);
-
-  const inlinePreviewFile = useMemo(
-    () => inlinePreviewFileId ? files.find((f) => f.fileId === inlinePreviewFileId) ?? null : null,
-    [inlinePreviewFileId, files],
-  );
 
   useEffect(() => {
     setAiSectionOpen(currentInstructions.length > 0);
@@ -237,13 +230,6 @@ export function UploadStep({
                       onClick={() => {
                         if (isUnstructured || file.worksheetNames.length <= 1) {
                           onToggleAllWorksheetsForFile(file.fileId);
-                          const selection: FileSelection = {
-                            fileId: file.fileId,
-                            fileName: file.fileName,
-                            worksheetIndex: 0,
-                            worksheetName: file.worksheetNames[0] ?? file.fileName,
-                          };
-                          onPreviewFile(selection);
                         } else {
                           onToggleFileExpand(file.fileId);
                         }
@@ -265,11 +251,17 @@ export function UploadStep({
                       size="sm"
                       className={cn(
                         "h-7 px-2 text-xs shrink-0",
-                        inlinePreviewFileId === file.fileId && "text-primary",
+                        previewFile?.fileId === file.fileId && "text-primary",
                       )}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setInlinePreviewFileId((prev) => prev === file.fileId ? null : file.fileId);
+                        const selection: FileSelection = {
+                          fileId: file.fileId,
+                          fileName: file.fileName,
+                          worksheetIndex: 0,
+                          worksheetName: file.worksheetNames[0] ?? file.fileName,
+                        };
+                        onPreviewFile(selection);
                       }}
                     >
                       <Eye className="h-3.5 w-3.5" />
@@ -328,27 +320,6 @@ export function UploadStep({
               No files uploaded. Go back and add files.
             </p>
           )}
-
-          {inlinePreviewFile && (
-            <div className="mt-3 border-t pt-3">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-muted-foreground">
-                  File Preview: {inlinePreviewFile.fileName}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0"
-                  onClick={() => setInlinePreviewFileId(null)}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-              <div className="max-h-[400px] overflow-auto rounded-md border bg-muted/10">
-                <UnstructuredPreview file={inlinePreviewFile} />
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
 
@@ -358,7 +329,7 @@ export function UploadStep({
           <CardDescription>
             {previewFile
               ? `${previewFile.fileName} / ${previewFile.worksheetName}`
-              : "Select a file to preview"}
+              : "Click the eye icon on a file to preview"}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -410,7 +381,7 @@ export function UploadStep({
                   totalRows={preview.totalRows}
                   loading={previewLoading}
                   loadingMessage="Loading preview..."
-                  emptyMessage="Click a file on the left to preview its contents."
+                  emptyMessage="Click the eye icon on a file to preview its contents."
                   onLoadMore={onLoadMorePreview}
                   loadMoreDisabled={previewLoading}
                 />
@@ -428,7 +399,7 @@ export function UploadStep({
             }
             return (
               <div className="flex items-center justify-center py-10 text-muted-foreground">
-                Click a file on the left to preview its contents.
+                Click the eye icon on a file to preview its contents.
               </div>
             );
           })()}
