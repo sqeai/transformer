@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,12 +24,14 @@ import {
   ArrowRight,
   ChevronDown,
   ChevronRight,
+  Eye,
   FileSpreadsheet,
   FileText,
   FileType,
   Image as ImageIcon,
   Settings2,
   Sparkles,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { FileSelection, UploadedFileEntry } from "@/lib/schema-store";
@@ -87,6 +89,12 @@ export function UploadStep({
   const [aiSectionOpen, setAiSectionOpen] = useState(currentInstructions.length > 0);
   const [globalInstructionsOpen, setGlobalInstructionsOpen] = useState(false);
   const [draftGlobalInstructions, setDraftGlobalInstructions] = useState(globalAiInstructions);
+  const [inlinePreviewFileId, setInlinePreviewFileId] = useState<string | null>(null);
+
+  const inlinePreviewFile = useMemo(
+    () => inlinePreviewFileId ? files.find((f) => f.fileId === inlinePreviewFileId) ?? null : null,
+    [inlinePreviewFileId, files],
+  );
 
   useEffect(() => {
     setAiSectionOpen(currentInstructions.length > 0);
@@ -251,6 +259,21 @@ export function UploadStep({
                         </span>
                       )}
                     </button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className={cn(
+                        "h-7 px-2 text-xs shrink-0",
+                        inlinePreviewFileId === file.fileId && "text-primary",
+                      )}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setInlinePreviewFileId((prev) => prev === file.fileId ? null : file.fileId);
+                      }}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                   {expandedFiles.has(file.fileId) && file.worksheetNames.length > 1 && (
                     <div className="ml-6 space-y-0.5">
@@ -304,6 +327,27 @@ export function UploadStep({
             <p className="text-sm text-muted-foreground text-center py-4">
               No files uploaded. Go back and add files.
             </p>
+          )}
+
+          {inlinePreviewFile && (
+            <div className="mt-3 border-t pt-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-muted-foreground">
+                  File Preview: {inlinePreviewFile.fileName}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0"
+                  onClick={() => setInlinePreviewFileId(null)}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              <div className="max-h-[400px] overflow-auto rounded-md border bg-muted/10">
+                <UnstructuredPreview file={inlinePreviewFile} />
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>

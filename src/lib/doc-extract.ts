@@ -123,7 +123,19 @@ export function extractPptxText(buffer: Buffer): string {
 }
 
 /**
+ * Extract text from a PDF buffer using pdf-parse.
+ */
+export async function extractPdfText(buffer: Buffer): Promise<string> {
+  const { PDFParse } = await import("pdf-parse");
+  const parser = new PDFParse({ data: new Uint8Array(buffer) });
+  const result = await parser.getText();
+  await parser.destroy();
+  return result.text;
+}
+
+/**
  * Extract text from a document buffer based on MIME type.
+ * Returns null for unsupported types (e.g. images that need OCR).
  */
 export function extractDocumentText(buffer: Buffer, mimeType: string): string | null {
   if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
@@ -133,4 +145,18 @@ export function extractDocumentText(buffer: Buffer, mimeType: string): string | 
     return extractPptxText(buffer);
   }
   return null;
+}
+
+/**
+ * Extract text from a document buffer, supporting async extractors (PDF).
+ * Falls back to sync extractDocumentText for DOCX/PPTX.
+ */
+export async function extractDocumentTextAsync(buffer: Buffer, mimeType: string): Promise<string | null> {
+  if (mimeType === "application/pdf") {
+    return extractPdfText(buffer);
+  }
+  if (mimeType === "text/plain") {
+    return buffer.toString("utf-8");
+  }
+  return extractDocumentText(buffer, mimeType);
 }
