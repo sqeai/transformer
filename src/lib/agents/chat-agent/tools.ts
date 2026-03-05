@@ -144,7 +144,7 @@ export const webSearchTool = tool(
     try {
       const response = await (client.messages.create as Function)({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 4096,
+        max_tokens: 1024,
         tools: [
           {
             type: "web_search_20250305",
@@ -155,7 +155,7 @@ export const webSearchTool = tool(
         messages: [
           {
             role: "user",
-            content: `Search the web for: ${input.query}\n\nProvide a summary of the most relevant and recent information you find.`,
+            content: `Search the web for: ${input.query}\n\nReply with a SHORT bullet-point summary only (3–6 bullets, one line each). Be succinct; no paragraphs.`,
           },
         ],
       }) as Anthropic.Message;
@@ -220,7 +220,7 @@ export const webSearchTool = tool(
 - The user's question cannot be answered from the workspace context alone
 - You need to verify or contextualize findings with external data
 
-Returns a summary of search results with source citations.`,
+Returns a succinct bullet-point summary with source citations.`,
     schema: z.object({
       query: z.string().describe("The search query to look up on the web"),
     }),

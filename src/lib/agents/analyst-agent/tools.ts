@@ -59,7 +59,7 @@ export function createAnalystTools(
     },
     {
       name: "query_database",
-      description: `Execute a read-only SQL query against a connected database. Use this to answer questions about data by writing appropriate SQL queries. Only SELECT, WITH, SHOW, DESCRIBE, and EXPLAIN statements are allowed. Results are limited to 100 rows.`,
+      description: `Execute a read-only SQL query against a connected database. Use when the user asks about database data or when you need DB data to supplement analysis (e.g. from attached files). Only SELECT, WITH, SHOW, DESCRIBE, and EXPLAIN allowed. Results limited to 100 rows.`,
       schema: z.object({
         dataSourceId: z.string().describe("The ID of the data source to query"),
         sql: z.string().describe("The SQL query to execute (read-only)"),
@@ -86,7 +86,7 @@ export function createAnalystTools(
     },
     {
       name: "list_available_tables",
-      description: `List all available tables and their columns across all selected data sources. Use this to understand the database schema before writing queries.`,
+      description: `List all available tables and their columns across selected data sources. Use only when you need to query the database (e.g. user asks about DB data or you need DB context); not required when the user's question is about attached file content.`,
       schema: z.object({}),
     },
   );
@@ -147,7 +147,7 @@ Keep data to ≤50 rows for readability; aggregate in SQL if needed.`,
       try {
         const response = await (client.messages.create as Function)({
           model: "claude-sonnet-4-20250514",
-          max_tokens: 4096,
+          max_tokens: 1024,
           tools: [
             {
               type: "web_search_20250305",
@@ -158,7 +158,7 @@ Keep data to ≤50 rows for readability; aggregate in SQL if needed.`,
           messages: [
             {
               role: "user",
-              content: `Search the web for: ${input.query}\n\nProvide a summary of the most relevant and recent information you find.`,
+              content: `Search the web for: ${input.query}\n\nReply with a SHORT bullet-point summary only (3–6 bullets, one line each). Be succinct; no paragraphs.`,
             },
           ],
         }) as Anthropic.Message;
@@ -225,7 +225,7 @@ Keep data to ≤50 rows for readability; aggregate in SQL if needed.`,
 - Market comparisons, industry benchmarks, valuation multiples, competitor analysis
 - Any question containing: "market", "industry", "benchmark", "comparable", "peers", "external"
 
-Returns a summary of search results with source citations.`,
+Returns a succinct bullet-point summary with source citations.`,
       schema: z.object({
         query: z.string().describe("The search query to look up on the web"),
       }),
