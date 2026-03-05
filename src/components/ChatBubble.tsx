@@ -765,7 +765,7 @@ export function ChatBubble() {
               size="icon"
               className="h-10 w-10 shrink-0 rounded-xl text-muted-foreground hover:text-foreground"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isLoading || isUploading}
+              disabled={isUploading}
               title="Attach files"
             >
               <Paperclip className="h-4 w-4" />
@@ -783,7 +783,7 @@ export function ChatBubble() {
                 "max-h-[120px] min-h-[40px]",
               )}
               style={{ fieldSizing: "content" } as React.CSSProperties}
-              disabled={isLoading || isUploading}
+              disabled={isUploading}
             />
             <Button
               type="submit"
