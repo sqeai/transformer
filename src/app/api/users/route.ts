@@ -1,29 +1,26 @@
-import { NextResponse } from "next/server";
-import { getAuth } from "@/lib/api-auth";
+import { NextRequest, NextResponse } from "next/server";
+import { requireSuperadmin } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-export async function GET() {
-  const auth = await getAuth();
-  if (auth.response) return auth.response;
-  const { userId } = auth;
-  const admin = createAdminClient();
+export async function GET(req: NextRequest) {
+  const authResult = await requireSuperadmin();
+  if (authResult.error) return authResult.error;
 
-  const { data, error } = await admin
+  const supabase = createAdminClient();
+  const search = req.nextUrl.searchParams.get("search") || "";
+
+  let query = supabase
     .from("users")
-    .select("id, email, full_name")
-    .eq("is_activated", true)
-    .neq("id", userId!)
-    .order("email");
+    .select("id, email, full_name, is_activated, is_superadmin, created_at")
+    .order("created_at", { ascending: false });
 
+  if (search) {
+    query = query.or(`email.ilike.%${search}%,full_name.ilike.%${search}%`);
+  }
+
+  const { data, error } = await query;
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-
-  return NextResponse.json({
-    users: (data ?? []).map((u: Record<string, unknown>) => ({
-      id: u.id,
-      email: u.email,
-      name: u.full_name || u.email,
-    })),
-  });
+  return NextResponse.json(data);
 }

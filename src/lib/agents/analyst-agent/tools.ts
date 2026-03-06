@@ -20,9 +20,17 @@ export interface VisualizationPayload {
   sql?: string;
 }
 
+export interface DimensionsLookupFn {
+  (dataSourceId: string, schema: string, table: string): Promise<{
+    dimensions: Record<string, { type: string; uniqueValues?: string[]; sampleValues?: string[]; nullPercentage?: number }> | null;
+    error?: string;
+  }>;
+}
+
 export function createAnalystTools(
   dataSources: DataSourceContext[],
   queryFn: (dataSourceId: string, sql: string) => Promise<{ rows: Record<string, unknown>[]; rowCount: number; error?: string }>,
+  dimensionsLookupFn?: DimensionsLookupFn,
 ) {
   const queryDatabaseTool = tool(
     async (input) => {
@@ -232,5 +240,111 @@ Returns a succinct bullet-point summary with source citations.`,
     },
   );
 
-  return [queryDatabaseTool, listAvailableTablesTool, visualizeDataTool, webSearchTool];
+  const dataLookupTool = tool(
+    async (input) => {
+      if (!dimensionsLookupFn) {
+        return JSON.stringify({ error: "Dimensions lookup not available." });
+      }
+      const ds = dataSources.find((d) => d.id === input.dataSourceId);
+      if (!ds) {
+        return JSON.stringify({ error: `Data source "${input.dataSourceId}" not found.` });
+      }
+      try {
+        const result = await dimensionsLookupFn(input.dataSourceId, input.schema, input.table);
+        if (result.error) return JSON.stringify({ error: result.error });
+        if (!result.dimensions) return JSON.stringify({ error: "No dimensions found for this table." });
+        return JSON.stringify(result.dimensions, null, 2);
+      } catch (err: unknown) {
+        return JSON.stringify({ error: (err as Error).message });
+      }
+    },
+    {
+      name: "data_lookup",
+      description: `Look up table dimensions — column metadata including data types, unique values, sample values, and null percentages. Use this to understand a table's data distribution before writing queries. Especially useful for:
+- Understanding what values exist in categorical columns
+- Checking data quality (null percentages)
+- Discovering column types before writing SQL`,
+      schema: z.object({
+        dataSourceId: z.string().describe("The data source ID"),
+        schema: z.string().describe("The schema name (e.g. 'public')"),
+        table: z.string().describe("The table name"),
+      }),
+    },
+  );
+
+  const forecastDataTool = tool(
+    async (input) => {
+      const data = input.data;
+      if (data.length < 3) {
+        return JSON.stringify({ error: "Need at least 3 data points to forecast." });
+      }
+
+      const values = data.map((d) => Number(d[input.valueKey]) || 0);
+      const labels = data.map((d) => String(d[input.labelKey]));
+      const n = values.length;
+      const periods = input.periods;
+
+      let forecast: number[];
+      let method: string;
+
+      if (input.method === "moving_average") {
+        const window = Math.min(3, n);
+        const lastWindow = values.slice(-window);
+        const avg = lastWindow.reduce((a, b) => a + b, 0) / window;
+        forecast = Array(periods).fill(Math.round(avg * 100) / 100);
+        method = `${window}-period moving average`;
+      } else {
+        const xMean = (n - 1) / 2;
+        const yMean = values.reduce((a, b) => a + b, 0) / n;
+        let num = 0, den = 0;
+        for (let i = 0; i < n; i++) {
+          num += (i - xMean) * (values[i] - yMean);
+          den += (i - xMean) * (i - xMean);
+        }
+        const slope = den !== 0 ? num / den : 0;
+        const intercept = yMean - slope * xMean;
+        forecast = [];
+        for (let i = 0; i < periods; i++) {
+          forecast.push(Math.round((slope * (n + i) + intercept) * 100) / 100);
+        }
+        method = `linear regression (slope=${Math.round(slope * 100) / 100})`;
+      }
+
+      const lastLabel = labels[labels.length - 1];
+      const forecastData = forecast.map((val, i) => ({
+        [input.labelKey]: `${lastLabel} +${i + 1}`,
+        [input.valueKey]: val,
+        _forecast: true,
+      }));
+
+      const combined = [
+        ...data.map((d) => ({ ...d, _forecast: false })),
+        ...forecastData,
+      ];
+
+      const payload: VisualizationPayload = {
+        title: input.title || `Forecast (${method})`,
+        chartType: "line",
+        data: combined as Record<string, unknown>[],
+        labelKey: input.labelKey,
+        valueKeys: [input.valueKey],
+      };
+
+      return `Forecast generated using ${method} for ${periods} periods.\n\nProjected values: ${forecast.join(", ")}\n\n<!-- VISUALIZATION:${JSON.stringify(payload)} -->`;
+    },
+    {
+      name: "forecast_data",
+      description: `Project future values from historical data using simple mathematical techniques. Supports linear regression and moving average. Use after querying time-series data to show trends and projections. The forecast is appended to the historical data and rendered as a line chart.`,
+      schema: z.object({
+        data: z.array(z.record(z.string(), z.unknown())).describe("Historical data array (from a query result)"),
+        labelKey: z.string().describe("The key for the time/label axis"),
+        valueKey: z.string().describe("The key for the numeric value to forecast"),
+        periods: z.number().describe("Number of future periods to forecast"),
+        method: z.enum(["linear", "moving_average"]).describe("Forecasting method"),
+        title: z.string().optional().describe("Chart title"),
+      }),
+    },
+  );
+
+  return [queryDatabaseTool, listAvailableTablesTool, dataLookupTool, visualizeDataTool, forecastDataTool, webSearchTool];
 }

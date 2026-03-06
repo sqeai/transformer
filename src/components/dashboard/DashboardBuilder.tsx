@@ -25,6 +25,9 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Plus,
+  Save,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -282,9 +285,17 @@ function AssistantMessage({
   );
 }
 
-export function DashboardBuilder() {
+interface DashboardBuilderProps {
+  dashboardId?: string;
+  folderId?: string;
+}
+
+export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProps) {
   const [input, setInput] = useState("");
   const [panelOpen, setPanelOpen] = useState(true);
+  const [expandedPanel, setExpandedPanel] = useState<string | null>(null);
+  const [dashboardName, setDashboardName] = useState("Untitled Dashboard");
+  const [isSaving, setIsSaving] = useState(false);
   const [panels, setPanels] = useState<DashboardPanel[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -354,6 +365,55 @@ export function DashboardBuilder() {
   useEffect(() => {
     localStorage.setItem(DASHBOARD_SOURCES_KEY, JSON.stringify(selectedSources));
   }, [selectedSources]);
+
+  useEffect(() => {
+    if (!dashboardId) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/dashboards/${dashboardId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setDashboardName(data.name || "Untitled Dashboard");
+          if (Array.isArray(data.panels)) {
+            const loaded = data.panels.map((p: Record<string, unknown>) => ({
+              id: p.id,
+              title: p.title,
+              chartType: p.chart_type || p.chartType,
+              data: p.data || [],
+              config: p.config || {},
+              width: p.width || 1,
+              height: p.height || 1,
+            }));
+            setPanels(loaded);
+          }
+        }
+      } catch {
+        // fallback to localStorage
+      }
+    })();
+  }, [dashboardId]);
+
+  const saveDashboard = useCallback(async () => {
+    if (!dashboardId) return;
+    setIsSaving(true);
+    try {
+      await fetch(`/api/dashboards/${dashboardId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: dashboardName }),
+      });
+      await fetch(`/api/dashboards/${dashboardId}/panels`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ panels }),
+      });
+      toast.success("Dashboard saved");
+    } catch {
+      toast.error("Failed to save dashboard");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [dashboardId, dashboardName, panels]);
 
   const applyPanelAction = useCallback((action: PanelAction) => {
     const key = JSON.stringify(action);
@@ -483,6 +543,18 @@ export function DashboardBuilder() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            {dashboardId && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={saveDashboard}
+                disabled={isSaving}
+              >
+                {isSaving ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1" />}
+                Save
+              </Button>
+            )}
             {panels.length > 0 && (
               <Button
                 variant="ghost"
@@ -491,7 +563,7 @@ export function DashboardBuilder() {
                 onClick={clearDashboard}
               >
                 <Trash2 className="h-3.5 w-3.5 mr-1" />
-                Clear dashboard
+                Clear
               </Button>
             )}
             <Button
@@ -539,16 +611,48 @@ export function DashboardBuilder() {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-4 auto-rows-[280px]">
-                {panels.map((panel) => (
-                  <ChartPanel
-                    key={panel.id}
-                    panel={panel}
-                    onRemove={removePanel}
-                    onEdit={editPanel}
-                  />
-                ))}
-              </div>
+              <>
+                {expandedPanel && (
+                  <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-8">
+                    <div className="w-full max-w-5xl h-full max-h-[80vh] bg-card rounded-xl border shadow-2xl flex flex-col">
+                      <div className="flex items-center justify-between px-4 py-3 border-b">
+                        <h3 className="font-semibold">{panels.find(p => p.id === expandedPanel)?.title}</h3>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setExpandedPanel(null)}>
+                          <Minimize2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="flex-1 p-4">
+                        {panels.find(p => p.id === expandedPanel) && (
+                          <ChartPanel
+                            panel={panels.find(p => p.id === expandedPanel)!}
+                            onRemove={removePanel}
+                            onEdit={editPanel}
+                            expanded
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-4 auto-rows-[280px]">
+                  {panels.map((panel) => (
+                    <div key={panel.id} className="relative group">
+                      <ChartPanel
+                        panel={panel}
+                        onRemove={removePanel}
+                        onEdit={editPanel}
+                      />
+                      <button
+                        onClick={() => setExpandedPanel(panel.id)}
+                        className="absolute top-2 right-12 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded bg-background/80 hover:bg-muted"
+                        title="Expand"
+                      >
+                        <Maximize2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </div>
 

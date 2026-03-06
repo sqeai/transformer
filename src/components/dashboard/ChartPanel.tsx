@@ -42,6 +42,7 @@ interface ChartPanelProps {
   panel: DashboardPanel;
   onRemove: (id: string) => void;
   onEdit: (id: string) => void;
+  expanded?: boolean;
 }
 
 function WaterfallChart({
@@ -100,7 +101,7 @@ function WaterfallChart({
   );
 }
 
-export function ChartPanel({ panel, onRemove, onEdit }: ChartPanelProps) {
+export function ChartPanel({ panel, onRemove, onEdit, expanded }: ChartPanelProps) {
   const { chartType, data, config, title } = panel;
   const colors = config.colors ?? DEFAULT_COLORS;
 
@@ -277,6 +278,10 @@ export function ChartPanel({ panel, onRemove, onEdit }: ChartPanelProps) {
         );
     }
   };
+
+  if (expanded) {
+    return <div className="w-full h-full">{renderChart()}</div>;
+  }
 
   return (
     <div
