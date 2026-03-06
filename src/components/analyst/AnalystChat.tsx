@@ -47,14 +47,13 @@ import {
 } from "@/components/ui/collapsible";
 import { toast } from "sonner";
 import {
-  DataSourcePanel,
-  type SelectedDataSource,
-} from "./DataSourcePanel";
+  ContextSelector,
+  type ContextSelection,
+} from "../dashboard/ContextSelector";
 import { InlineChart } from "./InlineChart";
 import type { VisualizationPayload } from "@/lib/agents/analyst-agent/tools";
 
 const ANALYST_STORAGE_KEY = "analyst-chat-history";
-const ANALYST_SOURCES_KEY = "analyst-selected-sources";
 const THINKING_START = "<!-- THINKING_START -->";
 const THINKING_END = "<!-- THINKING_END -->";
 
@@ -601,17 +600,8 @@ export function AnalystChat() {
   const [persona, setPersona] = useState<Persona | null>(null);
   const [chatId, setChatId] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
-  const [selectedSources, setSelectedSources] = useState<SelectedDataSource[]>(
-    () => {
-      if (typeof window === "undefined") return [];
-      try {
-        const stored = localStorage.getItem(ANALYST_SOURCES_KEY);
-        return stored ? JSON.parse(stored) : [];
-      } catch {
-        return [];
-      }
-    },
-  );
+  const [contextSelection, setContextSelection] =
+    useState<ContextSelection | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -713,13 +703,6 @@ export function AnalystChat() {
       localStorage.removeItem(ANALYST_STORAGE_KEY);
     }
   }, [messages]);
-
-  useEffect(() => {
-    localStorage.setItem(
-      ANALYST_SOURCES_KEY,
-      JSON.stringify(selectedSources),
-    );
-  }, [selectedSources]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -856,13 +839,15 @@ export function AnalystChat() {
       e.preventDefault();
       if ((!input.trim() && attachedFiles.length === 0) || isLoading || isUploading) return;
 
-      const dataSourceIds = selectedSources.map((s) => s.id);
-      const dataSourceContexts = selectedSources.map((s) => ({
+      const dataSources = contextSelection?.dataSources ?? [];
+      const dataSourceIds = dataSources.map((s) => s.id);
+      const dataSourceContexts = dataSources.map((s) => ({
         id: s.id,
         name: s.name,
         type: s.type,
         tables: s.tables,
       }));
+      const companyContext = contextSelection?.companyContext ?? "";
 
       if (attachedFiles.length > 0) {
         setIsUploading(true);
@@ -896,7 +881,7 @@ export function AnalystChat() {
 
           sendMessage(
             { text: `${fileLabel}${input.trim()}` },
-            { body: { dataSourceIds, dataSourceContexts, attachments: attachmentsMeta, persona, chatId } },
+            { body: { dataSourceIds, dataSourceContexts, attachments: attachmentsMeta, persona, chatId, companyContext } },
           );
           setInput("");
           setAttachedFiles([]);
@@ -906,12 +891,12 @@ export function AnalystChat() {
       } else {
         sendMessage(
           { text: input.trim() },
-          { body: { dataSourceIds, dataSourceContexts, persona, chatId } },
+          { body: { dataSourceIds, dataSourceContexts, persona, chatId, companyContext } },
         );
         setInput("");
       }
     },
-    [input, attachedFiles, isLoading, isUploading, sendMessage, selectedSources, uploadFilesToS3, persona, chatId],
+    [input, attachedFiles, isLoading, isUploading, sendMessage, contextSelection, uploadFilesToS3, persona, chatId],
   );
 
   const onKeyDown = useCallback(
@@ -945,9 +930,9 @@ export function AnalystChat() {
               <p className="text-xs text-muted-foreground">
                 {isLoading
                   ? "Thinking..."
-                  : selectedSources.length > 0
-                    ? `${selectedSources.reduce((n, s) => n + s.tables.length, 0)} table${selectedSources.reduce((n, s) => n + s.tables.length, 0) !== 1 ? "s" : ""} selected`
-                    : "Select tables to get started"}
+                  : contextSelection && contextSelection.contexts.length > 0
+                    ? `${contextSelection.contexts.length} context${contextSelection.contexts.length > 1 ? "s" : ""} · ${contextSelection.dataSources.reduce((n, s) => n + s.tables.length, 0)} table${contextSelection.dataSources.reduce((n, s) => n + s.tables.length, 0) !== 1 ? "s" : ""}`
+                    : "Select contexts to get started"}
               </p>
             </div>
           </div>
@@ -1008,7 +993,7 @@ export function AnalystChat() {
               size="icon"
               className="h-8 w-8 text-muted-foreground"
               onClick={() => setPanelOpen((o) => !o)}
-              title={panelOpen ? "Hide databases" : "Show databases"}
+              title={panelOpen ? "Hide contexts" : "Show contexts"}
             >
               {panelOpen ? (
                 <PanelRightClose className="h-4 w-4" />
@@ -1030,7 +1015,7 @@ export function AnalystChat() {
               <p className="text-lg font-medium">Data Analyst Assistant</p>
               <p className="mt-2 text-sm max-w-md">
                 Ask me financial questions, explore your data, or request
-                analysis. Select tables from the right panel to get started.
+                analysis. Select contexts from the right panel to get started.
               </p>
               <div className="mt-6 grid grid-cols-2 gap-2 max-w-lg">
                 {[
@@ -1244,9 +1229,9 @@ export function AnalystChat() {
               placeholder={
                 attachedFiles.length > 0
                   ? "Add a message about these files..."
-                  : selectedSources.length > 0
+                  : contextSelection && contextSelection.contexts.length > 0
                     ? "Ask a question about your data..."
-                    : "Select tables from the right panel first..."
+                    : "Select contexts from the right panel first..."
               }
               rows={1}
               className={cn(
@@ -1312,13 +1297,10 @@ export function AnalystChat() {
         </div>
       )}
 
-      {/* Right panel - Data Sources */}
+      {/* Right panel - Contexts */}
       {panelOpen && (
         <div className="w-72 flex-shrink-0">
-          <DataSourcePanel
-            selectedSources={selectedSources}
-            onSelectionChange={setSelectedSources}
-          />
+          <ContextSelector onSelectionChange={setContextSelection} />
         </div>
       )}
     </div>

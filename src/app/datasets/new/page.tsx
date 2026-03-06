@@ -132,7 +132,7 @@ function NewDatasetPageContent() {
   const schemaId = searchParams.get("schemaId") ?? datasetWorkflow.schemaId;
   const datasetIdParam = searchParams.get("datasetId");
   const folderIdParam = searchParams.get("folderId");
-  const datasetsListUrl = folderIdParam ? `/folders/${folderIdParam}` : "/";
+  const datasetsListUrl = folderIdParam ? `/folders/${folderIdParam}/datasets` : "/";
   const schema = schemaId ? getSchema(schemaId) : null;
   const targetPaths = useMemo(() => {
     if (!schema) return [];

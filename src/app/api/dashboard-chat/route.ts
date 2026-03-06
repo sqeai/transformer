@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDashboardAgent } from "@/lib/agents/dashboard-agent";
 import type { DataSourceContext } from "@/lib/agents/analyst-agent/tools";
+import type { DimensionsLookupFn } from "@/lib/agents/analyst-agent";
 import { requireAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createConnector } from "@/lib/connectors";
@@ -21,6 +22,7 @@ export async function POST(req: NextRequest) {
     const dataSourceContexts: DataSourceContext[] =
       body.dataSourceContexts ?? [];
     const currentPanels: string = body.currentPanels ?? "[]";
+    const companyContext: string = body.companyContext ?? "";
 
     const filteredMessages = (body.messages ?? []).filter(
       (message: Record<string, unknown>) =>
@@ -103,12 +105,29 @@ export async function POST(req: NextRequest) {
       }
     };
 
+    const dimensionsLookupFn: DimensionsLookupFn = async (dataSourceId, schema, table) => {
+      const { data, error } = await supabase
+        .from("table_dimensions")
+        .select("dimensions")
+        .eq("data_source_id", dataSourceId)
+        .eq("schema_name", schema)
+        .eq("table_name", table)
+        .single();
+
+      if (error || !data) {
+        return { dimensions: null, error: "No dimensions found. Try refreshing dimensions for this table." };
+      }
+      return { dimensions: data.dimensions as Record<string, { type: string; uniqueValues?: string[]; sampleValues?: string[]; nullPercentage?: number }> };
+    };
+
     const eventStream = await agent.streamEvents(
       {
         messages,
         dataSources: dataSourceContexts,
         currentPanels,
         queryFn,
+        companyContext,
+        dimensionsLookupFn,
       },
       { version: "v2", recursionLimit: 50 },
     );

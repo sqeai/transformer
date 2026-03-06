@@ -356,7 +356,7 @@ export default function DatasetPage() {
     try {
       const res = await fetch(`/api/datasets/${dataset.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error();
-      router.push(dataset.folderId ? `/folders/${dataset.folderId}` : "/");
+      router.push(dataset.folderId ? `/folders/${dataset.folderId}/datasets` : "/");
     } finally { setDeleting(false); }
   };
 
@@ -577,7 +577,7 @@ export default function DatasetPage() {
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" onClick={() => router.push(dataset.folderId ? `/folders/${dataset.folderId}` : "/")}>
+            <Button variant="ghost" size="icon" onClick={() => router.push(dataset.folderId ? `/folders/${dataset.folderId}/datasets` : "/")}>
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div>

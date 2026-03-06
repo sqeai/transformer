@@ -313,6 +313,5 @@ export default function FolderAlertsPage() {
           </div>
         )}
       </div>
-    </div>
   );
 }

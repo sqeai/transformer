@@ -2,17 +2,18 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { createAgent } from "langchain";
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import { createDashboardTools } from "./tools";
-import type { DataSourceContext } from "../analyst-agent/tools";
+import type { DataSourceContext, DimensionsLookupFn } from "../analyst-agent/tools";
 
-const SYSTEM_PROMPT = `You are a Dashboard Builder Assistant. You help users create beautiful, informative dashboards using natural language.
+const BASE_SYSTEM_PROMPT = `You are a Dashboard Builder Assistant. You help users create beautiful, informative dashboards using natural language.
 
 You have access to the following tools:
 
 1. **list_available_tables** — List all available tables and columns across selected data sources.
 2. **query_database** — Execute read-only SQL queries to fetch data for charts.
-3. **add_dashboard_panel** — Add a new chart panel to the dashboard.
-4. **update_dashboard_panel** — Update an existing panel.
-5. **remove_dashboard_panel** — Remove a panel from the dashboard.
+3. **data_lookup** — Look up table dimensions (column metadata, unique values, sample data) to understand the data before querying.
+4. **add_dashboard_panel** — Add a new chart panel to the dashboard.
+5. **update_dashboard_panel** — Update an existing panel.
+6. **remove_dashboard_panel** — Remove a panel from the dashboard.
 
 ## Available Chart Types
 
@@ -40,10 +41,11 @@ IMPORTANT: Do NOT output the THINKING delimiters during intermediate tool-callin
 ## How to Build Dashboards
 
 1. When the user describes what they want, first call list_available_tables to understand the schema.
-2. Write SQL queries to fetch the needed data using query_database.
-3. Transform the query results into the right format for each chart type.
-4. Call add_dashboard_panel with the data and appropriate chart configuration.
-5. Include the DASHBOARD_PANEL delimiter from the tool result in your response.
+2. Use data_lookup to understand column distributions and data quality before writing queries.
+3. Write SQL queries to fetch the needed data using query_database.
+4. Transform the query results into the right format for each chart type.
+5. Call add_dashboard_panel with the data and appropriate chart configuration.
+6. Include the DASHBOARD_PANEL delimiter from the tool result in your response.
 
 ## Data Format Guidelines
 
@@ -70,17 +72,32 @@ IMPORTANT: Do NOT output the THINKING delimiters during intermediate tool-callin
 - Explain what each panel shows
 - Adapt SQL dialect to the database type`;
 
+function getSystemPrompt(companyContext?: string): string {
+  if (!companyContext?.trim()) return BASE_SYSTEM_PROMPT;
+  return `${BASE_SYSTEM_PROMPT}
+
+## Company / Entity Context
+
+The user has provided the following context about their company/entity. Use this to inform your analysis, understand the domain, and provide more relevant dashboards:
+
+${companyContext}`;
+}
+
 export interface DashboardInvokeOptions {
   messages: BaseMessage[];
   dataSources: DataSourceContext[];
   currentPanels: string;
   queryFn: (dataSourceId: string, sql: string) => Promise<{ rows: Record<string, unknown>[]; rowCount: number; error?: string }>;
+  companyContext?: string;
+  dimensionsLookupFn?: DimensionsLookupFn;
 }
 
 function createDashboardAgent(
   apiKey: string,
   dataSources: DataSourceContext[],
   queryFn: DashboardInvokeOptions["queryFn"],
+  companyContext?: string,
+  dimensionsLookupFn?: DimensionsLookupFn,
 ) {
   const llm = new ChatAnthropic({
     model: "claude-sonnet-4-20250514",
@@ -88,12 +105,12 @@ function createDashboardAgent(
     temperature: 0,
   });
 
-  const tools = createDashboardTools(dataSources, queryFn);
+  const tools = createDashboardTools(dataSources, queryFn, dimensionsLookupFn);
 
   return createAgent({
     model: llm,
     tools,
-    systemPrompt: SYSTEM_PROMPT,
+    systemPrompt: getSystemPrompt(companyContext),
   });
 }
 
@@ -112,6 +129,8 @@ export class DashboardAgentGraph {
       this.apiKey,
       inputs.dataSources,
       inputs.queryFn,
+      inputs.companyContext,
+      inputs.dimensionsLookupFn,
     );
     return agent.streamEvents({ messages: inputs.messages }, config);
   }
@@ -125,6 +144,8 @@ export class DashboardAgentGraph {
         this.apiKey,
         inputs.dataSources,
         inputs.queryFn,
+        inputs.companyContext,
+        inputs.dimensionsLookupFn,
       );
       const result = await agent.invoke(
         { messages: inputs.messages },

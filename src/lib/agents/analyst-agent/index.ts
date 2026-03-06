@@ -14,6 +14,7 @@ export interface AnalystInvokeOptions {
   queryFn: (dataSourceId: string, sql: string) => Promise<{ rows: Record<string, unknown>[]; rowCount: number; error?: string }>;
   persona?: Persona | null;
   dimensionsLookupFn?: DimensionsLookupFn;
+  companyContext?: string;
 }
 
 function createAnalystAgent(
@@ -22,6 +23,7 @@ function createAnalystAgent(
   queryFn: AnalystInvokeOptions["queryFn"],
   persona?: Persona | null,
   dimensionsLookupFn?: DimensionsLookupFn,
+  companyContext?: string,
 ) {
   const llm = new ChatAnthropic({
     model: "claude-sonnet-4-20250514",
@@ -31,10 +33,15 @@ function createAnalystAgent(
 
   const tools = createAnalystTools(dataSources, queryFn, dimensionsLookupFn);
 
+  let systemPrompt = getSystemPrompt(persona);
+  if (companyContext?.trim()) {
+    systemPrompt += `\n\n## Company / Entity Context\n\nThe user has provided the following context about their company/entity. Use this to inform your analysis, understand the domain, and provide more relevant insights:\n\n${companyContext}`;
+  }
+
   return createAgent({
     model: llm,
     tools,
-    systemPrompt: getSystemPrompt(persona),
+    systemPrompt,
   });
 }
 
@@ -55,6 +62,7 @@ export class AnalystAgentGraph {
       inputs.queryFn,
       inputs.persona,
       inputs.dimensionsLookupFn,
+      inputs.companyContext,
     );
     return agent.streamEvents({ messages: inputs.messages }, config);
   }
@@ -70,6 +78,7 @@ export class AnalystAgentGraph {
         inputs.queryFn,
         inputs.persona,
         inputs.dimensionsLookupFn,
+        inputs.companyContext,
       );
       const result = await agent.invoke(
         { messages: inputs.messages },

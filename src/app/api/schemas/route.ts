@@ -46,9 +46,10 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const schemas = (schemaRows ?? []).map((s: { id: string; name: string; created_at: string; updated_at?: string; user_id: string }) => ({
+  const schemas = (schemaRows ?? []).map((s: { id: string; name: string; created_at: string; updated_at?: string; user_id: string; folder_id?: string | null }) => ({
     id: s.id,
     name: s.name,
+    folderId: s.folder_id ?? null,
     createdAt: s.created_at ?? new Date().toISOString(),
     updatedAt: s.updated_at ?? s.created_at ?? new Date().toISOString(),
     lastActivityAt: s.updated_at ?? s.created_at ?? new Date().toISOString(),

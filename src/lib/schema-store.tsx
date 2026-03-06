@@ -156,7 +156,7 @@ const defaultDatasetWorkflow: DatasetWorkflowState = {
 interface SchemaStoreContextType {
   schemas: FinalSchema[];
   schemasLoading: boolean;
-  addSchema: (schema: FinalSchema) => Promise<FinalSchema>;
+  addSchema: (schema: FinalSchema, folderId?: string) => Promise<FinalSchema>;
   updateSchema: (id: string, updates: Partial<FinalSchema>) => Promise<void>;
   deleteSchema: (id: string) => Promise<void>;
   getSchema: (id: string) => FinalSchema | undefined;
@@ -210,11 +210,13 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
     idbSet(IDB_DATASET_WORKFLOW_KEY, datasetWorkflow).catch(() => {});
   }, [datasetWorkflow, hydrated]);
 
-  const addSchema = useCallback(async (schema: FinalSchema) => {
+  const addSchema = useCallback(async (schema: FinalSchema, folderId?: string) => {
+    const payload: Record<string, unknown> = { name: schema.name, fields: schema.fields };
+    if (folderId) payload.folderId = folderId;
     const res = await api("/api/schemas", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: schema.name, fields: schema.fields }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
