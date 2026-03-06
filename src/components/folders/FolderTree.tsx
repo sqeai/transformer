@@ -51,7 +51,7 @@ const FOLDER_SECTIONS = [
   { key: "data-sources", label: "Data Sources", icon: Cable, href: "/data-sources" },
   { key: "schemas", label: "Schemas", icon: FileStack, href: "/schemas" },
   { key: "datasets", label: "Datasets", icon: Database, href: "/datasets" },
-  { key: "dashboards", label: "Dashboards", icon: LayoutDashboard, href: "/dashboards" },
+  { key: "panels", label: "Panels", icon: LayoutDashboard, href: "/panels" },
   { key: "alerts", label: "Alerts", icon: Bell, href: "/alerts" },
 ];
 
