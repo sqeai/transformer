@@ -58,6 +58,7 @@ interface DataSourceDetail {
   config: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  folderId?: string;
 }
 
 interface TableInfo {
@@ -191,15 +192,22 @@ export default function DataSourceDetailPage({
     }
     if (ds.type === "bigquery") {
       let credentials: Record<string, unknown> | undefined;
+      let projectId = bqProjectId;
       if (bqCredentials.trim()) {
         try {
-          credentials = JSON.parse(bqCredentials.trim());
+          const parsed = JSON.parse(bqCredentials.trim());
+          if (parsed.credentials && typeof parsed.credentials === "object") {
+            credentials = parsed.credentials as Record<string, unknown>;
+            if (!projectId && parsed.projectId) projectId = parsed.projectId;
+          } else {
+            credentials = parsed;
+          }
         } catch {
           return null;
         }
       }
       return {
-        projectId: bqProjectId,
+        projectId,
         ...(credentials ? { credentials } : {}),
       };
     }
@@ -274,7 +282,7 @@ export default function DataSourceDetailPage({
       const res = await fetch(`/api/data-sources/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete");
       toast.success("Data source deleted");
-      router.push("/data-sources");
+      router.push(ds?.folderId ? `/folders/${ds.folderId}/data-sources` : "/folders");
     } catch {
       toast.error("Failed to delete");
     } finally {
@@ -427,7 +435,7 @@ export default function DataSourceDetailPage({
           variant="ghost"
           size="sm"
           className="gap-1.5"
-          onClick={() => router.push("/data-sources")}
+          onClick={() => router.push(ds.folderId ? `/folders/${ds.folderId}/data-sources` : "/folders")}
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Data Sources

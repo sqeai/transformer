@@ -25,6 +25,8 @@ function NewDataSourceContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const type = searchParams.get("type") as "bigquery" | "mysql" | "postgres" | "redshift" | null;
+  const folderId = searchParams.get("folderId");
+  const backHref = folderId ? `/folders/${folderId}/data-sources` : "/folders";
 
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -71,15 +73,22 @@ function NewDataSourceContent() {
     }
     if (type === "bigquery") {
       let credentials: Record<string, unknown> | undefined;
+      let projectId = bqProjectId;
       if (bqCredentials.trim()) {
         try {
-          credentials = JSON.parse(bqCredentials.trim());
+          const parsed = JSON.parse(bqCredentials.trim());
+          if (parsed.credentials && typeof parsed.credentials === "object") {
+            credentials = parsed.credentials as Record<string, unknown>;
+            if (!projectId && parsed.projectId) projectId = parsed.projectId;
+          } else {
+            credentials = parsed;
+          }
         } catch {
           return null;
         }
       }
       return {
-        projectId: bqProjectId,
+        projectId,
         ...(credentials ? { credentials } : {}),
       };
     }
@@ -110,6 +119,28 @@ function NewDataSourceContent() {
     if (!config) {
       toast.error("Invalid credentials JSON");
       return;
+    }
+    if (type === "bigquery" && bqCredentials.trim()) {
+      try {
+        const parsed = JSON.parse(bqCredentials.trim());
+        const creds = (parsed.credentials && typeof parsed.credentials === "object")
+          ? parsed.credentials
+          : parsed;
+        if (!creds.client_email || !creds.private_key) {
+          toast.error(
+            "Service account JSON is missing required fields (client_email, private_key). " +
+            "Please paste the full JSON key file from Google Cloud Console."
+          );
+          setTestResult({
+            ok: false,
+            error: "Missing client_email or private_key in credentials JSON",
+          });
+          return;
+        }
+      } catch {
+        toast.error("Invalid credentials JSON");
+        return;
+      }
     }
     setTesting(true);
     setTestResult(null);
@@ -146,12 +177,21 @@ function NewDataSourceContent() {
       const res = await fetch("/api/data-sources", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), type, config }),
+        body: JSON.stringify({
+          name: name.trim(),
+          type,
+          config,
+          ...(folderId ? { folderId } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save");
       toast.success("Data source created");
-      router.push(`/data-sources/${data.dataSource.id}`);
+      if (folderId) {
+        router.push(`/folders/${folderId}/data-sources`);
+      } else {
+        router.push(`/data-sources/${data.dataSource.id}`);
+      }
     } catch (err: unknown) {
       toast.error((err as Error).message);
     } finally {
@@ -161,7 +201,7 @@ function NewDataSourceContent() {
 
   const validTypes = ["bigquery", "mysql", "postgres", "redshift"] as const;
   if (!type || !validTypes.includes(type)) {
-    router.replace("/data-sources");
+    router.replace(backHref);
     return null;
   }
 
@@ -183,7 +223,7 @@ function NewDataSourceContent() {
           variant="ghost"
           size="sm"
           className="gap-1.5"
-          onClick={() => router.push("/data-sources")}
+          onClick={() => router.push(backHref)}
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Data Sources
@@ -452,7 +492,7 @@ function NewDataSourceContent() {
         </Card>
 
         <div className="flex justify-end gap-3">
-          <Button variant="outline" onClick={() => router.push("/data-sources")}>
+          <Button variant="outline" onClick={() => router.push(backHref)}>
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={saving || !name.trim()}>
