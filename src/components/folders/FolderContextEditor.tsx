@@ -69,7 +69,7 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
 
   const fetchDataSources = useCallback(async () => {
     try {
-      const res = await fetch(`/api/folders/${folderId}/data-connections`);
+      const res = await fetch(`/api/data-sources?folderId=${folderId}`);
       if (res.ok) {
         const data = await res.json();
         setDataSources(data.dataSources ?? []);

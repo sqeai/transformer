@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuth } from "@/lib/api-auth";
+import { getAuth, requireFolderAccess } from "@/lib/api-auth";
 
 function toThreeLinePreview(value: unknown): string {
   if (value == null) return "***";
@@ -39,6 +39,36 @@ function redactSensitiveConfig(config: unknown) {
   return base;
 }
 
+/**
+ * Get folderId and all descendant folder IDs (so a parent folder sees data sources from subfolders).
+ */
+async function getFolderAndDescendantIds(
+  supabase: Awaited<ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>>,
+  folderId: string,
+): Promise<string[]> {
+  const { data: folders, error } = await supabase
+    .from("folders")
+    .select("id, parent_id");
+  if (error || !folders) return [folderId];
+  const byParent = new Map<string | null, { id: string }[]>();
+  for (const f of folders) {
+    const list = byParent.get(f.parent_id) ?? [];
+    list.push({ id: f.id });
+    byParent.set(f.parent_id, list);
+  }
+  const ids: string[] = [folderId];
+  const queue = [folderId];
+  while (queue.length) {
+    const pid = queue.shift()!;
+    const children = byParent.get(pid) ?? [];
+    for (const c of children) {
+      ids.push(c.id);
+      queue.push(c.id);
+    }
+  }
+  return ids;
+}
+
 export async function GET(request: NextRequest) {
   const auth = await getAuth();
   if (auth.response) return auth.response;
@@ -53,7 +83,10 @@ export async function GET(request: NextRequest) {
     .order("created_at", { ascending: false });
 
   if (folderId) {
-    query = query.eq("folder_id", folderId);
+    const access = await requireFolderAccess(folderId, "view_resources");
+    if (access.error) return access.error;
+    const folderIds = await getFolderAndDescendantIds(supabase!, folderId);
+    query = query.in("folder_id", folderIds);
   }
 
   const { data, error } = await query;

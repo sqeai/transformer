@@ -11,9 +11,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Cable, Plus, Loader2, ArrowLeft } from "lucide-react";
-import Link from "next/link";
+import { Cable, Plus, Loader2, ArrowLeft, Database, Server, Container, Warehouse } from "lucide-react";
 
 interface DataSource {
   id: string;
@@ -28,6 +34,7 @@ export default function FolderDataSourcesPage() {
   const folderId = params.id as string;
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   const fetchDataSources = useCallback(async () => {
     try {
@@ -47,6 +54,11 @@ export default function FolderDataSourcesPage() {
     fetchDataSources();
   }, [fetchDataSources]);
 
+  const goToNew = (type: string) => {
+    setDialogOpen(false);
+    router.push(`/data-sources/new?type=${type}&folderId=${folderId}`);
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -62,15 +74,13 @@ export default function FolderDataSourcesPage() {
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Data Sources</h1>
               <p className="text-sm text-muted-foreground">
-                Database connections in this folder
+                Database connections in this folder and its subfolders
               </p>
             </div>
           </div>
-          <Button asChild>
-            <Link href={`/data-sources/new?folderId=${folderId}`}>
-              <Plus className="mr-2 h-4 w-4" />
-              New Data Source
-            </Link>
+          <Button onClick={() => setDialogOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            New Data Source
           </Button>
         </div>
 
@@ -86,6 +96,10 @@ export default function FolderDataSourcesPage() {
               <p className="text-sm text-muted-foreground mt-1">
                 Connect a database to start querying data.
               </p>
+              <Button className="mt-4" onClick={() => setDialogOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add New
+              </Button>
             </CardContent>
           </Card>
         ) : (
@@ -112,6 +126,67 @@ export default function FolderDataSourcesPage() {
           </div>
         )}
       </div>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Data Source</DialogTitle>
+            <DialogDescription>
+              Choose the type of database you want to connect.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4 pt-2">
+            <button
+              className="flex flex-col items-center gap-3 rounded-xl border-2 border-border p-6 transition-all hover:border-primary hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-ring"
+              onClick={() => goToNew("bigquery")}
+            >
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-blue-500/10">
+                <Database className="h-7 w-7 text-blue-500" />
+              </div>
+              <span className="text-sm font-semibold">BigQuery</span>
+              <span className="text-xs text-muted-foreground text-center">
+                Google Cloud data warehouse
+              </span>
+            </button>
+            <button
+              className="flex flex-col items-center gap-3 rounded-xl border-2 border-border p-6 transition-all hover:border-primary hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-ring"
+              onClick={() => goToNew("mysql")}
+            >
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-orange-500/10">
+                <Server className="h-7 w-7 text-orange-500" />
+              </div>
+              <span className="text-sm font-semibold">MySQL</span>
+              <span className="text-xs text-muted-foreground text-center">
+                Open-source relational database
+              </span>
+            </button>
+            <button
+              className="flex flex-col items-center gap-3 rounded-xl border-2 border-border p-6 transition-all hover:border-primary hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-ring"
+              onClick={() => goToNew("postgres")}
+            >
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-sky-500/10">
+                <Container className="h-7 w-7 text-sky-500" />
+              </div>
+              <span className="text-sm font-semibold">PostgreSQL</span>
+              <span className="text-xs text-muted-foreground text-center">
+                Advanced open-source database
+              </span>
+            </button>
+            <button
+              className="flex flex-col items-center gap-3 rounded-xl border-2 border-border p-6 transition-all hover:border-primary hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-ring"
+              onClick={() => goToNew("redshift")}
+            >
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-red-500/10">
+                <Warehouse className="h-7 w-7 text-red-500" />
+              </div>
+              <span className="text-sm font-semibold">AWS Redshift</span>
+              <span className="text-xs text-muted-foreground text-center">
+                AWS cloud data warehouse
+              </span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

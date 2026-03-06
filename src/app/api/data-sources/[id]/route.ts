@@ -26,7 +26,7 @@ export async function GET(
 
   const { data, error } = await supabase!
     .from("data_sources")
-    .select("id, name, type, config, created_at, updated_at")
+    .select("id, name, type, config, created_at, updated_at, folder_id")
     .eq("id", id)
     .single();
 
@@ -42,6 +42,7 @@ export async function GET(
       config: redactSensitiveConfig(data.config),
       createdAt: data.created_at,
       updatedAt: data.updated_at,
+      folderId: data.folder_id ?? undefined,
     },
   });
 }
