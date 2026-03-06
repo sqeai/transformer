@@ -131,6 +131,8 @@ function NewDatasetPageContent() {
 
   const schemaId = searchParams.get("schemaId") ?? datasetWorkflow.schemaId;
   const datasetIdParam = searchParams.get("datasetId");
+  const folderIdParam = searchParams.get("folderId");
+  const datasetsListUrl = folderIdParam ? `/folders/${folderIdParam}` : "/";
   const schema = schemaId ? getSchema(schemaId) : null;
   const targetPaths = useMemo(() => {
     if (!schema) return [];
@@ -183,8 +185,8 @@ function NewDatasetPageContent() {
       setStep(previousStep);
       return;
     }
-    router.push("/datasets");
-  }, [router, step]);
+    router.push(datasetsListUrl);
+  }, [router, step, datasetsListUrl]);
 
   // --- File upload helper ---
 
@@ -725,7 +727,7 @@ function NewDatasetPageContent() {
       <DashboardLayout>
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <p className="text-muted-foreground text-lg">No schema selected.</p>
-          <Button className="mt-4" onClick={() => router.push("/datasets")}>Back to Datasets</Button>
+          <Button className="mt-4" onClick={() => router.push(datasetsListUrl)}>Back to Datasets</Button>
         </div>
       </DashboardLayout>
     );
@@ -772,7 +774,7 @@ function NewDatasetPageContent() {
             onLoadMorePreview={() => setPreviewTopRows((prev) => prev + PREVIEW_ROWS)}
             globalAiInstructions={globalAiInstructions}
             onGlobalAiInstructionsChange={setGlobalAiInstructions}
-            onCancel={() => router.push("/datasets")}
+            onCancel={() => router.push(datasetsListUrl)}
             onSubmit={submitJobs}
             isFileSelected={isFileSelected}
           />

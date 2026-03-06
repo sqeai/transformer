@@ -18,7 +18,7 @@ export async function GET(
   let data: Record<string, unknown> | null = null;
   const { data: rlsData, error } = await supabase!
     .from("datasets")
-    .select("id, schema_id, name, row_count, state, rows, mapping_snapshot, created_at, updated_at, schemas(name)")
+    .select("id, schema_id, folder_id, name, row_count, state, rows, mapping_snapshot, created_at, updated_at, schemas(name)")
     .eq("id", id)
     .single();
 
@@ -36,7 +36,7 @@ export async function GET(
     if (approverRow) {
       const { data: adminData } = await admin
         .from("datasets")
-        .select("id, schema_id, name, row_count, state, rows, mapping_snapshot, created_at, updated_at, schemas(name)")
+        .select("id, schema_id, folder_id, name, row_count, state, rows, mapping_snapshot, created_at, updated_at, schemas(name)")
         .eq("id", id)
         .single();
       data = adminData as Record<string, unknown> | null;
@@ -82,6 +82,7 @@ export async function GET(
     dataset: {
       id: data.id,
       schemaId: data.schema_id,
+      folderId: data.folder_id ?? null,
       schemaName: (data.schemas as Record<string, unknown>)?.name ?? null,
       name: data.name,
       rowCount: data.row_count ?? 0,

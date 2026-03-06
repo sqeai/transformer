@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,7 +24,7 @@ interface DataSource {
   id: string;
   name: string;
   type: string;
-  created_at: string;
+  createdAt: string;
 }
 
 export default function FolderDataSourcesPage() {
@@ -60,7 +59,7 @@ export default function FolderDataSourcesPage() {
   };
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -118,7 +117,7 @@ export default function FolderDataSourcesPage() {
                     </Badge>
                   </div>
                   <CardDescription className="text-xs">
-                    Created {new Date(ds.created_at).toLocaleDateString()}
+                    Created {new Date(ds.createdAt).toLocaleDateString()}
                   </CardDescription>
                 </CardHeader>
               </Card>
@@ -187,6 +186,6 @@ export default function FolderDataSourcesPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </DashboardLayout>
+    </>
   );
 }

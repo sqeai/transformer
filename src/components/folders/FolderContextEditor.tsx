@@ -24,7 +24,7 @@ interface DataSource {
 
 interface TableInfo {
   schema: string;
-  table: string;
+  name: string;
 }
 
 interface ContextTable {
@@ -228,7 +228,7 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
         <div className="flex flex-wrap gap-2">
           {contextTables.map((t, i) => (
             <Badge key={i} variant="secondary" className="gap-1 pr-1">
-              {t.dataSourceName ?? t.dataSourceId}: {t.schemaName}.{t.tableName}
+              {t.schemaName}.{t.tableName}
               <button
                 onClick={() => removeTable(i)}
                 className="ml-1 rounded-full p-0.5 hover:bg-muted"
@@ -266,8 +266,8 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
               </SelectTrigger>
               <SelectContent>
                 {availableTables.map((t) => (
-                  <SelectItem key={`${t.schema}.${t.table}`} value={`${t.schema}.${t.table}`}>
-                    {t.schema}.{t.table}
+                  <SelectItem key={`${t.schema}.${t.name}`} value={`${t.schema}.${t.name}`}>
+                    {t.schema}.{t.name}
                   </SelectItem>
                 ))}
               </SelectContent>
