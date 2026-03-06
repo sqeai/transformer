@@ -28,7 +28,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!loading && user) {
-      router.replace("/datasets");
+      router.replace("/folders");
     }
   }, [user, loading, router]);
 
@@ -52,7 +52,7 @@ export default function LoginPage() {
       setError(err.message);
       setIsLoading(false);
     } else {
-      router.push("/datasets");
+      router.push("/folders");
     }
   };
 

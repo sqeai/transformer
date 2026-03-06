@@ -2,17 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, useState, useEffect } from "react";
+import { type ReactNode, useState, useEffect, useCallback } from "react";
 import {
   LogOut,
   Sparkles,
-  FileStack,
-  Database,
-  Cable,
   PanelLeftClose,
   PanelLeftOpen,
   MessageSquare,
-  LayoutDashboard,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -26,20 +23,57 @@ import {
   TooltipTrigger,
   TooltipProvider,
 } from "@/components/ui/tooltip";
-const nav = [
-  { name: "Datasets", href: "/datasets", icon: Database },
-  { name: "Schemas", href: "/schemas", icon: FileStack },
-  { name: "Data Sources", href: "/data-sources", icon: Cable },
-  { name: "Assistant", href: "/assistant", icon: MessageSquare },
-  // { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-];
+import { FolderTree, type FolderNode } from "@/components/folders/FolderTree";
+import { CreateFolderDialog } from "@/components/folders/CreateFolderDialog";
+import { ManageAccessDialog } from "@/components/folders/ManageAccessDialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
+
+function buildTree(
+  flat: { id: string; name: string; parent_id: string | null }[],
+): FolderNode[] {
+  const map = new Map<string, FolderNode>();
+  for (const f of flat) {
+    map.set(f.id, { id: f.id, name: f.name, parentId: f.parent_id, children: [] });
+  }
+  const roots: FolderNode[] = [];
+  for (const node of map.values()) {
+    if (node.parentId && map.has(node.parentId)) {
+      map.get(node.parentId)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return roots;
+}
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+  const [folders, setFolders] = useState<FolderNode[]>([]);
+  const [foldersLoading, setFoldersLoading] = useState(true);
+
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createParentId, setCreateParentId] = useState<string | null>(null);
+
+  const [accessDialogOpen, setAccessDialogOpen] = useState(false);
+  const [accessFolderId, setAccessFolderId] = useState("");
+  const [accessFolderName, setAccessFolderName] = useState("");
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteFolderId, setDeleteFolderId] = useState("");
 
   useEffect(() => {
     const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
@@ -47,6 +81,24 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       setCollapsed(stored === "true");
     }
   }, []);
+
+  const fetchFolders = useCallback(async () => {
+    try {
+      const res = await fetch("/api/folders");
+      if (res.ok) {
+        const data = await res.json();
+        setFolders(buildTree(data.folders ?? []));
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setFoldersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchFolders();
+  }, [fetchFolders]);
 
   const toggleCollapsed = () => {
     setCollapsed((c) => {
@@ -57,6 +109,53 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       return next;
     });
   };
+
+  const handleCreateFolder = (parentId: string | null) => {
+    setCreateParentId(parentId);
+    setCreateDialogOpen(true);
+  };
+
+  const handleManageAccess = (folderId: string) => {
+    const findFolder = (nodes: FolderNode[]): FolderNode | undefined => {
+      for (const n of nodes) {
+        if (n.id === folderId) return n;
+        const found = findFolder(n.children);
+        if (found) return found;
+      }
+      return undefined;
+    };
+    const folder = findFolder(folders);
+    setAccessFolderId(folderId);
+    setAccessFolderName(folder?.name ?? "");
+    setAccessDialogOpen(true);
+  };
+
+  const handleDeleteFolder = (folderId: string) => {
+    setDeleteFolderId(folderId);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    try {
+      const res = await fetch(`/api/folders/${deleteFolderId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        toast.success("Folder deleted");
+        fetchFolders();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error ?? "Failed to delete folder");
+      }
+    } catch {
+      toast.error("Failed to delete folder");
+    } finally {
+      setDeleteDialogOpen(false);
+    }
+  };
+
+  const isAssistantActive =
+    pathname === "/assistant" || pathname.startsWith("/assistant/");
 
   return (
     <ProtectedRoute>
@@ -73,7 +172,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           >
             <div className="flex h-14 items-center gap-2 border-b border-sidebar-border px-3">
               <Link
-                href="/schemas"
+                href="/folders"
                 className="flex items-center gap-2 font-semibold text-sidebar-foreground min-w-0"
               >
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent">
@@ -86,38 +185,55 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 )}
               </Link>
             </div>
-            <nav className="flex-1 space-y-1 p-2">
-              {nav.map((item) => {
-                const href = item.href;
-                const isActive =
-                  pathname === item.href || pathname.startsWith(item.href + "/");
+
+            <nav className="flex-1 overflow-y-auto p-2 space-y-1">
+              {!collapsed && (
+                <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Folders
+                </p>
+              )}
+              {foldersLoading ? (
+                <div className="flex justify-center py-4">
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <FolderTree
+                  folders={folders}
+                  collapsed={collapsed}
+                  onCreateFolder={handleCreateFolder}
+                  onDeleteFolder={handleDeleteFolder}
+                  onManageAccess={handleManageAccess}
+                />
+              )}
+
+              {!collapsed && <Separator className="my-2" />}
+
+              {(() => {
                 const link = (
                   <Link
-                    key={item.href}
-                    href={href}
+                    href="/assistant"
                     className={cn(
                       "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                      isActive
+                      isAssistantActive
                         ? "bg-sidebar-accent text-sidebar-accent-foreground"
                         : "text-sidebar-foreground hover:bg-sidebar-accent/50",
                       collapsed && "justify-center px-0",
                     )}
                   >
-                    <item.icon className="h-4 w-4 shrink-0" />
-                    {!collapsed && item.name}
+                    <MessageSquare className="h-4 w-4 shrink-0" />
+                    {!collapsed && "Assistant"}
                   </Link>
                 );
-
                 if (collapsed) {
                   return (
-                    <Tooltip key={item.href}>
+                    <Tooltip>
                       <TooltipTrigger asChild>{link}</TooltipTrigger>
-                      <TooltipContent side="right">{item.name}</TooltipContent>
+                      <TooltipContent side="right">Assistant</TooltipContent>
                     </Tooltip>
                   );
                 }
                 return link;
-              })}
+              })()}
             </nav>
 
             <div className="px-2 pb-1">
@@ -189,6 +305,42 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           <div className="h-full p-6">{children}</div>
         </main>
       </div>
+
+      <CreateFolderDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        parentId={createParentId}
+        onCreated={fetchFolders}
+      />
+
+      <ManageAccessDialog
+        open={accessDialogOpen}
+        onOpenChange={setAccessDialogOpen}
+        folderId={accessFolderId}
+        folderName={accessFolderName}
+      />
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete folder?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this folder and all its contents,
+              including sub-folders, schemas, datasets, and dashboards. This
+              action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ProtectedRoute>
   );
 }

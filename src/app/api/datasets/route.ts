@@ -10,6 +10,7 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const schemaId = searchParams.get("schemaId")?.trim() || null;
+  const folderId = searchParams.get("folderId")?.trim() || null;
   const search = searchParams.get("search")?.trim() || null;
   const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "20") || 20, 1), 100);
   const offset = Math.max(Number(searchParams.get("offset") ?? "0") || 0, 0);
@@ -36,6 +37,7 @@ export async function GET(request: NextRequest) {
     .range(offset, offset + limit - 1);
 
   if (schemaId) query = query.eq("schema_id", schemaId);
+  if (folderId) query = query.eq("folder_id", folderId);
   if (search) query = query.ilike("name", `%${search}%`);
   if (stateFilter) query = query.eq("state", stateFilter);
 

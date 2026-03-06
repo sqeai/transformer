@@ -4,14 +4,23 @@ import type { SchemaFieldRow } from "@/lib/schema-db";
 import { getAuth } from "@/lib/api-auth";
 import type { SchemaField } from "@/lib/types";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const auth = await getAuth();
   if (auth.response) return auth.response;
   const { supabase, userId } = auth;
 
-  const { data: schemaRows, error: schemaError } = await supabase!
+  const { searchParams } = new URL(request.url);
+  const folderId = searchParams.get("folderId")?.trim() || null;
+
+  let query = supabase!
     .from("schemas")
-    .select("id, name, created_at, updated_at, user_id");
+    .select("id, name, created_at, updated_at, user_id, folder_id");
+
+  if (folderId) {
+    query = query.eq("folder_id", folderId);
+  }
+
+  const { data: schemaRows, error: schemaError } = await query;
 
   if (schemaError) {
     console.error("Schemas list error:", schemaError);
@@ -121,7 +130,7 @@ export async function POST(request: NextRequest) {
   if (auth.response) return auth.response;
   const { supabase, userId } = auth;
 
-  let body: { name?: string; fields?: SchemaField[] };
+  let body: { name?: string; fields?: SchemaField[]; folderId?: string };
   try {
     body = await request.json();
   } catch {
@@ -129,13 +138,17 @@ export async function POST(request: NextRequest) {
   }
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   const fields = Array.isArray(body?.fields) ? (body.fields as SchemaField[]) : [];
+  const folderId = typeof body?.folderId === "string" ? body.folderId.trim() : null;
   if (!name) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
+  const insertData: Record<string, unknown> = { user_id: userId!, name };
+  if (folderId) insertData.folder_id = folderId;
+
   const { data: schema, error: schemaError } = await supabase!
     .from("schemas")
-    .insert({ user_id: userId!, name })
+    .insert(insertData)
     .select("id, name, created_at")
     .single();
 

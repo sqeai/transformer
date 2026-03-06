@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAnalystAgent } from "@/lib/agents/analyst-agent";
 import type { DataSourceContext } from "@/lib/agents/analyst-agent";
-import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/api-auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createConnector } from "@/lib/connectors";
 import type { DataSourceType } from "@/lib/connectors";
 import { type BaseMessage } from "@langchain/core/messages";
@@ -11,15 +12,10 @@ import { resolveAttachments, type ChatAttachment } from "@/lib/chat-attachments"
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    const authResult = await requireAuth();
+    if (authResult.error) return authResult.error;
 
-    if (!user || userError) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const supabase = createAdminClient();
 
     const body = await req.json();
     const selectedDataSourceIds: string[] = body.dataSourceIds ?? [];

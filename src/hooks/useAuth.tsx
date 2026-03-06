@@ -4,15 +4,15 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
-  useState,
   type ReactNode,
 } from "react";
+import { useSession, signIn as nextAuthSignIn, signOut as nextAuthSignOut } from "next-auth/react";
 
 export interface User {
   id: string;
   email: string;
   name: string;
+  isSuperadmin: boolean;
 }
 
 interface AuthContextType {
@@ -25,24 +25,17 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: session, status } = useSession();
+  const loading = status === "loading";
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/auth/session", { credentials: "include" })
-      .then((res) => res.json())
-      .then((data) => {
-        if (!cancelled && data?.user) setUser(data.user);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const user: User | null = session?.user
+    ? {
+        id: session.user.id,
+        email: session.user.email,
+        name: session.user.name,
+        isSuperadmin: session.user.isSuperadmin,
+      }
+    : null;
 
   const signIn = useCallback(
     async (email: string, password: string): Promise<{ error: Error | null }> => {
@@ -50,25 +43,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!normalizedEmail || !password) {
         return { error: new Error("Email and password are required") };
       }
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizedEmail, password }),
-        credentials: "include",
+
+      const result = await nextAuthSignIn("credentials", {
+        email: normalizedEmail,
+        password,
+        redirect: false,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        return { error: new Error(data.error ?? "Sign in failed") };
+
+      if (result?.error) {
+        return { error: new Error("Invalid credentials") };
       }
-      if (data.user) setUser(data.user);
       return { error: null };
     },
     [],
   );
 
   const signOut = useCallback(async () => {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
-    setUser(null);
+    await nextAuthSignOut({ redirect: false });
   }, []);
 
   return (
