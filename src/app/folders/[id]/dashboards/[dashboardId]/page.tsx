@@ -1,12 +1,16 @@
 "use client";
 
-import { useParams } from "next/navigation";
-import { DashboardBuilder } from "@/components/dashboard/DashboardBuilder";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect } from "react";
 
-export default function DashboardDetailPage() {
+export default function DashboardDetailRedirect() {
   const params = useParams();
+  const router = useRouter();
   const folderId = params.id as string;
-  const dashboardId = params.dashboardId as string;
 
-  return <DashboardBuilder dashboardId={dashboardId} folderId={folderId} />;
+  useEffect(() => {
+    router.replace(`/folders/${folderId}`);
+  }, [folderId, router]);
+
+  return null;
 }

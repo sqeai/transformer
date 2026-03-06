@@ -1,29 +1,30 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, type FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import {
-  Loader2,
   LayoutDashboard,
-  Save,
+  Plus,
   Trash2,
-  PanelRightClose,
-  PanelRightOpen,
+  Loader2,
+  Settings2,
   Maximize2,
   Minimize2,
+  PanelRightClose,
+  PanelRightOpen,
 } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { ChartPanel } from "@/components/dashboard/ChartPanel";
 import {
   ContextSelector,
   type ContextSelection,
 } from "@/components/dashboard/ContextSelector";
 import { StarlightInput } from "@/components/dashboard/StarlightInput";
-import type { DashboardPanel } from "@/components/dashboard/types";
+import type { DashboardPanel, ChartType } from "@/components/dashboard/types";
 
 const PANEL_REGEX = /<!-- DASHBOARD_PANEL:(.*?) -->/g;
 
@@ -47,20 +48,19 @@ function extractPanelActions(text: string): PanelAction[] {
   return actions;
 }
 
-export default function FolderDashboardPage() {
+export default function FolderPanelsPage() {
   const params = useParams();
   const router = useRouter();
   const folderId = params.id as string;
 
   const [loading, setLoading] = useState(true);
   const [dashboardId, setDashboardId] = useState<string | null>(null);
-  const [dashboardName, setDashboardName] = useState("Dashboard");
   const [panels, setPanels] = useState<DashboardPanel[]>([]);
-  const [isSaving, setIsSaving] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(true);
   const [expandedPanel, setExpandedPanel] = useState<string | null>(null);
+  const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [contextSelection, setContextSelection] =
     useState<ContextSelection | null>(null);
+  const [creatingManual, setCreatingManual] = useState(false);
   const appliedActions = useRef<Set<string>>(new Set());
 
   const transport = useRef(
@@ -79,7 +79,7 @@ export default function FolderDashboardPage() {
 
   const isLoading = status === "streaming" || status === "submitted";
 
-  const ensureDashboard = useCallback(async () => {
+  const loadPanels = useCallback(async () => {
     try {
       const res = await fetch(`/api/dashboards?folderId=${folderId}`);
       if (!res.ok) {
@@ -102,8 +102,6 @@ export default function FolderDashboardPage() {
 
       if (dashboard) {
         setDashboardId(dashboard.id);
-        setDashboardName(dashboard.name || "Dashboard");
-
         const detailRes = await fetch(`/api/dashboards/${dashboard.id}`);
         if (detailRes.ok) {
           const data = await detailRes.json();
@@ -122,15 +120,15 @@ export default function FolderDashboardPage() {
         }
       }
     } catch {
-      toast.error("Failed to load dashboard");
+      toast.error("Failed to load panels");
     } finally {
       setLoading(false);
     }
   }, [folderId]);
 
   useEffect(() => {
-    ensureDashboard();
-  }, [ensureDashboard]);
+    loadPanels();
+  }, [loadPanels]);
 
   const applyPanelAction = useCallback((action: PanelAction) => {
     const key = JSON.stringify(action);
@@ -165,46 +163,59 @@ export default function FolderDashboardPage() {
     }
   }, [messages, applyPanelAction]);
 
-  const saveDashboard = useCallback(async () => {
+  const savePanels = useCallback(async () => {
     if (!dashboardId) return;
-    setIsSaving(true);
     try {
-      await fetch(`/api/dashboards/${dashboardId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: dashboardName }),
-      });
       await fetch(`/api/dashboards/${dashboardId}/panels`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ panels }),
       });
-      toast.success("Dashboard saved");
+      toast.success("Panels saved");
     } catch {
-      toast.error("Failed to save dashboard");
-    } finally {
-      setIsSaving(false);
+      toast.error("Failed to save panels");
     }
-  }, [dashboardId, dashboardName, panels]);
+  }, [dashboardId, panels]);
 
-  const clearDashboard = useCallback(() => {
-    setPanels([]);
-    appliedActions.current.clear();
-  }, []);
+  useEffect(() => {
+    if (!dashboardId || panels.length === 0) return;
+    const timeout = setTimeout(() => {
+      savePanels();
+    }, 2000);
+    return () => clearTimeout(timeout);
+  }, [panels, dashboardId, savePanels]);
 
-  const removePanel = useCallback((id: string) => {
-    setPanels((prev) => prev.filter((p) => p.id !== id));
-  }, []);
+  const removePanel = useCallback(
+    (id: string) => {
+      setPanels((prev) => prev.filter((p) => p.id !== id));
+      toast.success("Panel removed");
+    },
+    [],
+  );
 
   const editPanel = useCallback(
     (id: string) => {
       const panel = panels.find((p) => p.id === id);
       if (panel) {
-        toast.info(`To edit "${panel.title}", use the Starlight input below.`);
+        toast.info(`Use Starlight to update "${panel.title}"`);
       }
     },
     [panels],
   );
+
+  const createManualPanel = useCallback(() => {
+    const newPanel: DashboardPanel = {
+      id: crypto.randomUUID(),
+      title: "New Panel",
+      chartType: "bar" as ChartType,
+      data: [],
+      config: {},
+      width: 1,
+      height: 1,
+    };
+    setPanels((prev) => [...prev, newPanel]);
+    toast.success("Empty panel created. Use Starlight to populate it.");
+  }, []);
 
   const handleStarlightSubmit = useCallback(
     (text: string) => {
@@ -247,7 +258,7 @@ export default function FolderDashboardPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -262,50 +273,31 @@ export default function FolderDashboardPage() {
               <LayoutDashboard className="h-5 w-5 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-base font-semibold">{dashboardName}</h1>
+              <h1 className="text-base font-semibold">Panels</h1>
               <p className="text-xs text-muted-foreground">
-                {panels.length > 0
-                  ? `${panels.length} panel${panels.length > 1 ? "s" : ""}`
-                  : "Use Starlight below to create panels"}
+                {panels.length} panel{panels.length !== 1 ? "s" : ""} in this
+                dashboard
               </p>
             </div>
           </div>
           <div className="flex items-center gap-1">
-            {dashboardId && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={saveDashboard}
-                disabled={isSaving}
-              >
-                {isSaving ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                ) : (
-                  <Save className="h-3.5 w-3.5 mr-1" />
-                )}
-                Save
-              </Button>
-            )}
-            {panels.length > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 text-xs text-muted-foreground hover:text-destructive"
-                onClick={clearDashboard}
-              >
-                <Trash2 className="h-3.5 w-3.5 mr-1" />
-                Clear
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={createManualPanel}
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              New Panel
+            </Button>
             <Button
               variant="ghost"
               size="icon"
               className="h-8 w-8 text-muted-foreground"
-              onClick={() => setPanelOpen((o) => !o)}
-              title={panelOpen ? "Hide contexts" : "Show contexts"}
+              onClick={() => setContextPanelOpen((o) => !o)}
+              title={contextPanelOpen ? "Hide contexts" : "Show contexts"}
             >
-              {panelOpen ? (
+              {contextPanelOpen ? (
                 <PanelRightClose className="h-4 w-4" />
               ) : (
                 <PanelRightOpen className="h-4 w-4" />
@@ -314,31 +306,20 @@ export default function FolderDashboardPage() {
           </div>
         </div>
 
-        {/* Dashboard panels */}
+        {/* Panels list */}
         <div className="flex-1 overflow-y-auto p-4 pb-24">
           {panels.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center text-center text-muted-foreground">
               <LayoutDashboard className="mb-4 h-12 w-12 opacity-30" />
-              <p className="text-lg font-medium">No panels yet</p>
-              <p className="mt-2 text-sm max-w-md">
-                Use the Starlight input at the bottom to describe the charts
-                you&apos;d like to see. Try something like:
+              <h3 className="text-lg font-semibold">No panels yet</h3>
+              <p className="text-sm text-muted-foreground mt-1 mb-4 max-w-md">
+                Create panels using Starlight below, or add an empty panel
+                manually.
               </p>
-              <div className="mt-4 grid grid-cols-1 gap-2 max-w-lg">
-                {[
-                  "Create a dashboard with revenue by month as a line chart and expenses by category as a pie chart",
-                  "Show me a bar chart of top 10 products by sales",
-                  "Build a financial overview with revenue trends, cost breakdown, and profit waterfall",
-                ].map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    onClick={() => handleStarlightSubmit(suggestion)}
-                    className="rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-xs text-left hover:bg-muted/60 transition-colors"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
+              <Button onClick={createManualPanel} variant="outline">
+                <Plus className="h-4 w-4 mr-2" />
+                Create Empty Panel
+              </Button>
             </div>
           ) : (
             <>
@@ -373,22 +354,57 @@ export default function FolderDashboardPage() {
                   </div>
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-4 auto-rows-[280px]">
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {panels.map((panel) => (
-                  <div key={panel.id} className="relative group">
-                    <ChartPanel
-                      panel={panel}
-                      onRemove={removePanel}
-                      onEdit={editPanel}
-                    />
-                    <button
-                      onClick={() => setExpandedPanel(panel.id)}
-                      className="absolute top-2 right-12 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded bg-background/80 hover:bg-muted"
-                      title="Expand"
-                    >
-                      <Maximize2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+                  <Card
+                    key={panel.id}
+                    className="cursor-pointer hover:border-primary/50 transition-colors group overflow-hidden"
+                  >
+                    <CardContent className="p-0">
+                      <div className="h-[200px] p-3">
+                        <ChartPanel
+                          panel={panel}
+                          onRemove={removePanel}
+                          onEdit={editPanel}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between border-t border-border/50 px-4 py-2">
+                        <div>
+                          <h3 className="text-sm font-medium truncate">
+                            {panel.title}
+                          </h3>
+                          <p className="text-[10px] text-muted-foreground capitalize">
+                            {panel.chartType} chart
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedPanel(panel.id);
+                            }}
+                          >
+                            <Maximize2 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removePanel(panel.id);
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
             </>
@@ -397,7 +413,7 @@ export default function FolderDashboardPage() {
       </div>
 
       {/* Right panel - Context Selector */}
-      {panelOpen && (
+      {contextPanelOpen && (
         <div className="w-72 flex-shrink-0">
           <ContextSelector onSelectionChange={setContextSelection} />
         </div>
