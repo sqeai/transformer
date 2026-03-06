@@ -8,6 +8,9 @@ export interface DashboardPanel {
   config: ChartConfig;
   width: 1 | 2;
   height: 1 | 2;
+  prompt?: string;
+  sqlQuery?: string;
+  colSpan?: number;
 }
 
 export interface ChartConfig {
@@ -23,4 +26,12 @@ export interface DashboardState {
   id: string;
   title: string;
   panels: DashboardPanel[];
+}
+
+export interface PredefinedQuestion {
+  id: string;
+  label: string;
+  category: string;
+  defaultChartType: ChartType;
+  sqlHint?: string;
 }

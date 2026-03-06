@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, type FormEvent } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useParams } from "next/navigation";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import {
@@ -9,21 +9,26 @@ import {
   LayoutDashboard,
   Save,
   Trash2,
-  PanelRightClose,
-  PanelRightOpen,
   Maximize2,
   Minimize2,
+  Pencil,
+  X,
+  Plus,
+  GripVertical,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ChartPanel } from "@/components/dashboard/ChartPanel";
-import {
-  ContextSelector,
-  type ContextSelection,
-} from "@/components/dashboard/ContextSelector";
 import { StarlightInput } from "@/components/dashboard/StarlightInput";
-import type { DashboardPanel } from "@/components/dashboard/types";
+import { AddPanelDialog } from "@/components/dashboard/AddPanelDialog";
+import { usePanelQueryExecution } from "@/components/dashboard/usePanelQueryExecution";
+import { usePanelTranslation } from "@/components/dashboard/usePanelTranslation";
+import type {
+  DashboardPanel,
+  ChartType,
+  PredefinedQuestion,
+} from "@/components/dashboard/types";
 
 const PANEL_REGEX = /<!-- DASHBOARD_PANEL:(.*?) -->/g;
 
@@ -47,9 +52,13 @@ function extractPanelActions(text: string): PanelAction[] {
   return actions;
 }
 
+function getDefaultColSpan(width: 1 | 2): number {
+  if (width === 2) return 8;
+  return 4;
+}
+
 export default function FolderDashboardPage() {
   const params = useParams();
-  const router = useRouter();
   const folderId = params.id as string;
 
   const [loading, setLoading] = useState(true);
@@ -57,17 +66,18 @@ export default function FolderDashboardPage() {
   const [dashboardName, setDashboardName] = useState("Dashboard");
   const [panels, setPanels] = useState<DashboardPanel[]>([]);
   const [isSaving, setIsSaving] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(true);
   const [expandedPanel, setExpandedPanel] = useState<string | null>(null);
-  const [contextSelection, setContextSelection] =
-    useState<ContextSelection | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
   const appliedActions = useRef<Set<string>>(new Set());
+  const { executePanelsOnLoad, executingPanels } = usePanelQueryExecution();
+  const { translateAndExecute, isTranslating } = usePanelTranslation();
 
   const transport = useRef(
     new DefaultChatTransport({ api: "/api/dashboard-chat" }),
   );
 
-  const { messages, sendMessage, setMessages, status } = useChat({
+  const { messages, sendMessage, status } = useChat({
     transport: transport.current,
     onError: (e: Error) => {
       console.error(e);
@@ -116,6 +126,9 @@ export default function FolderDashboardPage() {
               config: p.config || {},
               width: p.width || 1,
               height: p.height || 1,
+              prompt: p.prompt || "",
+              sqlQuery: p.sql_query || p.sqlQuery || "",
+              colSpan: (p.col_span as number) || (p.colSpan as number) || getDefaultColSpan((p.width as 1 | 2) || 1),
             }));
             setPanels(loaded);
           }
@@ -132,17 +145,34 @@ export default function FolderDashboardPage() {
     ensureDashboard();
   }, [ensureDashboard]);
 
+  const panelsLoadedRef = useRef(false);
+  useEffect(() => {
+    if (panelsLoadedRef.current || panels.length === 0 || loading) return;
+    const needsData = panels.some(
+      (p) => p.sqlQuery?.trim() && (!p.data || p.data.length === 0),
+    );
+    if (!needsData) return;
+    panelsLoadedRef.current = true;
+    executePanelsOnLoad(panels).then((updated) => {
+      if (updated !== panels) setPanels(updated);
+    });
+  }, [panels, loading, executePanelsOnLoad]);
+
   const applyPanelAction = useCallback((action: PanelAction) => {
     const key = JSON.stringify(action);
     if (appliedActions.current.has(key)) return;
     appliedActions.current.add(key);
 
     if (action.action === "add" && action.panel) {
-      setPanels((prev) => [...prev, action.panel!]);
-      toast.success(`Panel "${action.panel.title}" added`);
+      const panel = {
+        ...action.panel,
+        colSpan: action.panel.colSpan || getDefaultColSpan(action.panel.width),
+      };
+      setPanels((prev) => [...prev, panel]);
+      toast.success(`Panel "${panel.title}" added`);
     } else if (action.action === "update" && action.panel) {
       setPanels((prev) =>
-        prev.map((p) => (p.id === action.panel!.id ? action.panel! : p)),
+        prev.map((p) => (p.id === action.panel!.id ? { ...action.panel!, colSpan: action.panel!.colSpan || p.colSpan } : p)),
       );
       toast.success(`Panel "${action.panel.title}" updated`);
     } else if (action.action === "remove" && action.panelId) {
@@ -206,18 +236,75 @@ export default function FolderDashboardPage() {
     [panels],
   );
 
+  const handleAddPredefined = useCallback(
+    (question: PredefinedQuestion) => {
+      const newPanel: DashboardPanel = {
+        id: crypto.randomUUID(),
+        title: question.label,
+        chartType: question.defaultChartType,
+        data: [],
+        config: {},
+        width: 1,
+        height: 1,
+        prompt: question.label,
+        sqlQuery: question.sqlHint || "",
+        colSpan: 4,
+      };
+      setPanels((prev) => [...prev, newPanel]);
+      toast.success(`Panel "${question.label}" added — generating query...`);
+
+      translateAndExecute(newPanel).then((translated) => {
+        if (translated !== newPanel) {
+          setPanels((prev) =>
+            prev.map((p) => (p.id === newPanel.id ? translated : p)),
+          );
+        }
+      });
+    },
+    [translateAndExecute],
+  );
+
+  const handleAddCustom = useCallback(
+    (prompt: string, sqlQuery?: string) => {
+      const newPanel: DashboardPanel = {
+        id: crypto.randomUUID(),
+        title: prompt,
+        chartType: "bar" as ChartType,
+        data: [],
+        config: {},
+        width: 1,
+        height: 1,
+        prompt,
+        sqlQuery: sqlQuery || "",
+        colSpan: 4,
+      };
+      setPanels((prev) => [...prev, newPanel]);
+      toast.success("Panel added — generating query...");
+
+      translateAndExecute(newPanel).then((translated) => {
+        if (translated !== newPanel) {
+          setPanels((prev) =>
+            prev.map((p) => (p.id === newPanel.id ? translated : p)),
+          );
+        }
+      });
+    },
+    [translateAndExecute],
+  );
+
+  const handleResizePanel = useCallback((id: string, delta: number) => {
+    setPanels((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        const newSpan = Math.max(2, Math.min(12, (p.colSpan || 4) + delta));
+        return { ...p, colSpan: newSpan };
+      }),
+    );
+  }, []);
+
   const handleStarlightSubmit = useCallback(
     (text: string) => {
       if (!text.trim() || isLoading) return;
-
-      const dataSources = contextSelection?.dataSources ?? [];
-      const dataSourceIds = dataSources.map((s) => s.id);
-      const dataSourceContexts = dataSources.map((s) => ({
-        id: s.id,
-        name: s.name,
-        type: s.type,
-        tables: s.tables,
-      }));
 
       const currentPanels = JSON.stringify(
         panels.map((p) => ({
@@ -233,16 +320,23 @@ export default function FolderDashboardPage() {
         { text: text.trim() },
         {
           body: {
-            dataSourceIds,
-            dataSourceContexts,
+            dataSourceIds: [],
+            dataSourceContexts: [],
             currentPanels,
-            companyContext: contextSelection?.companyContext ?? "",
+            companyContext: "",
           },
         },
       );
     },
-    [isLoading, sendMessage, contextSelection, panels],
+    [isLoading, sendMessage, panels],
   );
+
+  const toggleEditMode = useCallback(() => {
+    if (editMode) {
+      saveDashboard();
+    }
+    setEditMode((prev) => !prev);
+  }, [editMode, saveDashboard]);
 
   if (loading) {
     return (
@@ -253,161 +347,252 @@ export default function FolderDashboardPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] -m-6 overflow-hidden">
-      <div className="flex flex-1 flex-col min-w-0">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-border bg-card/80 backdrop-blur-sm px-6 py-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent">
-              <LayoutDashboard className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <div>
-              <h1 className="text-base font-semibold">{dashboardName}</h1>
-              <p className="text-xs text-muted-foreground">
-                {panels.length > 0
-                  ? `${panels.length} panel${panels.length > 1 ? "s" : ""}`
-                  : "Use Starlight below to create panels"}
-              </p>
-            </div>
+    <div className="flex h-[calc(100vh-3rem)] -m-6 overflow-hidden flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-border bg-card/80 backdrop-blur-sm px-6 py-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent">
+            <LayoutDashboard className="h-5 w-5 text-primary-foreground" />
           </div>
-          <div className="flex items-center gap-1">
-            {dashboardId && (
+          <div>
+            <h1 className="text-base font-semibold">{dashboardName}</h1>
+            <p className="text-xs text-muted-foreground">
+              {panels.length > 0
+                ? `${panels.length} panel${panels.length > 1 ? "s" : ""}`
+                : "Add panels to get started"}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {editMode && (
+            <>
               <Button
                 variant="outline"
                 size="sm"
                 className="h-8 text-xs"
-                onClick={saveDashboard}
-                disabled={isSaving}
+                onClick={() => setAddDialogOpen(true)}
               >
-                {isSaving ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                ) : (
-                  <Save className="h-3.5 w-3.5 mr-1" />
-                )}
-                Save
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Add Panel
               </Button>
-            )}
-            {panels.length > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 text-xs text-muted-foreground hover:text-destructive"
-                onClick={clearDashboard}
-              >
-                <Trash2 className="h-3.5 w-3.5 mr-1" />
-                Clear
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground"
-              onClick={() => setPanelOpen((o) => !o)}
-              title={panelOpen ? "Hide contexts" : "Show contexts"}
-            >
-              {panelOpen ? (
-                <PanelRightClose className="h-4 w-4" />
-              ) : (
-                <PanelRightOpen className="h-4 w-4" />
+              {panels.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-xs text-muted-foreground hover:text-destructive"
+                  onClick={clearDashboard}
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1" />
+                  Clear
+                </Button>
               )}
+            </>
+          )}
+          <Button
+            variant={editMode ? "default" : "outline"}
+            size="sm"
+            className="h-8 text-xs"
+            onClick={toggleEditMode}
+            disabled={isSaving}
+          >
+            {isSaving ? (
+              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+            ) : editMode ? (
+              <Save className="h-3.5 w-3.5 mr-1" />
+            ) : (
+              <Pencil className="h-3.5 w-3.5 mr-1" />
+            )}
+            {editMode ? "Save & Exit" : "Edit"}
+          </Button>
+        </div>
+      </div>
+
+      {/* Dashboard grid */}
+      <div className="flex-1 overflow-y-auto p-4 pb-24">
+        {panels.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center text-center text-muted-foreground">
+            <LayoutDashboard className="mb-4 h-12 w-12 opacity-30" />
+            <p className="text-lg font-medium">No panels yet</p>
+            <p className="mt-2 text-sm max-w-md">
+              Click the Edit button to enter edit mode and add panels to your
+              dashboard.
+            </p>
+            <Button
+              onClick={() => {
+                setEditMode(true);
+                setAddDialogOpen(true);
+              }}
+              variant="outline"
+              className="mt-4"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Your First Panel
             </Button>
           </div>
-        </div>
-
-        {/* Dashboard panels */}
-        <div className="flex-1 overflow-y-auto p-4 pb-24">
-          {panels.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center text-center text-muted-foreground">
-              <LayoutDashboard className="mb-4 h-12 w-12 opacity-30" />
-              <p className="text-lg font-medium">No panels yet</p>
-              <p className="mt-2 text-sm max-w-md">
-                Use the Starlight input at the bottom to describe the charts
-                you&apos;d like to see. Try something like:
-              </p>
-              <div className="mt-4 grid grid-cols-1 gap-2 max-w-lg">
-                {[
-                  "Create a dashboard with revenue by month as a line chart and expenses by category as a pie chart",
-                  "Show me a bar chart of top 10 products by sales",
-                  "Build a financial overview with revenue trends, cost breakdown, and profit waterfall",
-                ].map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    onClick={() => handleStarlightSubmit(suggestion)}
-                    className="rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-xs text-left hover:bg-muted/60 transition-colors"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <>
-              {expandedPanel && (
-                <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-8">
-                  <div className="w-full max-w-5xl h-full max-h-[80vh] bg-card rounded-xl border shadow-2xl flex flex-col">
-                    <div className="flex items-center justify-between px-4 py-3 border-b">
-                      <h3 className="font-semibold">
-                        {panels.find((p) => p.id === expandedPanel)?.title}
-                      </h3>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => setExpandedPanel(null)}
-                      >
-                        <Minimize2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <div className="flex-1 p-4">
-                      {panels.find((p) => p.id === expandedPanel) && (
-                        <ChartPanel
-                          panel={
-                            panels.find((p) => p.id === expandedPanel)!
-                          }
-                          onRemove={removePanel}
-                          onEdit={editPanel}
-                          expanded
-                        />
-                      )}
-                    </div>
+        ) : (
+          <>
+            {/* Expanded panel overlay */}
+            {expandedPanel && (
+              <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-8">
+                <div className="w-full max-w-5xl h-full max-h-[80vh] bg-card rounded-xl border shadow-2xl flex flex-col">
+                  <div className="flex items-center justify-between px-4 py-3 border-b">
+                    <h3 className="font-semibold">
+                      {panels.find((p) => p.id === expandedPanel)?.title}
+                    </h3>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => setExpandedPanel(null)}
+                    >
+                      <Minimize2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="flex-1 p-4">
+                    {panels.find((p) => p.id === expandedPanel) && (
+                      <ChartPanel
+                        panel={panels.find((p) => p.id === expandedPanel)!}
+                        onRemove={removePanel}
+                        onEdit={editPanel}
+                        expanded
+                      />
+                    )}
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* 12-column grid */}
+            <div
+              className={cn(
+                "grid gap-4 auto-rows-[280px]",
+                editMode
+                  ? "grid-cols-12"
+                  : "grid-cols-12",
               )}
-              <div className="grid grid-cols-2 gap-4 auto-rows-[280px]">
-                {panels.map((panel) => (
-                  <div key={panel.id} className="relative group">
+            >
+              {panels.map((panel) => {
+                const span = panel.colSpan || getDefaultColSpan(panel.width);
+                return (
+                  <div
+                    key={panel.id}
+                    className={cn(
+                      "relative group",
+                      panel.height === 2 && "row-span-2",
+                      editMode && "ring-1 ring-border ring-dashed rounded-xl",
+                    )}
+                    style={{
+                      gridColumn: `span ${span} / span ${span}`,
+                    }}
+                  >
                     <ChartPanel
                       panel={panel}
                       onRemove={removePanel}
                       onEdit={editPanel}
+                      isLoading={executingPanels.has(panel.id)}
                     />
-                    <button
-                      onClick={() => setExpandedPanel(panel.id)}
-                      className="absolute top-2 right-12 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded bg-background/80 hover:bg-muted"
-                      title="Expand"
-                    >
-                      <Maximize2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
 
-      {/* Right panel - Context Selector */}
-      {panelOpen && (
-        <div className="w-72 flex-shrink-0">
-          <ContextSelector onSelectionChange={setContextSelection} />
-        </div>
-      )}
+                    {/* Edit mode overlay controls */}
+                    {editMode && (
+                      <div className="absolute inset-0 rounded-xl">
+                        {/* Top-right controls */}
+                        <div className="absolute top-2 right-2 flex items-center gap-1 z-10">
+                          <Button
+                            variant="secondary"
+                            size="icon"
+                            className="h-7 w-7 shadow-sm"
+                            onClick={() => setExpandedPanel(panel.id)}
+                            title="Expand"
+                          >
+                            <Maximize2 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="icon"
+                            className="h-7 w-7 shadow-sm text-destructive hover:text-destructive"
+                            onClick={() => removePanel(panel.id)}
+                            title="Remove"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+
+                        {/* Bottom resize controls */}
+                        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1 z-10">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-6 px-2 text-[10px] shadow-sm"
+                            onClick={() => handleResizePanel(panel.id, -2)}
+                            disabled={span <= 2}
+                          >
+                            Narrower
+                          </Button>
+                          <span className="text-[10px] text-muted-foreground bg-secondary/80 px-2 py-0.5 rounded">
+                            {span}/12
+                          </span>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-6 px-2 text-[10px] shadow-sm"
+                            onClick={() => handleResizePanel(panel.id, 2)}
+                            disabled={span >= 12}
+                          >
+                            Wider
+                          </Button>
+                        </div>
+
+                        {/* Drag handle */}
+                        <div className="absolute top-2 left-2 z-10">
+                          <div className="flex h-7 w-7 items-center justify-center rounded bg-secondary/80 shadow-sm cursor-grab">
+                            <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* View mode expand on hover */}
+                    {!editMode && (
+                      <button
+                        onClick={() => setExpandedPanel(panel.id)}
+                        className="absolute top-2 right-12 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded bg-background/80 hover:bg-muted z-10"
+                        title="Expand"
+                      >
+                        <Maximize2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Add panel placeholder in edit mode */}
+              {editMode && (
+                <button
+                  onClick={() => setAddDialogOpen(true)}
+                  className="col-span-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border/60 text-muted-foreground hover:border-primary/40 hover:text-primary hover:bg-primary/5 transition-colors"
+                >
+                  <Plus className="h-8 w-8 mb-2 opacity-50" />
+                  <span className="text-sm font-medium">Add Panel</span>
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
 
       {/* Starlight Input */}
       <StarlightInput
         onSubmit={handleStarlightSubmit}
         isLoading={isLoading}
         placeholder="Ask Starlight anything (⌘K)"
+      />
+
+      {/* Add Panel Dialog */}
+      <AddPanelDialog
+        open={addDialogOpen}
+        onOpenChange={setAddDialogOpen}
+        onAddPredefined={handleAddPredefined}
+        onAddCustom={handleAddCustom}
       />
     </div>
   );
