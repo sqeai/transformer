@@ -39,15 +39,24 @@ function redactSensitiveConfig(config: unknown) {
   return base;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const auth = await getAuth();
   if (auth.response) return auth.response;
   const { supabase } = auth;
 
-  const { data, error } = await supabase!
+  const { searchParams } = new URL(request.url);
+  const folderId = searchParams.get("folderId")?.trim() || null;
+
+  let query = supabase!
     .from("data_sources")
-    .select("id, name, type, config, created_at, updated_at")
+    .select("id, name, type, config, created_at, updated_at, folder_id")
     .order("created_at", { ascending: false });
+
+  if (folderId) {
+    query = query.eq("folder_id", folderId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -70,7 +79,7 @@ export async function POST(request: NextRequest) {
   if (auth.response) return auth.response;
   const { supabase, userId } = auth;
 
-  let body: { name?: string; type?: string; config?: Record<string, unknown> };
+  let body: { name?: string; type?: string; config?: Record<string, unknown>; folderId?: string };
   try {
     body = await request.json();
   } catch {
@@ -80,6 +89,7 @@ export async function POST(request: NextRequest) {
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const type = body.type;
   const config = body.config ?? {};
+  const folderId = typeof body.folderId === "string" ? body.folderId.trim() : null;
 
   if (!name) return NextResponse.json({ error: "name is required" }, { status: 400 });
   const validTypes = ["bigquery", "mysql", "postgres", "redshift"];
@@ -87,9 +97,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `type must be one of: ${validTypes.join(", ")}` }, { status: 400 });
   }
 
+  const insertData: Record<string, unknown> = { user_id: userId!, name, type, config };
+  if (folderId) insertData.folder_id = folderId;
+
   const { data, error } = await supabase!
     .from("data_sources")
-    .insert({ user_id: userId!, name, type, config })
+    .insert(insertData)
     .select("id, name, type, config, created_at, updated_at")
     .single();
 

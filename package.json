@@ -45,6 +45,7 @@
     "lucide-react": "^0.462.0",
     "mysql2": "^3.18.2",
     "next": "^16.1.6",
+    "next-auth": "^5.0.0-beta.30",
     "next-themes": "^0.3.0",
     "pdf-parse": "^2.4.5",
     "pg": "^8.19.0",

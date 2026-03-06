@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAgentGraph, AIMessage } from "@/lib/agents/chat-agent";
 import { getDocsOnlyAgent } from "@/lib/agents/docs-agent";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/api-auth";
 import { type BaseMessage } from "@langchain/core/messages";
 import { toUIMessageStream, toBaseMessages } from "@ai-sdk/langchain";
 import { createUIMessageStreamResponse, type UIMessage } from "ai";
@@ -23,12 +23,8 @@ const convertLangChainMessageToVercelMessage = (message: BaseMessage) => {
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-    const isAuthenticated = Boolean(user && !userError);
+    const user = await getAuthUser();
+    const isAuthenticated = Boolean(user);
 
     const body = await req.json();
     const returnIntermediateSteps = body.show_intermediate_steps;
