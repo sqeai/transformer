@@ -28,6 +28,13 @@ import {
   FileImage,
   File as FileIcon,
   X,
+  Download,
+  History,
+  Plus,
+  Briefcase,
+  TrendingUp,
+  BarChart3,
+  MessageSquare,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -551,9 +558,49 @@ function AssistantMessage({
   );
 }
 
+type Persona = "financial" | "operations" | "business_development";
+
+interface ChatHistoryItem {
+  id: string;
+  title: string;
+  agent_type: string;
+  persona: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const PERSONA_OPTIONS: { value: Persona; label: string; icon: typeof Briefcase; description: string }[] = [
+  { value: "financial", label: "Financial", icon: TrendingUp, description: "Revenue, margins, ratios, forecasting" },
+  { value: "operations", label: "Operations", icon: BarChart3, description: "Supply chain, efficiency, quality" },
+  { value: "business_development", label: "Business Dev", icon: Briefcase, description: "Market sizing, CAC/LTV, pipeline" },
+];
+
+function exportChatAsMarkdown(messages: { role: string; parts?: { type: string; text?: string }[] }[]): string {
+  const lines: string[] = ["# Chat Export\n"];
+  for (const msg of messages) {
+    const textParts = (msg.parts ?? []).filter((p: { type: string; text?: string }) => p.type === "text");
+    const text = textParts.map((p: { type: string; text?: string }) => p.text ?? "").join("");
+    if (!text) continue;
+    const cleaned = text
+      .replace(/<!-- THINKING_START -->[\s\S]*?<!-- THINKING_END -->/g, "")
+      .replace(/<!-- VISUALIZATION:[\s\S]*? -->/g, "")
+      .replace(/<!-- CITATIONS_JSON:[\s\S]*? -->/g, "")
+      .trim();
+    if (!cleaned) continue;
+    lines.push(`## ${msg.role === "user" ? "You" : "Assistant"}\n`);
+    lines.push(cleaned);
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
 export function AnalystChat() {
   const [input, setInput] = useState("");
   const [panelOpen, setPanelOpen] = useState(true);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [persona, setPersona] = useState<Persona | null>(null);
+  const [chatId, setChatId] = useState<string | null>(null);
+  const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
   const [selectedSources, setSelectedSources] = useState<SelectedDataSource[]>(
     () => {
       if (typeof window === "undefined") return [];
@@ -591,6 +638,57 @@ export function AnalystChat() {
       });
     },
   });
+
+  const loadChatHistory = useCallback(async () => {
+    try {
+      const res = await fetch("/api/chat-history?agentType=analyst");
+      if (res.ok) {
+        const data = await res.json();
+        setChatHistory(data);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const loadChat = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/chat-history/${id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setChatId(data.id);
+        setPersona(data.persona || null);
+        if (Array.isArray(data.messages) && data.messages.length > 0) {
+          setMessages(data.messages);
+        }
+        setHistoryOpen(false);
+      }
+    } catch {
+      toast.error("Failed to load chat");
+    }
+  }, [setMessages]);
+
+  const startNewChat = useCallback(() => {
+    setChatId(null);
+    setMessages([]);
+    localStorage.removeItem(ANALYST_STORAGE_KEY);
+    setHistoryOpen(false);
+  }, [setMessages]);
+
+  const handleExport = useCallback(() => {
+    const md = exportChatAsMarkdown(messages as { role: string; parts?: { type: string; text?: string }[] }[]);
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `chat-export-${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [messages]);
+
+  useEffect(() => {
+    if (historyOpen) loadChatHistory();
+  }, [historyOpen, loadChatHistory]);
 
   const isLoading = status === "streaming" || status === "submitted";
 
@@ -798,7 +896,7 @@ export function AnalystChat() {
 
           sendMessage(
             { text: `${fileLabel}${input.trim()}` },
-            { body: { dataSourceIds, dataSourceContexts, attachments: attachmentsMeta } },
+            { body: { dataSourceIds, dataSourceContexts, attachments: attachmentsMeta, persona, chatId } },
           );
           setInput("");
           setAttachedFiles([]);
@@ -808,12 +906,12 @@ export function AnalystChat() {
       } else {
         sendMessage(
           { text: input.trim() },
-          { body: { dataSourceIds, dataSourceContexts } },
+          { body: { dataSourceIds, dataSourceContexts, persona, chatId } },
         );
         setInput("");
       }
     },
-    [input, attachedFiles, isLoading, isUploading, sendMessage, selectedSources, uploadFilesToS3],
+    [input, attachedFiles, isLoading, isUploading, sendMessage, selectedSources, uploadFilesToS3, persona, chatId],
   );
 
   const onKeyDown = useCallback(
@@ -854,6 +952,48 @@ export function AnalystChat() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            {/* Persona selector */}
+            <div className="flex items-center gap-1 mr-2">
+              {PERSONA_OPTIONS.map((opt) => {
+                const Icon = opt.icon;
+                const isActive = persona === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => setPersona(isActive ? null : opt.value)}
+                    title={`${opt.label}: ${opt.description}`}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors",
+                      isActive
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    <span className="hidden lg:inline">{opt.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground"
+              onClick={() => setHistoryOpen((o) => !o)}
+              title="Chat history"
+            >
+              <History className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground"
+              onClick={handleExport}
+              title="Export chat as Markdown"
+              disabled={messages.length === 0}
+            >
+              <Download className="h-4 w-4" />
+            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -1132,6 +1272,45 @@ export function AnalystChat() {
           </div>
         </form>
       </div>
+
+      {/* Chat history sidebar */}
+      {historyOpen && (
+        <div className="w-72 flex-shrink-0 border-l border-border bg-card flex flex-col">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              <MessageSquare className="h-4 w-4" />
+              Chat History
+            </h2>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={startNewChat} title="New chat">
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {chatHistory.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">No saved chats</p>
+            ) : (
+              <div className="divide-y divide-border">
+                {chatHistory.map((chat) => (
+                  <button
+                    key={chat.id}
+                    onClick={() => loadChat(chat.id)}
+                    className={cn(
+                      "w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors",
+                      chatId === chat.id && "bg-muted/70",
+                    )}
+                  >
+                    <p className="text-sm font-medium truncate">{chat.title}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {chat.persona && <span className="capitalize">{chat.persona.replace("_", " ")} · </span>}
+                      {new Date(chat.updated_at).toLocaleDateString()}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Right panel - Data Sources */}
       {panelOpen && (

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAnalystAgent } from "@/lib/agents/analyst-agent";
-import type { DataSourceContext } from "@/lib/agents/analyst-agent";
+import type { DataSourceContext, Persona, DimensionsLookupFn } from "@/lib/agents/analyst-agent";
 import { requireAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createConnector } from "@/lib/connectors";
@@ -22,6 +22,8 @@ export async function POST(req: NextRequest) {
     const dataSourceContexts: DataSourceContext[] =
       body.dataSourceContexts ?? [];
     const attachments: ChatAttachment[] = Array.isArray(body.attachments) ? body.attachments : [];
+    const persona: Persona | null = body.persona ?? null;
+    const chatId: string | null = body.chatId ?? null;
 
     let attachmentContext = "";
     if (attachments.length > 0) {
@@ -116,14 +118,47 @@ export async function POST(req: NextRequest) {
       }
     };
 
+    const dimensionsLookupFn: DimensionsLookupFn = async (dataSourceId, schema, table) => {
+      const { data, error } = await supabase
+        .from("table_dimensions")
+        .select("dimensions")
+        .eq("data_source_id", dataSourceId)
+        .eq("schema_name", schema)
+        .eq("table_name", table)
+        .single();
+
+      if (error || !data) {
+        return { dimensions: null, error: "No dimensions found. Try refreshing dimensions for this table." };
+      }
+      return { dimensions: data.dimensions as Record<string, { type: string; uniqueValues?: string[]; sampleValues?: string[]; nullPercentage?: number }> };
+    };
+
     const eventStream = await agent.streamEvents(
       {
         messages,
         dataSources: dataSourceContexts,
         queryFn,
+        persona,
+        dimensionsLookupFn,
       },
       { version: "v2", recursionLimit: 50 },
     );
+
+    // Save chat history asynchronously
+    if (chatId) {
+      const allMessages = body.messages ?? [];
+      supabase
+        .from("chat_history")
+        .upsert({
+          id: chatId,
+          user_id: authResult.user.id,
+          agent_type: "analyst",
+          title: allMessages[0]?.content?.slice(0, 100) || "Untitled Chat",
+          messages: allMessages,
+          persona,
+        })
+        .then(() => {});
+    }
 
     return createUIMessageStreamResponse({
       stream: toUIMessageStream(eventStream),

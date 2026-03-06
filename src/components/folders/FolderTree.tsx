@@ -16,6 +16,7 @@ import {
   Bell,
   Plus,
   MoreHorizontal,
+  Pencil,
   Trash2,
   Users,
 } from "lucide-react";
@@ -40,6 +41,7 @@ interface FolderTreeProps {
   folders: FolderNode[];
   collapsed: boolean;
   onCreateFolder: (parentId: string | null) => void;
+  onRenameFolder: (folderId: string) => void;
   onDeleteFolder: (folderId: string) => void;
   onManageAccess: (folderId: string) => void;
 }
@@ -58,6 +60,7 @@ function FolderNodeItem({
   depth,
   collapsed: sidebarCollapsed,
   onCreateFolder,
+  onRenameFolder,
   onDeleteFolder,
   onManageAccess,
 }: {
@@ -65,6 +68,7 @@ function FolderNodeItem({
   depth: number;
   collapsed: boolean;
   onCreateFolder: (parentId: string | null) => void;
+  onRenameFolder: (folderId: string) => void;
   onDeleteFolder: (folderId: string) => void;
   onManageAccess: (folderId: string) => void;
 }) {
@@ -133,6 +137,10 @@ function FolderNodeItem({
               <Plus className="mr-2 h-4 w-4" />
               New Sub-Folder
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onRenameFolder(node.id)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Rename
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onManageAccess(node.id)}>
               <Users className="mr-2 h-4 w-4" />
               Manage Access
@@ -180,6 +188,7 @@ function FolderNodeItem({
               depth={depth + 1}
               collapsed={sidebarCollapsed}
               onCreateFolder={onCreateFolder}
+              onRenameFolder={onRenameFolder}
               onDeleteFolder={onDeleteFolder}
               onManageAccess={onManageAccess}
             />
@@ -194,6 +203,7 @@ export function FolderTree({
   folders,
   collapsed,
   onCreateFolder,
+  onRenameFolder,
   onDeleteFolder,
   onManageAccess,
 }: FolderTreeProps) {
@@ -208,6 +218,7 @@ export function FolderTree({
           depth={0}
           collapsed={collapsed}
           onCreateFolder={onCreateFolder}
+          onRenameFolder={onRenameFolder}
           onDeleteFolder={onDeleteFolder}
           onManageAccess={onManageAccess}
         />

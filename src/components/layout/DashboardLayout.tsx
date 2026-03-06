@@ -10,6 +10,8 @@ import {
   PanelLeftOpen,
   MessageSquare,
   Loader2,
+  UserCircle,
+  ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -25,6 +27,7 @@ import {
 } from "@/components/ui/tooltip";
 import { FolderTree, type FolderNode } from "@/components/folders/FolderTree";
 import { CreateFolderDialog } from "@/components/folders/CreateFolderDialog";
+import { RenameFolderDialog } from "@/components/folders/RenameFolderDialog";
 import { ManageAccessDialog } from "@/components/folders/ManageAccessDialog";
 import {
   AlertDialog,
@@ -71,6 +74,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const [accessDialogOpen, setAccessDialogOpen] = useState(false);
   const [accessFolderId, setAccessFolderId] = useState("");
   const [accessFolderName, setAccessFolderName] = useState("");
+
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renameFolderId, setRenameFolderId] = useState("");
+  const [renameFolderName, setRenameFolderName] = useState("");
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteFolderId, setDeleteFolderId] = useState("");
@@ -130,6 +137,21 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     setAccessDialogOpen(true);
   };
 
+  const handleRenameFolder = (folderId: string) => {
+    const findFolder = (nodes: FolderNode[]): FolderNode | undefined => {
+      for (const n of nodes) {
+        if (n.id === folderId) return n;
+        const found = findFolder(n.children);
+        if (found) return found;
+      }
+      return undefined;
+    };
+    const folder = findFolder(folders);
+    setRenameFolderId(folderId);
+    setRenameFolderName(folder?.name ?? "");
+    setRenameDialogOpen(true);
+  };
+
   const handleDeleteFolder = (folderId: string) => {
     setDeleteFolderId(folderId);
     setDeleteDialogOpen(true);
@@ -156,6 +178,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   const isAssistantActive =
     pathname === "/assistant" || pathname.startsWith("/assistant/");
+  const isProfileActive = pathname === "/profile";
+  const isAdminActive = pathname.startsWith("/admin");
 
   return (
     <ProtectedRoute>
@@ -201,6 +225,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                   folders={folders}
                   collapsed={collapsed}
                   onCreateFolder={handleCreateFolder}
+                  onRenameFolder={handleRenameFolder}
                   onDeleteFolder={handleDeleteFolder}
                   onManageAccess={handleManageAccess}
                 />
@@ -208,32 +233,38 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
               {!collapsed && <Separator className="my-2" />}
 
-              {(() => {
+              {[
+                { href: "/assistant", label: "Assistant", icon: MessageSquare, active: isAssistantActive },
+                { href: "/profile", label: "Profile", icon: UserCircle, active: isProfileActive },
+                ...(user?.isSuperadmin ? [{ href: "/admin/users", label: "User Management", icon: ShieldCheck, active: isAdminActive }] : []),
+              ].map((item) => {
+                const Icon = item.icon;
                 const link = (
                   <Link
-                    href="/assistant"
+                    key={item.href}
+                    href={item.href}
                     className={cn(
                       "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                      isAssistantActive
+                      item.active
                         ? "bg-sidebar-accent text-sidebar-accent-foreground"
                         : "text-sidebar-foreground hover:bg-sidebar-accent/50",
                       collapsed && "justify-center px-0",
                     )}
                   >
-                    <MessageSquare className="h-4 w-4 shrink-0" />
-                    {!collapsed && "Assistant"}
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {!collapsed && item.label}
                   </Link>
                 );
                 if (collapsed) {
                   return (
-                    <Tooltip>
+                    <Tooltip key={item.href}>
                       <TooltipTrigger asChild>{link}</TooltipTrigger>
-                      <TooltipContent side="right">Assistant</TooltipContent>
+                      <TooltipContent side="right">{item.label}</TooltipContent>
                     </Tooltip>
                   );
                 }
                 return link;
-              })()}
+              })}
             </nav>
 
             <div className="px-2 pb-1">
@@ -311,6 +342,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         onOpenChange={setCreateDialogOpen}
         parentId={createParentId}
         onCreated={fetchFolders}
+      />
+
+      <RenameFolderDialog
+        open={renameDialogOpen}
+        onOpenChange={setRenameDialogOpen}
+        folderId={renameFolderId}
+        currentName={renameFolderName}
+        onRenamed={fetchFolders}
       />
 
       <ManageAccessDialog
