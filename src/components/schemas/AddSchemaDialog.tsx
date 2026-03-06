@@ -49,6 +49,7 @@ interface AddSchemaDialogProps {
   onOpenChange: (open: boolean) => void;
   uploading: boolean;
   onUploadClick: () => void;
+  folderId?: string;
 }
 
 export function AddSchemaDialog({
@@ -56,6 +57,7 @@ export function AddSchemaDialog({
   onOpenChange,
   uploading,
   onUploadClick,
+  folderId,
 }: AddSchemaDialogProps) {
   const router = useRouter();
   const { addSchema } = useSchemaStore();
@@ -154,7 +156,7 @@ export function AddSchemaDialog({
         fields: Array.isArray(data?.fields) ? data.fields : [],
         createdAt: new Date().toISOString(),
       };
-      const created = await addSchema(schema);
+      const created = await addSchema(schema, folderId);
       onOpenChange(false);
       resetDialogMode();
       router.push(`/schemas/${created.id}`);
@@ -180,7 +182,7 @@ export function AddSchemaDialog({
         fields,
         createdAt: new Date().toISOString(),
       };
-      const created = await addSchema(schema);
+      const created = await addSchema(schema, folderId);
       onOpenChange(false);
       resetDialogMode();
       router.push(`/schemas/${created.id}`);
@@ -248,7 +250,7 @@ export function AddSchemaDialog({
         fields,
         createdAt: new Date().toISOString(),
       };
-      const created = await addSchema(schema);
+      const created = await addSchema(schema, folderId);
       onOpenChange(false);
       resetDialogMode();
       router.push(`/schemas/${created.id}`);

@@ -1,6 +1,6 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import type { DataSourceContext } from "../analyst-agent/tools";
+import type { DataSourceContext, DimensionsLookupFn } from "../analyst-agent/tools";
 
 const chartConfigSchema = z.object({
   xKey: z.string().optional().describe("Key for X axis (line, bar, scatter, waterfall)"),
@@ -28,6 +28,7 @@ function wrapDelimiter(tag: string, payload: object): string {
 export function createDashboardTools(
   dataSources: DataSourceContext[],
   queryFn: (dataSourceId: string, sql: string) => Promise<{ rows: Record<string, unknown>[]; rowCount: number; error?: string }>,
+  dimensionsLookupFn?: DimensionsLookupFn,
 ) {
   const queryDatabaseTool = tool(
     async (input) => {
@@ -141,5 +142,34 @@ export function createDashboardTools(
     },
   );
 
-  return [queryDatabaseTool, listTablesTool, addPanelTool, updatePanelTool, removePanelTool];
+  const dataLookupTool = tool(
+    async (input) => {
+      if (!dimensionsLookupFn) {
+        return JSON.stringify({ error: "Dimensions lookup not available." });
+      }
+      const ds = dataSources.find((d) => d.id === input.dataSourceId);
+      if (!ds) {
+        return JSON.stringify({ error: `Data source "${input.dataSourceId}" not found.` });
+      }
+      try {
+        const result = await dimensionsLookupFn(input.dataSourceId, input.schema, input.table);
+        if (result.error) return JSON.stringify({ error: result.error });
+        if (!result.dimensions) return JSON.stringify({ error: "No dimensions found for this table." });
+        return JSON.stringify(result.dimensions, null, 2);
+      } catch (err: unknown) {
+        return JSON.stringify({ error: (err as Error).message });
+      }
+    },
+    {
+      name: "data_lookup",
+      description: `Look up table dimensions — column metadata including data types, unique values, sample values, and null percentages. Use this to understand a table's data distribution before writing queries.`,
+      schema: z.object({
+        dataSourceId: z.string().describe("The data source ID"),
+        schema: z.string().describe("The schema name (e.g. 'public')"),
+        table: z.string().describe("The table name"),
+      }),
+    },
+  );
+
+  return [queryDatabaseTool, listTablesTool, dataLookupTool, addPanelTool, updatePanelTool, removePanelTool];
 }

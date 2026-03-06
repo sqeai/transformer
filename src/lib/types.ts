@@ -26,6 +26,7 @@ export interface SchemaField {
 export interface FinalSchema {
   id: string;
   name: string;
+  folderId?: string | null;
   fields: SchemaField[];
   createdAt: string;
   updatedAt?: string;

@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
     const attachments: ChatAttachment[] = Array.isArray(body.attachments) ? body.attachments : [];
     const persona: Persona | null = body.persona ?? null;
     const chatId: string | null = body.chatId ?? null;
+    const companyContext: string = body.companyContext ?? "";
 
     let attachmentContext = "";
     if (attachments.length > 0) {
@@ -140,6 +141,7 @@ export async function POST(req: NextRequest) {
         queryFn,
         persona,
         dimensionsLookupFn,
+        companyContext,
       },
       { version: "v2", recursionLimit: 50 },
     );

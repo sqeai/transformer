@@ -15,7 +15,7 @@ export async function GET(
 
   const { data: schema, error: schemaError } = await supabase!
     .from("schemas")
-    .select("id, name, created_at, updated_at, user_id")
+    .select("id, name, folder_id, created_at, updated_at, user_id")
     .eq("id", id)
     .single();
 
@@ -68,6 +68,7 @@ export async function GET(
     schema: {
       id: schema.id,
       name: schema.name,
+      folderId: (schema as Record<string, unknown>).folder_id ?? null,
       createdAt: schema.created_at ?? new Date().toISOString(),
       updatedAt: schema.updated_at ?? schema.created_at ?? new Date().toISOString(),
       creator,

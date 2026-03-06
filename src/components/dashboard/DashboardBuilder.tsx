@@ -40,15 +40,14 @@ import {
 } from "@/components/ui/collapsible";
 import { toast } from "sonner";
 import {
-  DataSourcePanel,
-  type SelectedDataSource,
-} from "../analyst/DataSourcePanel";
+  ContextSelector,
+  type ContextSelection,
+} from "./ContextSelector";
 import { ChartPanel } from "./ChartPanel";
 import type { DashboardPanel } from "./types";
 
 const DASHBOARD_STORAGE_KEY = "dashboard-chat-history";
 const DASHBOARD_PANELS_KEY = "dashboard-panels";
-const DASHBOARD_SOURCES_KEY = "dashboard-selected-sources";
 const PANEL_REGEX = /<!-- DASHBOARD_PANEL:(.*?) -->/g;
 const THINKING_START = "<!-- THINKING_START -->";
 const THINKING_END = "<!-- THINKING_END -->";
@@ -305,17 +304,8 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
       return [];
     }
   });
-  const [selectedSources, setSelectedSources] = useState<SelectedDataSource[]>(
-    () => {
-      if (typeof window === "undefined") return [];
-      try {
-        const stored = localStorage.getItem(DASHBOARD_SOURCES_KEY);
-        return stored ? JSON.parse(stored) : [];
-      } catch {
-        return [];
-      }
-    },
-  );
+  const [contextSelection, setContextSelection] =
+    useState<ContextSelection | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const appliedActions = useRef<Set<string>>(new Set());
@@ -361,10 +351,6 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
   useEffect(() => {
     localStorage.setItem(DASHBOARD_PANELS_KEY, JSON.stringify(panels));
   }, [panels]);
-
-  useEffect(() => {
-    localStorage.setItem(DASHBOARD_SOURCES_KEY, JSON.stringify(selectedSources));
-  }, [selectedSources]);
 
   useEffect(() => {
     if (!dashboardId) return;
@@ -471,8 +457,9 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
       e.preventDefault();
       if (!input.trim() || isLoading) return;
 
-      const dataSourceIds = selectedSources.map((s) => s.id);
-      const dataSourceContexts = selectedSources.map((s) => ({
+      const dataSources = contextSelection?.dataSources ?? [];
+      const dataSourceIds = dataSources.map((s) => s.id);
+      const dataSourceContexts = dataSources.map((s) => ({
         id: s.id,
         name: s.name,
         type: s.type,
@@ -491,11 +478,18 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
 
       sendMessage(
         { text: input.trim() },
-        { body: { dataSourceIds, dataSourceContexts, currentPanels } },
+        {
+          body: {
+            dataSourceIds,
+            dataSourceContexts,
+            currentPanels,
+            companyContext: contextSelection?.companyContext ?? "",
+          },
+        },
       );
       setInput("");
     },
-    [input, isLoading, sendMessage, selectedSources, panels],
+    [input, isLoading, sendMessage, contextSelection, panels],
   );
 
   const onKeyDown = useCallback(
@@ -537,8 +531,8 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
               <h1 className="text-base font-semibold">Dashboard Builder</h1>
               <p className="text-xs text-muted-foreground">
                 {panels.length > 0
-                  ? `${panels.length} panel${panels.length > 1 ? "s" : ""}`
-                  : "Describe your dashboard to get started"}
+                  ? `${panels.length} panel${panels.length > 1 ? "s" : ""}${contextSelection && contextSelection.contexts.length > 0 ? ` · ${contextSelection.contexts.length} context${contextSelection.contexts.length > 1 ? "s" : ""}` : ""}`
+                  : "Select contexts from the right panel to get started"}
               </p>
             </div>
           </div>
@@ -571,7 +565,7 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
               size="icon"
               className="h-8 w-8 text-muted-foreground"
               onClick={() => setPanelOpen((o) => !o)}
-              title={panelOpen ? "Hide databases" : "Show databases"}
+              title={panelOpen ? "Hide contexts" : "Show contexts"}
             >
               {panelOpen ? (
                 <PanelRightClose className="h-4 w-4" />
@@ -801,13 +795,10 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
         </div>
       </div>
 
-      {/* Right panel - Data Sources */}
+      {/* Right panel - Context Selector */}
       {panelOpen && (
-        <div className="w-64 flex-shrink-0">
-          <DataSourcePanel
-            selectedSources={selectedSources}
-            onSelectionChange={setSelectedSources}
-          />
+        <div className="w-72 flex-shrink-0">
+          <ContextSelector onSelectionChange={setContextSelection} />
         </div>
       )}
     </div>

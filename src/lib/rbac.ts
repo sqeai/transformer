@@ -203,7 +203,34 @@ export async function getFolderMembers(
 }
 
 /**
- * Get inherited members from ancestor folders.
+ * Get all descendant folder IDs (direct children, grandchildren, etc.).
+ */
+async function getFolderDescendants(folderId: string): Promise<string[]> {
+  const supabase = createAdminClient();
+  const descendants: string[] = [];
+  const queue = [folderId];
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+    const { data, error } = await supabase
+      .from("folders")
+      .select("id")
+      .eq("parent_id", currentId);
+
+    if (error || !data) continue;
+    for (const child of data) {
+      descendants.push(child.id);
+      queue.push(child.id);
+    }
+  }
+
+  return descendants;
+}
+
+/**
+ * Get members from subfolder (descendant) folders.
+ * A parent folder's members have access to all subfolders,
+ * so this shows which additional members exist in child folders.
  */
 export async function getInheritedMembers(
   folderId: string,
@@ -217,8 +244,11 @@ export async function getInheritedMembers(
     fromFolderName: string;
   }[]
 > {
-  const ancestors = await getFolderAncestors(folderId);
+  const descendants = await getFolderDescendants(folderId);
   const supabase = createAdminClient();
+  const directMembers = await getFolderMembers(folderId);
+  const directUserIds = new Set(directMembers.map((m) => m.userId));
+
   const inherited: {
     userId: string;
     email: string;
@@ -228,19 +258,22 @@ export async function getInheritedMembers(
     fromFolderName: string;
   }[] = [];
 
-  for (const ancestorId of ancestors) {
+  for (const descendantId of descendants) {
     const { data: folder } = await supabase
       .from("folders")
       .select("name")
-      .eq("id", ancestorId)
+      .eq("id", descendantId)
       .maybeSingle();
 
-    const members = await getFolderMembers(ancestorId);
+    const members = await getFolderMembers(descendantId);
     for (const member of members) {
-      if (!inherited.some((m) => m.userId === member.userId)) {
+      if (
+        !directUserIds.has(member.userId) &&
+        !inherited.some((m) => m.userId === member.userId)
+      ) {
         inherited.push({
           ...member,
-          fromFolderId: ancestorId,
+          fromFolderId: descendantId,
           fromFolderName: folder?.name ?? "",
         });
       }

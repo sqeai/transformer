@@ -166,8 +166,8 @@ export default function SchemaDetailPage() {
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <FileStack className="h-12 w-12 text-muted-foreground/30 mb-4" />
           <p className="text-muted-foreground text-lg">Schema not found.</p>
-          <Button variant="outline" className="mt-4" onClick={() => router.push("/schemas")}>
-            Back to Schemas
+          <Button variant="outline" className="mt-4" onClick={() => router.push("/")}>
+            Back to Home
           </Button>
         </div>
       </DashboardLayout>
@@ -207,9 +207,11 @@ export default function SchemaDetailPage() {
         files,
         selectedFiles: [],
       });
-      router.push(`/datasets/new?schemaId=${schemaId}`);
+      const params = new URLSearchParams({ schemaId });
+      if (schema?.folderId) params.set("folderId", schema.folderId);
+      router.push(`/datasets/new?${params.toString()}`);
     },
-    [resetDatasetWorkflow, setDatasetWorkflow, router],
+    [resetDatasetWorkflow, setDatasetWorkflow, router, schema],
   );
 
   const handleGrant = async () => {
@@ -261,7 +263,7 @@ export default function SchemaDetailPage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => requestLeave(() => router.push("/schemas"))}>
+            <Button variant="ghost" size="icon" onClick={() => requestLeave(() => router.push(schema.folderId ? `/folders/${schema.folderId}/schemas` : "/"))}>
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div>
@@ -454,9 +456,10 @@ export default function SchemaDetailPage() {
               onClick={async () => {
                 try {
                   setDeleting(true);
+                  const backUrl = schema.folderId ? `/folders/${schema.folderId}/schemas` : "/";
                   await deleteSchema(id);
                   setShowDeleteConfirm(false);
-                  router.push("/schemas");
+                  router.push(backUrl);
                 } catch (err) {
                   alert(err instanceof Error ? err.message : "Delete failed");
                 } finally {
