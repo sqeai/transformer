@@ -9,7 +9,7 @@ export default function DashboardsRedirect() {
   const folderId = params.id as string;
 
   useEffect(() => {
-    router.replace(`/folders/${folderId}/panels`);
+    router.replace(`/folders/${folderId}`);
   }, [folderId, router]);
 
   return null;

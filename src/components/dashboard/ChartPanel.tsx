@@ -18,7 +18,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { Settings2, GripVertical, Trash2 } from "lucide-react";
+import { Settings2, GripVertical, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { DashboardPanel } from "./types";
@@ -43,6 +43,7 @@ interface ChartPanelProps {
   onRemove: (id: string) => void;
   onEdit: (id: string) => void;
   expanded?: boolean;
+  isLoading?: boolean;
 }
 
 function WaterfallChart({
@@ -101,11 +102,20 @@ function WaterfallChart({
   );
 }
 
-export function ChartPanel({ panel, onRemove, onEdit, expanded }: ChartPanelProps) {
+export function ChartPanel({ panel, onRemove, onEdit, expanded, isLoading }: ChartPanelProps) {
   const { chartType, data, config, title } = panel;
   const colors = config.colors ?? DEFAULT_COLORS;
 
   const renderChart = () => {
+    if (isLoading) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span>Loading data...</span>
+        </div>
+      );
+    }
+
     if (!data || data.length === 0) {
       return (
         <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
