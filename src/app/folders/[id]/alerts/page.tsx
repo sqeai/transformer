@@ -2,7 +2,6 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -142,8 +141,7 @@ export default function FolderAlertsPage() {
   };
 
   return (
-    <DashboardLayout>
-      <div className="space-y-6">
+    <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Button
@@ -315,6 +313,6 @@ export default function FolderAlertsPage() {
           </div>
         )}
       </div>
-    </DashboardLayout>
+    </div>
   );
 }

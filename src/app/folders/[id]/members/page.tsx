@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
-import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -136,8 +135,7 @@ export default function FolderMembersPage() {
   };
 
   return (
-    <DashboardLayout>
-      <div className="space-y-6">
+    <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <Shield className="h-6 w-6" />
@@ -260,10 +258,10 @@ export default function FolderMembersPage() {
                 <CardHeader>
                   <CardTitle className="text-base flex items-center gap-2">
                     <Users className="h-4 w-4" />
-                    Inherited Members ({inheritedMembers.length})
+                    Sub-Folder Members ({inheritedMembers.length})
                   </CardTitle>
                   <CardDescription>
-                    These members have access through parent folders
+                    These members exist in sub-folders
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -278,7 +276,7 @@ export default function FolderMembersPage() {
                             {member.name || member.email}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {member.email} &middot; from{" "}
+                            {member.email} &middot; in{" "}
                             {member.fromFolderName}
                           </p>
                         </div>
@@ -294,6 +292,6 @@ export default function FolderMembersPage() {
           </div>
         )}
       </div>
-    </DashboardLayout>
+    </div>
   );
 }

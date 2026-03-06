@@ -77,7 +77,7 @@ export default function Home() {
                 variant="ghost"
                 className="text-slate-100 hover:bg-slate-800"
               >
-                <Link href="/datasets">
+                <Link href="/folders">
                   <UserCircle2 className="h-5 w-5" />
                   {`Hi ${firstName}`}
                 </Link>
@@ -119,7 +119,7 @@ export default function Home() {
               variant="outline"
               className="border-slate-500 bg-transparent text-slate-100 hover:bg-slate-800"
             >
-              <Link href="/datasets">Open Workspace</Link>
+              <Link href="/folders">Open Workspace</Link>
             </Button>
           </div>
 

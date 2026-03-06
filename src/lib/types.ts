@@ -67,6 +67,7 @@ export interface DatasetLog {
 export interface DatasetSummary {
   id: string;
   schemaId: string;
+  folderId?: string | null;
   name: string;
   rowCount: number;
   state: DatasetState;
