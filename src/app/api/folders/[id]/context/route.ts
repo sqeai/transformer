@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, requireFolderAccess } from "@/lib/api-auth";
+import { requireFolderAccess } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(
@@ -7,8 +7,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const result = await requireAuth();
-  if (result.error) return result.error;
+  const access = await requireFolderAccess(id, "view_context");
+  if (access.error) return access.error;
 
   const supabase = createAdminClient();
 

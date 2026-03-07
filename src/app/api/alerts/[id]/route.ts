@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/api-auth";
+import { requireAuth, requireFolderAccess } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 interface RouteParams {
@@ -12,6 +12,20 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
   const { id } = await params;
   const supabase = createAdminClient();
+
+  const { data: alert } = await supabase
+    .from("alerts")
+    .select("folder_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!alert) {
+    return NextResponse.json({ error: "Alert not found" }, { status: 404 });
+  }
+
+  const access = await requireFolderAccess(alert.folder_id, "edit_alerts");
+  if (access.error) return access.error;
+
   const body = await req.json();
 
   const updates: Record<string, unknown> = {};
@@ -36,6 +50,19 @@ export async function DELETE(_req: NextRequest, { params }: RouteParams) {
 
   const { id } = await params;
   const supabase = createAdminClient();
+
+  const { data: alert } = await supabase
+    .from("alerts")
+    .select("folder_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!alert) {
+    return NextResponse.json({ error: "Alert not found" }, { status: 404 });
+  }
+
+  const access = await requireFolderAccess(alert.folder_id, "edit_alerts");
+  if (access.error) return access.error;
 
   const { error } = await supabase.from("alerts").delete().eq("id", id);
   if (error) {

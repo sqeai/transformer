@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/api-auth";
+import { requireAuth, requireFolderAccess } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 interface RouteParams {
@@ -12,6 +12,20 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   const { id: dashboardId } = await params;
   const supabase = createAdminClient();
+
+  const { data: dashboard } = await supabase
+    .from("dashboards")
+    .select("folder_id")
+    .eq("id", dashboardId)
+    .maybeSingle();
+
+  if (!dashboard) {
+    return NextResponse.json({ error: "Dashboard not found" }, { status: 404 });
+  }
+
+  const access = await requireFolderAccess(dashboard.folder_id, "edit_panels");
+  if (access.error) return access.error;
+
   const body = await req.json();
 
   const { data: maxPos } = await supabase
@@ -54,6 +68,20 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
 
   const { id: dashboardId } = await params;
   const supabase = createAdminClient();
+
+  const { data: dashboard } = await supabase
+    .from("dashboards")
+    .select("folder_id")
+    .eq("id", dashboardId)
+    .maybeSingle();
+
+  if (!dashboard) {
+    return NextResponse.json({ error: "Dashboard not found" }, { status: 404 });
+  }
+
+  const access = await requireFolderAccess(dashboard.folder_id, "edit_panels");
+  if (access.error) return access.error;
+
   const body = await req.json();
 
   if (!Array.isArray(body.panels)) {

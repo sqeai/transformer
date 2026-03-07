@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getUserAccessibleFolderIds, isSuperadmin } from "@/lib/rbac";
+import { PermissionsService } from "@/lib/permissions";
 
 /**
  * GET /api/contexts?folderIds=id1,id2
@@ -21,12 +21,12 @@ export async function GET(request: NextRequest) {
   if (folderIdsParam) {
     folderIds = folderIdsParam.split(",").filter(Boolean);
   } else {
-    const isAdmin = await isSuperadmin(userId);
+    const isAdmin = await PermissionsService.isSuperadmin(userId);
     if (isAdmin) {
       const { data } = await supabase.from("folders").select("id");
       folderIds = (data ?? []).map((f) => f.id);
     } else {
-      folderIds = await getUserAccessibleFolderIds(userId);
+      folderIds = await PermissionsService.getAccessibleFolderIds(userId);
     }
   }
 

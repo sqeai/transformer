@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/api-auth";
+import { requireAuth, requireFolderAccess } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 interface RouteParams {
@@ -23,6 +23,10 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: "Panel not found" }, { status: 404 });
   }
 
+  const folderId = (data.dashboards as unknown as { folder_id: string })?.folder_id;
+  const access = await requireFolderAccess(folderId, "view_panels");
+  if (access.error) return access.error;
+
   return NextResponse.json(data);
 }
 
@@ -32,6 +36,21 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
   const { panelId } = await params;
   const supabase = createAdminClient();
+
+  const { data: panel } = await supabase
+    .from("dashboard_panels")
+    .select("dashboard_id, dashboards(folder_id)")
+    .eq("id", panelId)
+    .maybeSingle();
+
+  if (!panel) {
+    return NextResponse.json({ error: "Panel not found" }, { status: 404 });
+  }
+
+  const folderId = (panel.dashboards as unknown as { folder_id: string })?.folder_id;
+  const access = await requireFolderAccess(folderId, "edit_panels");
+  if (access.error) return access.error;
+
   const body = await req.json();
 
   const updates: Record<string, unknown> = {};
@@ -69,6 +88,20 @@ export async function DELETE(_req: NextRequest, { params }: RouteParams) {
 
   const { panelId } = await params;
   const supabase = createAdminClient();
+
+  const { data: panel } = await supabase
+    .from("dashboard_panels")
+    .select("dashboard_id, dashboards(folder_id)")
+    .eq("id", panelId)
+    .maybeSingle();
+
+  if (!panel) {
+    return NextResponse.json({ error: "Panel not found" }, { status: 404 });
+  }
+
+  const folderId = (panel.dashboards as unknown as { folder_id: string })?.folder_id;
+  const access = await requireFolderAccess(folderId, "edit_panels");
+  if (access.error) return access.error;
 
   const { error } = await supabase
     .from("dashboard_panels")

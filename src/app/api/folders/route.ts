@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isSuperadmin, getUserAccessibleFolderIds } from "@/lib/rbac";
+import { PermissionsService } from "@/lib/permissions";
 
 export async function GET() {
   const result = await requireAuth();
@@ -9,7 +9,7 @@ export async function GET() {
 
   const supabase = createAdminClient();
   const userId = result.user.id;
-  const isAdmin = await isSuperadmin(userId);
+  const isAdmin = await PermissionsService.isSuperadmin(userId);
 
   if (isAdmin) {
     const { data, error } = await supabase
@@ -23,7 +23,7 @@ export async function GET() {
     return NextResponse.json({ folders: data ?? [] });
   }
 
-  const accessibleIds = await getUserAccessibleFolderIds(userId);
+  const accessibleIds = await PermissionsService.getAccessibleFolderIds(userId);
   if (accessibleIds.length === 0) {
     return NextResponse.json({ folders: [] });
   }

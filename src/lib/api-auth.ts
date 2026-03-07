@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { canUserAccess, type Permission } from "@/lib/rbac";
+import { PermissionsService, type Permission } from "@/lib/permissions";
 
 export interface AuthUser {
   id: string;
@@ -78,7 +78,7 @@ export async function requireSuperadmin(): Promise<
 
 /**
  * Checks if the authenticated user has a specific permission on a folder.
- * Returns the user or a 403 response.
+ * Uses the PermissionsService which handles role inheritance and superadmin bypass.
  */
 export async function requireFolderAccess(
   folderId: string,
@@ -89,7 +89,11 @@ export async function requireFolderAccess(
   const result = await requireAuth();
   if (result.error) return result;
 
-  const hasAccess = await canUserAccess(result.user.id, folderId, permission);
+  const hasAccess = await PermissionsService.can(
+    result.user.id,
+    folderId,
+    permission,
+  );
   if (!hasAccess) {
     return {
       error: NextResponse.json(

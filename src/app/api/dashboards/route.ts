@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, requireFolderAccess } from "@/lib/api-auth";
+import { requireFolderAccess } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(req: NextRequest) {
-  const authResult = await requireAuth();
-  if (authResult.error) return authResult.error;
-
-  const supabase = createAdminClient();
   const folderId = req.nextUrl.searchParams.get("folderId");
 
   if (!folderId) {
     return NextResponse.json({ error: "folderId required" }, { status: 400 });
   }
 
+  const accessResult = await requireFolderAccess(folderId, "view_panels");
+  if (accessResult.error) return accessResult.error;
+
+  const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("dashboards")
     .select("id, name, created_by, created_at, updated_at")
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "folderId required" }, { status: 400 });
   }
 
-  const accessResult = await requireFolderAccess(folderId, "edit_resources");
+  const accessResult = await requireFolderAccess(folderId, "edit_panels");
   if (accessResult.error) return accessResult.error;
 
   const supabase = createAdminClient();

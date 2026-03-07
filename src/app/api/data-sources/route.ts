@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
     .order("created_at", { ascending: false });
 
   if (folderId) {
-    const access = await requireFolderAccess(folderId, "view_resources");
+    const access = await requireFolderAccess(folderId, "view_data_sources");
     if (access.error) return access.error;
     const folderIds = await getFolderAndDescendantIds(supabase!, folderId);
     query = query.in("folder_id", folderIds);

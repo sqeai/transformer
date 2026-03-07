@@ -77,7 +77,7 @@ export default function LoginPage() {
               <Sparkles className="h-6 w-6 text-primary-foreground" />
             </div>
             <CardTitle className="text-2xl font-bold tracking-tight">
-              Starlight
+              AI Data Cleanser
             </CardTitle>
             <CardDescription className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
               Map raw data to your structure
