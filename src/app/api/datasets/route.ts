@@ -106,6 +106,7 @@ export async function POST(request: NextRequest) {
 
   let body: {
     schemaId?: string;
+    folderId?: string;
     name?: string;
     rows?: Record<string, unknown>[];
     mappingSnapshot?: Record<string, unknown>;
@@ -117,6 +118,7 @@ export async function POST(request: NextRequest) {
   }
 
   const schemaId = typeof body.schemaId === "string" ? body.schemaId.trim() : "";
+  const folderId = typeof body.folderId === "string" ? body.folderId.trim() : "";
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const rows = Array.isArray(body.rows) ? body.rows : [];
   const mappingSnapshot = body.mappingSnapshot && typeof body.mappingSnapshot === "object" ? body.mappingSnapshot : {};
@@ -126,7 +128,7 @@ export async function POST(request: NextRequest) {
 
   const { data: schemaRow, error: schemaError } = await supabase!
     .from("schemas")
-    .select("id")
+    .select("id, folder_id")
     .eq("id", schemaId)
     .single();
   if (schemaError || !schemaRow) {
@@ -145,15 +147,19 @@ export async function POST(request: NextRequest) {
   );
   const normalizedRows = normalizeRowsForStorage(rows, fieldTypeMap);
 
+  const resolvedFolderId = folderId || (schemaRow as Record<string, unknown>).folder_id || null;
+  const insertPayload: Record<string, unknown> = {
+    schema_id: schemaId,
+    name,
+    rows: normalizedRows,
+    row_count: normalizedRows.length,
+    mapping_snapshot: mappingSnapshot,
+  };
+  if (resolvedFolderId) insertPayload.folder_id = resolvedFolderId;
+
   const { data, error } = await supabase!
     .from("datasets")
-    .insert({
-      schema_id: schemaId,
-      name,
-      rows: normalizedRows,
-      row_count: normalizedRows.length,
-      mapping_snapshot: mappingSnapshot,
-    })
+    .insert(insertPayload)
     .select("id, schema_id, name, row_count, state, created_at, updated_at")
     .single();
 
