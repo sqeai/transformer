@@ -3,7 +3,7 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
-  title: "AI Data Cleanser",
+  title: "Starlight",
   description: "Map raw data to intended structure with AI-assisted mapping",
 };
 

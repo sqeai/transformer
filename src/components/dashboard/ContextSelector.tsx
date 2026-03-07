@@ -60,6 +60,28 @@ export interface ContextSelection {
 
 interface ContextSelectorProps {
   onSelectionChange: (selection: ContextSelection) => void;
+  storageKey?: string;
+}
+
+const ANALYST_CONTEXT_STORAGE_KEY = "analyst-selected-context-ids";
+
+function loadSavedContextIds(key: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveContextIds(key: string, ids: Set<string>) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(key, JSON.stringify(Array.from(ids)));
+  } catch {
+    // ignore
+  }
 }
 
 function buildSelection(
@@ -122,10 +144,10 @@ function buildSelection(
   return { contexts: selected, companyContext, dataSources };
 }
 
-export function ContextSelector({ onSelectionChange }: ContextSelectorProps) {
+export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEXT_STORAGE_KEY }: ContextSelectorProps) {
   const [allContexts, setAllContexts] = useState<FolderContext[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(loadSavedContextIds(storageKey)));
   const [expandedContexts, setExpandedContexts] = useState<Set<string>>(
     new Set(),
   );
@@ -156,9 +178,10 @@ export function ContextSelector({ onSelectionChange }: ContextSelectorProps) {
   }, [fetchContexts]);
 
   useEffect(() => {
+    saveContextIds(storageKey, selectedIds);
     const selection = buildSelection(allContexts, selectedIds);
     onSelectionChangeRef.current(selection);
-  }, [allContexts, selectedIds]);
+  }, [allContexts, selectedIds, storageKey]);
 
   const toggleContext = useCallback((folderId: string) => {
     setSelectedIds((prev) => {

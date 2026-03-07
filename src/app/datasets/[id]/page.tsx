@@ -454,7 +454,7 @@ export default function DatasetPage() {
     setExportDialogOpen(true);
   };
 
-  // --- AI Data Cleanser ---
+  // --- Starlight ---
 
   const escapeCsvCell = useCallback((value: unknown): string => {
     const text = String(value ?? "");
@@ -513,10 +513,10 @@ export default function DatasetPage() {
         const job = Array.isArray(statusData.jobs) ? statusData.jobs[0] : null;
         if (!job) continue;
         if (job.status === "completed") { nextResult = (job.result ?? null) as AiCleanseJobResult | null; break; }
-        if (job.status === "failed") throw new Error(String(job.error ?? "AI Data Cleanser job failed"));
+        if (job.status === "failed") throw new Error(String(job.error ?? "Starlight job failed"));
       }
 
-      if (!nextResult) throw new Error("Timed out waiting for AI Data Cleanser");
+      if (!nextResult) throw new Error("Timed out waiting for Starlight");
       const finalResult = nextResult;
 
       const nextRows = Array.isArray(finalResult.transformedRows) ? finalResult.transformedRows : [];
@@ -538,12 +538,12 @@ export default function DatasetPage() {
       const patchData = await patchRes.json().catch(() => ({}));
       if (!patchRes.ok) throw new Error(patchData.error ?? "Failed to save cleansed dataset");
 
-      toast.success(`AI Data Cleanser updated dataset (${nextRows.length} rows)`);
+      toast.success(`Starlight updated dataset (${nextRows.length} rows)`);
       setAiCleanserDialogOpen(false);
       setAiCleanserInstructions("");
       await fetchDataset();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to run AI Data Cleanser");
+      toast.error(error instanceof Error ? error.message : "Failed to run Starlight");
     } finally { setAiCleanserRunning(false); }
   };
 
@@ -771,7 +771,7 @@ export default function DatasetPage() {
                     disabled={aiCleanserRunning || dataset.rows.length === 0}
                   >
                     {aiCleanserRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                    AI Data Cleanser
+                    Starlight
                   </Button>
                 </div>
               )}

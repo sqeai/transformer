@@ -849,7 +849,7 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
       {/* Right panel - Context Selector */}
       {panelOpen && (
         <div className="w-72 flex-shrink-0">
-          <ContextSelector onSelectionChange={setContextSelection} />
+          <ContextSelector onSelectionChange={setContextSelection} storageKey="dashboard-selected-context-ids" />
         </div>
       )}
     </div>
