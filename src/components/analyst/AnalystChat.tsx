@@ -9,6 +9,7 @@ import {
   type FormEvent,
   type ComponentPropsWithoutRef,
 } from "react";
+import { useSearchParams } from "next/navigation";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import {
@@ -594,6 +595,7 @@ function exportChatAsMarkdown(messages: { role: string; parts?: { type: string; 
 }
 
 export function AnalystChat() {
+  const searchParams = useSearchParams();
   const [input, setInput] = useState("");
   const [panelOpen, setPanelOpen] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -657,6 +659,13 @@ export function AnalystChat() {
       toast.error("Failed to load chat");
     }
   }, [setMessages]);
+
+  useEffect(() => {
+    const chatParam = searchParams.get("chat");
+    if (chatParam && chatParam !== chatId) {
+      loadChat(chatParam);
+    }
+  }, [searchParams, chatId, loadChat]);
 
   const startNewChat = useCallback(() => {
     setChatId(null);

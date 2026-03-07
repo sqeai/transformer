@@ -12,6 +12,9 @@ import {
   Loader2,
   UserCircle,
   ShieldCheck,
+  ChevronDown,
+  ChevronRight,
+  Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -42,6 +45,16 @@ import {
 import { toast } from "sonner";
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
+const FOLDERS_COLLAPSED_KEY = "sidebar-folders-collapsed";
+
+interface ChatHistoryItem {
+  id: string;
+  title: string;
+  agent_type: string;
+  persona: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 function buildTree(
   flat: { id: string; name: string; parent_id: string | null }[],
@@ -65,8 +78,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+  const [foldersCollapsed, setFoldersCollapsed] = useState(false);
   const [folders, setFolders] = useState<FolderNode[]>([]);
   const [foldersLoading, setFoldersLoading] = useState(true);
+  const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createParentId, setCreateParentId] = useState<string | null>(null);
@@ -84,9 +99,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
-    if (stored !== null) {
-      setCollapsed(stored === "true");
-    }
+    if (stored !== null) setCollapsed(stored === "true");
+    const fStored = localStorage.getItem(FOLDERS_COLLAPSED_KEY);
+    if (fStored !== null) setFoldersCollapsed(fStored === "true");
   }, []);
 
   const fetchFolders = useCallback(async () => {
@@ -103,15 +118,38 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const loadChatHistory = useCallback(async () => {
+    try {
+      const res = await fetch("/api/chat-history?agentType=analyst");
+      if (res.ok) {
+        const data = await res.json();
+        setChatHistory(data);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   useEffect(() => {
     fetchFolders();
-  }, [fetchFolders]);
+    loadChatHistory();
+  }, [fetchFolders, loadChatHistory]);
 
   const toggleCollapsed = () => {
     setCollapsed((c) => {
       const next = !c;
       if (typeof window !== "undefined") {
         localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next));
+      }
+      return next;
+    });
+  };
+
+  const toggleFoldersCollapsed = () => {
+    setFoldersCollapsed((c) => {
+      const next = !c;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(FOLDERS_COLLAPSED_KEY, String(next));
       }
       return next;
     });
@@ -194,136 +232,251 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               collapsed ? "w-16" : "w-64",
             )}
           >
+            {/* Header: Logo + Collapse toggle */}
             <div className="flex h-14 items-center gap-2 border-b border-sidebar-border px-3">
-              <Link
-                href="/folders"
-                className="flex items-center gap-2 font-semibold text-sidebar-foreground min-w-0"
-              >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent">
-                  <Sparkles className="h-5 w-5 text-primary-foreground" />
-                </div>
-                {!collapsed && (
-                  <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent truncate">
-                    AI Data Cleanser
-                  </span>
-                )}
-              </Link>
+              {collapsed ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={toggleCollapsed}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent hover:opacity-80 transition-opacity mx-auto"
+                    >
+                      <PanelLeftOpen className="h-5 w-5 text-primary-foreground" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Expand sidebar</TooltipContent>
+                </Tooltip>
+              ) : (
+                <>
+                  <Link
+                    href="/folders"
+                    className="flex items-center gap-2 font-semibold text-sidebar-foreground min-w-0 flex-1"
+                  >
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent">
+                      <Sparkles className="h-5 w-5 text-primary-foreground" />
+                    </div>
+                    <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent truncate">
+                      Starlight
+                    </span>
+                  </Link>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 text-sidebar-foreground"
+                    onClick={toggleCollapsed}
+                  >
+                    <PanelLeftClose className="h-4 w-4" />
+                  </Button>
+                </>
+              )}
             </div>
 
-            <nav className="flex-1 overflow-y-auto p-2 space-y-1">
-              {!collapsed && (
-                <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Folders
-                </p>
-              )}
-              {foldersLoading ? (
-                <div className="flex justify-center py-4">
-                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                </div>
-              ) : (
-                <FolderTree
-                  folders={folders}
-                  collapsed={collapsed}
-                  onCreateFolder={handleCreateFolder}
-                  onRenameFolder={handleRenameFolder}
-                  onDeleteFolder={handleDeleteFolder}
-                  onManageAccess={handleManageAccess}
-                />
-              )}
-
-              {!collapsed && <Separator className="my-2" />}
-
-              {[
-                { href: "/assistant", label: "Assistant", icon: MessageSquare, active: isAssistantActive },
-                { href: "/profile", label: "Profile", icon: UserCircle, active: isProfileActive },
-                ...(user?.isSuperadmin ? [{ href: "/admin/users", label: "User Management", icon: ShieldCheck, active: isAdminActive }] : []),
-              ].map((item) => {
-                const Icon = item.icon;
-                const link = (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                      item.active
-                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                        : "text-sidebar-foreground hover:bg-sidebar-accent/50",
-                      collapsed && "justify-center px-0",
-                    )}
+            {/* Scrollable middle section */}
+            <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
+              {/* Collapsible Folders panel */}
+              <div className="p-2 space-y-1">
+                {!collapsed ? (
+                  <button
+                    onClick={toggleFoldersCollapsed}
+                    className="flex w-full items-center gap-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
                   >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    {!collapsed && item.label}
-                  </Link>
-                );
-                if (collapsed) {
-                  return (
-                    <Tooltip key={item.href}>
-                      <TooltipTrigger asChild>{link}</TooltipTrigger>
-                      <TooltipContent side="right">{item.label}</TooltipContent>
-                    </Tooltip>
-                  );
-                }
-                return link;
-              })}
-            </nav>
+                    {foldersCollapsed ? (
+                      <ChevronRight className="h-3 w-3" />
+                    ) : (
+                      <ChevronDown className="h-3 w-3" />
+                    )}
+                    Folders
+                  </button>
+                ) : null}
 
-            <div className="px-2 pb-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "w-full text-sidebar-foreground",
-                  collapsed ? "justify-center px-0" : "justify-start",
-                )}
-                onClick={toggleCollapsed}
-              >
-                {collapsed ? (
-                  <PanelLeftOpen className="h-4 w-4" />
-                ) : (
+                {!foldersCollapsed && (
                   <>
-                    <PanelLeftClose className="mr-2 h-4 w-4" />
-                    Collapse
+                    {foldersLoading ? (
+                      <div className="flex justify-center py-4">
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : (
+                      <FolderTree
+                        folders={folders}
+                        collapsed={collapsed}
+                        onCreateFolder={handleCreateFolder}
+                        onRenameFolder={handleRenameFolder}
+                        onDeleteFolder={handleDeleteFolder}
+                        onManageAccess={handleManageAccess}
+                      />
+                    )}
                   </>
                 )}
-              </Button>
+              </div>
+
+              {!collapsed && <Separator className="mx-2" />}
+
+              {/* Assistant nav link */}
+              <div className="p-2 space-y-1">
+                {(() => {
+                  const assistantLink = (
+                    <Link
+                      href="/assistant"
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                        isAssistantActive
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                          : "text-sidebar-foreground hover:bg-sidebar-accent/50",
+                        collapsed && "justify-center px-0",
+                      )}
+                    >
+                      <MessageSquare className="h-4 w-4 shrink-0" />
+                      {!collapsed && "Assistant"}
+                    </Link>
+                  );
+                  if (collapsed) {
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>{assistantLink}</TooltipTrigger>
+                        <TooltipContent side="right">Assistant</TooltipContent>
+                      </Tooltip>
+                    );
+                  }
+                  return assistantLink;
+                })()}
+
+                {user?.isSuperadmin && (() => {
+                  const adminLink = (
+                    <Link
+                      href="/admin/users"
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                        isAdminActive
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                          : "text-sidebar-foreground hover:bg-sidebar-accent/50",
+                        collapsed && "justify-center px-0",
+                      )}
+                    >
+                      <ShieldCheck className="h-4 w-4 shrink-0" />
+                      {!collapsed && "User Management"}
+                    </Link>
+                  );
+                  if (collapsed) {
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>{adminLink}</TooltipTrigger>
+                        <TooltipContent side="right">User Management</TooltipContent>
+                      </Tooltip>
+                    );
+                  }
+                  return adminLink;
+                })()}
+              </div>
+
+              {/* Chat history fills remaining space */}
+              {!collapsed && (
+                <>
+                  <Separator className="mx-2" />
+                  <div className="flex-1 flex flex-col min-h-0 p-2">
+                    <div className="flex items-center justify-between px-2 py-1 mb-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Chat History
+                      </p>
+                      <Link href="/assistant">
+                        <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground" title="New chat">
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </Link>
+                    </div>
+                    <div className="flex-1 overflow-y-auto -mx-2">
+                      {chatHistory.length === 0 ? (
+                        <p className="text-xs text-muted-foreground text-center py-4">No saved chats</p>
+                      ) : (
+                        <div className="space-y-0.5 px-2">
+                          {chatHistory.map((chat) => (
+                            <Link
+                              key={chat.id}
+                              href={`/assistant?chat=${chat.id}`}
+                              className="block rounded-lg px-2 py-1.5 hover:bg-sidebar-accent/50 transition-colors"
+                            >
+                              <p className="text-xs font-medium truncate text-sidebar-foreground">{chat.title}</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                                {chat.persona && <span className="capitalize">{chat.persona.replace("_", " ")} · </span>}
+                                {new Date(chat.updated_at).toLocaleDateString()}
+                              </p>
+                            </Link>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
-            <Separator />
-            <div className="p-2">
+            {/* Sticky bottom: Profile */}
+            <div className="shrink-0 border-t border-sidebar-border">
+              <div className="p-2 space-y-1">
+                {(() => {
+                  const profileLink = (
+                    <Link
+                      href="/profile"
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                        isProfileActive
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                          : "text-sidebar-foreground hover:bg-sidebar-accent/50",
+                        collapsed && "justify-center px-0",
+                      )}
+                    >
+                      <UserCircle className="h-4 w-4 shrink-0" />
+                      {!collapsed && "Profile"}
+                    </Link>
+                  );
+                  if (collapsed) {
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>{profileLink}</TooltipTrigger>
+                        <TooltipContent side="right">Profile</TooltipContent>
+                      </Tooltip>
+                    );
+                  }
+                  return profileLink;
+                })()}
+              </div>
+
               {!collapsed && (
-                <div className="mb-2 flex items-center justify-between px-2 text-xs text-muted-foreground">
+                <div className="px-4 pb-1 flex items-center justify-between text-xs text-muted-foreground">
                   <span className="truncate">{user?.email}</span>
                   <ThemeToggle />
                 </div>
               )}
-              {collapsed ? (
-                <div className="flex flex-col items-center gap-2">
-                  <ThemeToggle />
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-sidebar-foreground"
-                        onClick={() => signOut()}
-                      >
-                        <LogOut className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">Sign Out</TooltipContent>
-                  </Tooltip>
-                </div>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start text-sidebar-foreground"
-                  onClick={() => signOut()}
-                >
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Sign Out
-                </Button>
-              )}
+
+              <div className="p-2">
+                {collapsed ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <ThemeToggle />
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-sidebar-foreground"
+                          onClick={() => signOut()}
+                        >
+                          <LogOut className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">Sign Out</TooltipContent>
+                    </Tooltip>
+                  </div>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start text-sidebar-foreground"
+                    onClick={() => signOut()}
+                  >
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Sign Out
+                  </Button>
+                )}
+              </div>
             </div>
           </aside>
         </TooltipProvider>

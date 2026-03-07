@@ -34,7 +34,7 @@ export function ProcessingStep({
         <div>
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
-            AI Data Cleanser is Processing
+            Starlight is Processing
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
             Each file is being analyzed and transformed by the AI agent.
