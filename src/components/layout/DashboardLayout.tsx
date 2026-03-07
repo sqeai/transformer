@@ -8,7 +8,7 @@ import {
   Sparkles,
   PanelLeftClose,
   PanelLeftOpen,
-  MessageSquare,
+  SquarePen,
   Loader2,
   UserCircle,
   ShieldCheck,
@@ -279,9 +279,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             </div>
 
             {/* Scrollable middle section */}
-            <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
+            <div className="flex-1 flex flex-col min-h-0">
               {/* Collapsible Folders panel */}
-              <div className="p-2 space-y-1">
+              <div className="p-2 space-y-1 flex-1 min-h-0 overflow-y-auto">
                 {!collapsed ? (
                   <button
                     onClick={toggleFoldersCollapsed}
@@ -318,10 +318,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
               {!collapsed && <Separator className="mx-2" />}
 
-              {/* Assistant nav link + Chat history (seamless) */}
-              <div className="p-2 space-y-1 flex-1 flex flex-col min-h-0">
+              {/* New Chat link + Chat history */}
+              <div className="p-2 space-y-1 flex flex-col min-h-[300px] shrink-0">
                 {(() => {
-                  const assistantLink = (
+                  const newChatLink = (
                     <Link
                       href="/assistant"
                       className={cn(
@@ -332,22 +332,22 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                         collapsed && "justify-center px-0",
                       )}
                     >
-                      <MessageSquare className="h-4 w-4 shrink-0" />
-                      {!collapsed && "Assistant"}
+                      <SquarePen className="h-4 w-4 shrink-0" />
+                      {!collapsed && "New Chat"}
                     </Link>
                   );
                   if (collapsed) {
                     return (
                       <Tooltip>
-                        <TooltipTrigger asChild>{assistantLink}</TooltipTrigger>
-                        <TooltipContent side="right">Assistant</TooltipContent>
+                        <TooltipTrigger asChild>{newChatLink}</TooltipTrigger>
+                        <TooltipContent side="right">New Chat</TooltipContent>
                       </Tooltip>
                     );
                   }
-                  return assistantLink;
+                  return newChatLink;
                 })()}
 
-                {/* Chat history directly beneath Assistant */}
+                {/* Chat history */}
                 {!collapsed && (
                   <div className="flex-1 overflow-y-auto -mx-2 mt-1">
                     {chatHistory.length === 0 ? (
