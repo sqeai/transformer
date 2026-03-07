@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useState, useEffect, useCallback } from "react";
 import {
   LogOut,
@@ -75,6 +75,7 @@ function buildTree(
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, signOut } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [foldersCollapsed, setFoldersCollapsed] = useState(false);
@@ -321,14 +322,18 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               {/* New Chat link + Chat history */}
               <div className="p-2 space-y-1 flex flex-col min-h-[300px] shrink-0">
                 {(() => {
+                  const handleNewChat = (e: React.MouseEvent) => {
+                    e.preventDefault();
+                    window.dispatchEvent(new CustomEvent("new-chat"));
+                    router.push("/assistant");
+                  };
                   const newChatLink = (
                     <Link
                       href="/assistant"
+                      onClick={handleNewChat}
                       className={cn(
                         "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                        isAssistantActive
-                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                          : "text-sidebar-foreground hover:bg-sidebar-accent/50",
+                        "text-sidebar-foreground hover:bg-sidebar-accent/50",
                         collapsed && "justify-center px-0",
                       )}
                     >

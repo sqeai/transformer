@@ -32,6 +32,8 @@ import {
   Briefcase,
   TrendingUp,
   BarChart3,
+  Sparkles,
+  Search,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -562,6 +564,79 @@ const PERSONA_OPTIONS: { value: Persona; label: string; icon: typeof Briefcase; 
   { value: "business_development", label: "Business Dev", icon: Briefcase, description: "Market sizing, CAC/LTV, pipeline" },
 ];
 
+const SAMPLE_PROMPTS = [
+  {
+    category: "CAPABILITY",
+    icon: Sparkles,
+    text: "What all can you do?",
+    color: "text-emerald-400",
+    borderColor: "border-emerald-500/30",
+    bgColor: "bg-emerald-500/10",
+  },
+  {
+    category: "SEARCH",
+    icon: Search,
+    text: "Describe our main dashboards / questions",
+    color: "text-emerald-400",
+    borderColor: "border-emerald-500/30",
+    bgColor: "bg-emerald-500/10",
+  },
+  {
+    category: "ANALYSIS",
+    icon: TrendingUp,
+    text: "Show me an interesting visualization",
+    color: "text-emerald-400",
+    borderColor: "border-emerald-500/30",
+    bgColor: "bg-emerald-500/10",
+  },
+];
+
+function WelcomeScreen({ onPromptClick }: { onPromptClick: (text: string) => void }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center px-6 py-12">
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-primary/20 to-accent/20 border border-primary/30 mb-5">
+        <Sparkles className="h-7 w-7 text-primary" />
+      </div>
+      <h2 className="text-xl font-semibold text-foreground mb-2">
+        Ask Starlight anything
+      </h2>
+      <p className="text-sm text-muted-foreground mb-8">
+        Query your data, create visualizations, and discover insights
+      </p>
+
+      <div className="w-full max-w-lg space-y-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Try these questions
+        </p>
+        {SAMPLE_PROMPTS.map((prompt) => {
+          const Icon = prompt.icon;
+          return (
+            <button
+              key={prompt.text}
+              onClick={() => onPromptClick(prompt.text)}
+              className={cn(
+                "flex w-full items-center gap-4 rounded-xl border px-4 py-3.5 text-left transition-colors",
+                prompt.borderColor,
+                "bg-card/60 hover:bg-card/90",
+              )}
+            >
+              <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", prompt.bgColor)}>
+                <Icon className={cn("h-4 w-4", prompt.color)} />
+              </div>
+              <div className="min-w-0">
+                <p className={cn("text-[10px] font-semibold uppercase tracking-wider mb-0.5", prompt.color)}>
+                  {prompt.category}
+                </p>
+                <p className="text-sm text-foreground">{prompt.text}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function exportChatAsMarkdown(messages: { role: string; parts?: { type: string; text?: string }[] }[]): string {
   const lines: string[] = ["# Chat Export\n"];
   for (const msg of messages) {
@@ -638,6 +713,19 @@ export function AnalystChat() {
       loadChat(chatParam);
     }
   }, [searchParams, chatId, loadChat]);
+
+  useEffect(() => {
+    const handleNewChat = () => {
+      setChatId(null);
+      setMessages([]);
+      setPersona(null);
+      setInput("");
+      setAttachedFiles([]);
+      setContextSelection(null);
+    };
+    window.addEventListener("new-chat", handleNewChat);
+    return () => window.removeEventListener("new-chat", handleNewChat);
+  }, [setMessages]);
 
   const createChatEntry = useCallback(async (firstMessage: string): Promise<string | null> => {
     const title = firstMessage.length > 80
@@ -919,7 +1007,7 @@ export function AnalystChat() {
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border bg-card/80 backdrop-blur-sm px-6 py-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent">
+            {/* <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent">
               <Bot className="h-5 w-5 text-primary-foreground" />
             </div>
             <div>
@@ -931,7 +1019,7 @@ export function AnalystChat() {
                     ? `${contextSelection.contexts.length} context${contextSelection.contexts.length > 1 ? "s" : ""} · ${contextSelection.dataSources.reduce((n, s) => n + s.tables.length, 0)} table${contextSelection.dataSources.reduce((n, s) => n + s.tables.length, 0) !== 1 ? "s" : ""}`
                     : "Ready"}
               </p>
-            </div>
+            </div> */}
           </div>
           <div className="flex items-center gap-1">
             {/* Persona selector */}
@@ -988,6 +1076,15 @@ export function AnalystChat() {
           ref={scrollRef}
           className="flex-1 overflow-y-auto px-6 py-4 space-y-4"
         >
+          {messages.length === 0 && !isLoading && (
+            <WelcomeScreen
+              onPromptClick={(text) => {
+                setInput(text);
+                inputRef.current?.focus();
+              }}
+            />
+          )}
+
           {messages.map((msg) => {
             const isUser = msg.role === "user";
 
