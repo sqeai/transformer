@@ -14,7 +14,6 @@ import {
   ShieldCheck,
   ChevronDown,
   ChevronRight,
-  Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -135,6 +134,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     loadChatHistory();
   }, [fetchFolders, loadChatHistory]);
 
+  useEffect(() => {
+    const handler = () => loadChatHistory();
+    window.addEventListener("chat-history-updated", handler);
+    return () => window.removeEventListener("chat-history-updated", handler);
+  }, [loadChatHistory]);
+
   const toggleCollapsed = () => {
     setCollapsed((c) => {
       const next = !c;
@@ -237,12 +242,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               {collapsed ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 text-sidebar-foreground mx-auto"
                       onClick={toggleCollapsed}
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent hover:opacity-80 transition-opacity mx-auto"
                     >
-                      <PanelLeftOpen className="h-5 w-5 text-primary-foreground" />
-                    </button>
+                      <PanelLeftOpen className="h-4 w-4" />
+                    </Button>
                   </TooltipTrigger>
                   <TooltipContent side="right">Expand sidebar</TooltipContent>
                 </Tooltip>
@@ -311,8 +318,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
               {!collapsed && <Separator className="mx-2" />}
 
-              {/* Assistant nav link */}
-              <div className="p-2 space-y-1">
+              {/* Assistant nav link + Chat history (seamless) */}
+              <div className="p-2 space-y-1 flex-1 flex flex-col min-h-0">
                 {(() => {
                   const assistantLink = (
                     <Link
@@ -339,6 +346,31 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                   }
                   return assistantLink;
                 })()}
+
+                {/* Chat history directly beneath Assistant */}
+                {!collapsed && (
+                  <div className="flex-1 overflow-y-auto -mx-2 mt-1">
+                    {chatHistory.length === 0 ? (
+                      <p className="text-xs text-muted-foreground text-center py-4">No saved chats</p>
+                    ) : (
+                      <div className="space-y-0.5 px-2">
+                        {chatHistory.map((chat) => (
+                          <Link
+                            key={chat.id}
+                            href={`/assistant?chat=${chat.id}`}
+                            className="block rounded-lg px-2 py-1.5 hover:bg-sidebar-accent/50 transition-colors"
+                          >
+                            <p className="text-xs font-medium truncate text-sidebar-foreground">{chat.title}</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                              {chat.persona && <span className="capitalize">{chat.persona.replace("_", " ")} · </span>}
+                              {new Date(chat.updated_at).toLocaleDateString()}
+                            </p>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {user?.isSuperadmin && (() => {
                   const adminLink = (
@@ -367,46 +399,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                   return adminLink;
                 })()}
               </div>
-
-              {/* Chat history fills remaining space */}
-              {!collapsed && (
-                <>
-                  <Separator className="mx-2" />
-                  <div className="flex-1 flex flex-col min-h-0 p-2">
-                    <div className="flex items-center justify-between px-2 py-1 mb-1">
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Chat History
-                      </p>
-                      <Link href="/assistant">
-                        <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground" title="New chat">
-                          <Plus className="h-3 w-3" />
-                        </Button>
-                      </Link>
-                    </div>
-                    <div className="flex-1 overflow-y-auto -mx-2">
-                      {chatHistory.length === 0 ? (
-                        <p className="text-xs text-muted-foreground text-center py-4">No saved chats</p>
-                      ) : (
-                        <div className="space-y-0.5 px-2">
-                          {chatHistory.map((chat) => (
-                            <Link
-                              key={chat.id}
-                              href={`/assistant?chat=${chat.id}`}
-                              className="block rounded-lg px-2 py-1.5 hover:bg-sidebar-accent/50 transition-colors"
-                            >
-                              <p className="text-xs font-medium truncate text-sidebar-foreground">{chat.title}</p>
-                              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
-                                {chat.persona && <span className="capitalize">{chat.persona.replace("_", " ")} · </span>}
-                                {new Date(chat.updated_at).toLocaleDateString()}
-                              </p>
-                            </Link>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
             </div>
 
             {/* Sticky bottom: Profile */}
