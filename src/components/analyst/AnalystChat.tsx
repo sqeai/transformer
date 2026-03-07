@@ -50,7 +50,7 @@ import {
   ContextSelector,
   type ContextSelection,
 } from "../dashboard/ContextSelector";
-import { InlineChart } from "./InlineChart";
+import { InlineChartFromVisualization } from "./InlineChart";
 import type { VisualizationPayload } from "@/lib/agents/analyst-agent/tools";
 
 const ANALYST_STORAGE_KEY = "analyst-chat-history";
@@ -518,7 +518,7 @@ function AssistantMessage({
         {visualizations.length > 0 && (
           <div className="space-y-2">
             {visualizations.map((viz, i) => (
-              <InlineChart key={`viz-${i}`} visualization={viz} />
+              <InlineChartFromVisualization key={`viz-${i}`} visualization={viz} />
             ))}
           </div>
         )}

@@ -44,7 +44,7 @@ IMPORTANT: Do NOT output the THINKING delimiters during intermediate tool-callin
 2. Use data_lookup to understand column distributions and data quality before writing queries.
 3. Write SQL queries to fetch the needed data using query_database.
 4. Transform the query results into the right format for each chart type.
-5. Call add_dashboard_panel with the data and appropriate chart configuration.
+5. Call add_dashboard_panel with the data, the SQL query (in sqlQuery field), and appropriate chart configuration.
 6. Include the DASHBOARD_PANEL delimiter from the tool result in your response.
 
 ## Data Format Guidelines
@@ -54,11 +54,6 @@ IMPORTANT: Do NOT output the THINKING delimiters during intermediate tool-callin
 - **Bar chart**: same as line chart format
 - **Scatter plot**: data should be [{xKey: 10, yKey: 20}, ...]
 - **Waterfall**: data should be [{xKey: "Revenue", yKey: 1000}, {xKey: "Costs", yKey: -500}, ...]
-
-## Panel Sizing
-
-- width: 1 (half width) or 2 (full width)
-- height: 1 (standard) or 2 (tall)
 
 ## Guidelines
 
@@ -70,7 +65,9 @@ IMPORTANT: Do NOT output the THINKING delimiters during intermediate tool-callin
 - If the user asks to modify a panel, use update_dashboard_panel
 - If the user asks to remove a panel, use remove_dashboard_panel
 - Explain what each panel shows
-- Adapt SQL dialect to the database type`;
+- Adapt SQL dialect to the database type
+- **CRITICAL**: Always use fully-qualified table names with schema prefix: \`schema_name.table_name\` (e.g. \`public.orders\`, \`analytics.events\`). NEVER reference bare table names.
+- **CRITICAL**: You MUST call list_available_tables first to discover the actual schema, table names, and columns. NEVER guess or invent table/column names. Only use tables and columns that exist in the data source.`;
 
 function getSystemPrompt(companyContext?: string): string {
   if (!companyContext?.trim()) return BASE_SYSTEM_PROMPT;

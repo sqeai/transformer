@@ -79,14 +79,8 @@ export default function FolderPanelsPage() {
               chartType: p.chart_type || p.chartType,
               data: p.data || [],
               config: p.config || {},
-              width: p.width || 1,
-              height: p.height || 1,
               prompt: p.prompt || "",
               sqlQuery: p.sql_query || p.sqlQuery || "",
-              colSpan:
-                (p.col_span as number) ||
-                (p.colSpan as number) ||
-                4,
             }));
             setPanels(loaded);
           }
@@ -127,11 +121,8 @@ export default function FolderPanelsPage() {
         chartType: question.defaultChartType,
         data: [],
         config: {},
-        width: 1,
-        height: 1,
         prompt: question.label,
-        sqlQuery: question.sqlHint || "",
-        colSpan: 4,
+        sqlQuery: "",
       };
       const updated = [...panels, newPanel];
       setPanels(updated);
@@ -160,11 +151,8 @@ export default function FolderPanelsPage() {
         chartType: "bar" as ChartType,
         data: [],
         config: {},
-        width: 1,
-        height: 1,
         prompt,
         sqlQuery: sqlQuery || "",
-        colSpan: 4,
       };
       const updated = [...panels, newPanel];
       setPanels(updated);

@@ -61,6 +61,9 @@ Choose the best chart type for the data:
 - Aggregate data appropriately for the chart type
 - Adapt SQL dialect to the database type (BigQuery, MySQL, PostgreSQL, etc.)
 - Use meaningful column aliases
+- **CRITICAL**: Always use fully-qualified table names with schema prefix: \`schema_name.table_name\` (e.g. \`public.orders\`, \`analytics.events\`). NEVER reference bare table names.
+- **CRITICAL**: You MUST call list_available_tables first to discover the actual schema, table names, and columns. NEVER guess or invent table/column names. Only use tables and columns that exist in the data source.
+- If the user's prompt references concepts that don't map to any available table, explain what tables are available and ask for clarification.
 
 IMPORTANT: Your entire response must be valid JSON. Nothing else.`;
 

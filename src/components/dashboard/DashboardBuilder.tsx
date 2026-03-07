@@ -28,6 +28,7 @@ import {
   Save,
   Maximize2,
   Minimize2,
+  Settings2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -352,6 +353,10 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
     localStorage.setItem(DASHBOARD_PANELS_KEY, JSON.stringify(panels));
   }, [panels]);
 
+  const dbInitialLoadDone = useRef(false);
+  const dbPanelsSnapshot = useRef<string>("");
+  const dbAutoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     if (!dashboardId) return;
     (async () => {
@@ -367,17 +372,45 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
               chartType: p.chart_type || p.chartType,
               data: p.data || [],
               config: p.config || {},
-              width: p.width || 1,
-              height: p.height || 1,
+              prompt: p.prompt || "",
+              sqlQuery: p.sql_query || p.sqlQuery || "",
             }));
             setPanels(loaded);
+            dbPanelsSnapshot.current = JSON.stringify(loaded);
           }
         }
       } catch {
         // fallback to localStorage
+      } finally {
+        dbInitialLoadDone.current = true;
       }
     })();
   }, [dashboardId]);
+
+  useEffect(() => {
+    if (!dashboardId || !dbInitialLoadDone.current) return;
+
+    const snapshot = JSON.stringify(panels);
+    if (snapshot === dbPanelsSnapshot.current) return;
+    dbPanelsSnapshot.current = snapshot;
+
+    if (dbAutoSaveTimer.current) clearTimeout(dbAutoSaveTimer.current);
+    dbAutoSaveTimer.current = setTimeout(async () => {
+      try {
+        await fetch(`/api/dashboards/${dashboardId}/panels`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ panels }),
+        });
+      } catch {
+        // silent
+      }
+    }, 1500);
+
+    return () => {
+      if (dbAutoSaveTimer.current) clearTimeout(dbAutoSaveTimer.current);
+    };
+  }, [panels, dashboardId]);
 
   const saveDashboard = useCallback(async () => {
     if (!dashboardId) return;
@@ -393,6 +426,7 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ panels }),
       });
+      dbPanelsSnapshot.current = JSON.stringify(panels);
       toast.success("Dashboard saved");
     } catch {
       toast.error("Failed to save dashboard");
@@ -471,8 +505,6 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
           id: p.id,
           title: p.title,
           chartType: p.chartType,
-          width: p.width,
-          height: p.height,
         })),
       );
 
@@ -619,9 +651,6 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
                         {panels.find(p => p.id === expandedPanel) && (
                           <ChartPanel
                             panel={panels.find(p => p.id === expandedPanel)!}
-                            onRemove={removePanel}
-                            onEdit={editPanel}
-                            expanded
                           />
                         )}
                       </div>
@@ -631,18 +660,25 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
                 <div className="grid grid-cols-2 gap-4 auto-rows-[280px]">
                   {panels.map((panel) => (
                     <div key={panel.id} className="relative group">
-                      <ChartPanel
-                        panel={panel}
-                        onRemove={removePanel}
-                        onEdit={editPanel}
-                      />
-                      <button
-                        onClick={() => setExpandedPanel(panel.id)}
-                        className="absolute top-2 right-12 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded bg-background/80 hover:bg-muted"
-                        title="Expand"
-                      >
-                        <Maximize2 className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="flex flex-col rounded-xl border border-border bg-card shadow-sm overflow-hidden h-full">
+                        <div className="flex items-center justify-between border-b border-border/50 px-4 py-2">
+                          <h3 className="text-sm font-medium truncate">{panel.title}</h3>
+                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => editPanel(panel.id)}>
+                              <Settings2 className="h-3 w-3" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setExpandedPanel(panel.id)}>
+                              <Maximize2 className="h-3 w-3" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => removePanel(panel.id)}>
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="flex-1 p-3 min-h-[200px]">
+                          <ChartPanel panel={panel} />
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
