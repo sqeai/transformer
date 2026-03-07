@@ -292,6 +292,5 @@ export default function FolderMembersPage() {
           </div>
         )}
       </div>
-    </div>
   );
 }
