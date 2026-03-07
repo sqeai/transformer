@@ -1,0 +1,2 @@
+ALTER TABLE public.dashboard_panels
+  ADD COLUMN IF NOT EXISTS col_span INTEGER NOT NULL DEFAULT 4;

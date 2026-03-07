@@ -15,10 +15,9 @@ const panelSchema = z.object({
   id: z.string().describe("Unique panel ID"),
   title: z.string().describe("Panel title"),
   chartType: z.enum(["pie", "line", "bar", "scatter", "waterfall"]).describe("Chart type"),
+  sqlQuery: z.string().optional().describe("The SQL query used to produce the data (for re-execution)"),
   data: z.array(z.record(z.string(), z.unknown())).describe("Chart data array"),
   config: chartConfigSchema.describe("Chart configuration"),
-  width: z.union([z.literal(1), z.literal(2)]).describe("Grid width (1 or 2 columns)"),
-  height: z.union([z.literal(1), z.literal(2)]).describe("Grid height (1 or 2 rows)"),
 });
 
 function wrapDelimiter(tag: string, payload: object): string {
@@ -103,7 +102,7 @@ export function createDashboardTools(
     },
     {
       name: "add_dashboard_panel",
-      description: `Add a new chart panel to the dashboard. Supported chart types: pie, line, bar, scatter, waterfall. You must provide the data array directly (query the database first to get the data). The panel will be rendered using Recharts.`,
+      description: `Add a new chart panel to the dashboard. Supported chart types: pie, line, bar, scatter, waterfall. You must provide the data array directly (query the database first to get the data). Always include the sqlQuery field with the SQL query used to produce the data so it can be re-executed later. The panel will be rendered using Recharts.`,
       schema: z.object({
         panel: panelSchema.describe("The panel to add"),
       }),

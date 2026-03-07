@@ -1,16 +1,17 @@
 export type ChartType = "pie" | "line" | "bar" | "scatter" | "waterfall";
 
+/**
+ * A panel is purely data: what to display and how to query it.
+ * It contains NO layout information — the dashboard owns layout.
+ */
 export interface DashboardPanel {
   id: string;
   title: string;
   chartType: ChartType;
   data: Record<string, unknown>[];
   config: ChartConfig;
-  width: 1 | 2;
-  height: 1 | 2;
   prompt?: string;
   sqlQuery?: string;
-  colSpan?: number;
 }
 
 export interface ChartConfig {
@@ -22,10 +23,25 @@ export interface ChartConfig {
   colors?: string[];
 }
 
+/**
+ * Layout for a single panel within a dashboard grid.
+ * Stored separately from the panel data.
+ */
+export interface PanelLayout {
+  panelId: string;
+  /** Column span in a 12-column grid (2–12). Default: 4. */
+  colSpan: number;
+  /** Row span. Default: 1. */
+  rowSpan: number;
+  /** Order index for drag-and-drop sorting. */
+  order: number;
+}
+
 export interface DashboardState {
   id: string;
   title: string;
   panels: DashboardPanel[];
+  layout: PanelLayout[];
 }
 
 export interface PredefinedQuestion {

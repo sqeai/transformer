@@ -49,7 +49,7 @@ const COLORS = [
   "#06b6d4",
 ];
 
-type ViewType = "bar" | "line" | "pie" | "scatter" | "waterfall" | "table";
+export type ViewType = "bar" | "line" | "pie" | "scatter" | "waterfall" | "table";
 
 const VIEW_TABS: { type: ViewType; label: string; icon: typeof BarChart3 }[] = [
   { type: "bar", label: "Bar", icon: BarChart3 },
@@ -236,7 +236,7 @@ function SqlPanel({ sql }: { sql: string }) {
   );
 }
 
-function ChartView({
+export function ChartView({
   chartType,
   data,
   labelKey,
@@ -391,19 +391,88 @@ function ChartView({
   }
 }
 
-export function InlineChart({ visualization }: { visualization: VisualizationPayload }) {
-  const [activeView, setActiveView] = useState<ViewType>(visualization.chartType);
+/**
+ * Unified chart data shape used across the app.
+ * Both VisualizationPayload (from analyst) and DashboardPanel can be
+ * converted to this shape for rendering.
+ */
+export interface ChartData {
+  title: string;
+  chartType: ViewType;
+  data: Record<string, unknown>[];
+  labelKey: string;
+  valueKeys: string[];
+  sql?: string;
+}
+
+export type InlineChartMode = "full" | "clean";
+
+interface InlineChartBaseProps {
+  chartData: ChartData;
+  /** "full" = analyst chat with type selector + SQL panel. "clean" = dashboard embed, chart only. */
+  mode?: InlineChartMode;
+  /** Override chart height. Defaults to 300 for full, 100% for clean. */
+  height?: number | string;
+  className?: string;
+}
+
+/**
+ * Convert a VisualizationPayload (from analyst agent) to ChartData.
+ */
+export function visualizationToChartData(v: VisualizationPayload): ChartData {
+  return {
+    title: v.title,
+    chartType: v.chartType as ViewType,
+    data: v.data,
+    labelKey: v.labelKey,
+    valueKeys: v.valueKeys,
+    sql: v.sql,
+  };
+}
+
+/**
+ * Reusable chart component used in both the analyst chat and dashboards.
+ *
+ * - mode="full": shows title, chart type selector tabs, SQL panel (analyst chat)
+ * - mode="clean": renders only the chart, no chrome (dashboard panels)
+ */
+export function InlineChart({
+  chartData,
+  mode = "full",
+  height,
+  className,
+}: InlineChartBaseProps) {
+  const [activeView, setActiveView] = useState<ViewType>(chartData.chartType);
+
+  if (mode === "clean") {
+    return (
+      <div className={cn("w-full h-full", className)} style={height ? { height } : undefined}>
+        <ChartView
+          chartType={chartData.chartType}
+          data={chartData.data}
+          labelKey={chartData.labelKey}
+          valueKeys={chartData.valueKeys}
+        />
+      </div>
+    );
+  }
+
+  const fillHeight = height === "100%";
 
   return (
-    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between border-b border-border/50 px-4 py-2.5">
-        <h3 className="text-sm font-medium truncate">{visualization.title}</h3>
+    <div className={cn(
+      "rounded-xl border border-border bg-card shadow-sm overflow-hidden",
+      fillHeight && "flex flex-col h-full",
+      className,
+    )}>
+      <div className="flex items-center justify-between border-b border-border/50 px-4 py-2.5 shrink-0">
+        <h3 className="text-sm font-medium truncate">{chartData.title}</h3>
         <span className="text-[11px] text-muted-foreground ml-2 shrink-0">
-          {visualization.data.length.toLocaleString("en-US")} rows
+          {chartData.data.length.toLocaleString("en-US")} rows
         </span>
       </div>
 
-      <div className="flex items-center gap-0.5 border-b border-border/50 px-3 py-1.5 bg-muted/20 overflow-x-auto">
+      <div className="flex items-center gap-0.5 border-b border-border/50 px-3 py-1.5 bg-muted/20 overflow-x-auto shrink-0">
         {VIEW_TABS.map(({ type, label, icon: Icon }) => (
           <button
             key={type}
@@ -421,16 +490,31 @@ export function InlineChart({ visualization }: { visualization: VisualizationPay
         ))}
       </div>
 
-      <div className={cn("p-3", activeView === "table" ? "h-[320px]" : "h-[300px]")}>
+      <div
+        className={cn(
+          "p-3",
+          fillHeight ? "flex-1 min-h-0" : (activeView === "table" ? "h-[320px]" : "h-[300px]"),
+        )}
+        style={height && !fillHeight ? { height } : undefined}
+      >
         <ChartView
           chartType={activeView}
-          data={visualization.data}
-          labelKey={visualization.labelKey}
-          valueKeys={visualization.valueKeys}
+          data={chartData.data}
+          labelKey={chartData.labelKey}
+          valueKeys={chartData.valueKeys}
         />
       </div>
 
-      {visualization.sql && <SqlPanel sql={visualization.sql} />}
+      {chartData.sql && <SqlPanel sql={chartData.sql} />}
     </div>
   );
+}
+
+/**
+ * Legacy wrapper: accepts a VisualizationPayload directly.
+ * Used by the analyst chat for backward compatibility.
+ */
+export function InlineChartFromVisualization({ visualization }: { visualization: VisualizationPayload }) {
+  const chartData = useMemo(() => visualizationToChartData(visualization), [visualization]);
+  return <InlineChart chartData={chartData} mode="full" />;
 }
