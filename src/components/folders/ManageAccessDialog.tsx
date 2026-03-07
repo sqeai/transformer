@@ -55,6 +55,7 @@ export function ManageAccessDialog({
   const [members, setMembers] = useState<Member[]>([]);
   const [inheritedMembers, setInheritedMembers] = useState<InheritedMember[]>([]);
   const [loading, setLoading] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [newRole, setNewRole] = useState("viewer");
   const [adding, setAdding] = useState(false);
@@ -62,8 +63,13 @@ export function ManageAccessDialog({
   const fetchMembers = useCallback(async () => {
     if (!folderId) return;
     setLoading(true);
+    setPermissionDenied(false);
     try {
       const res = await fetch(`/api/folders/${folderId}/members`);
+      if (res.status === 403) {
+        setPermissionDenied(true);
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         setMembers(data.members ?? []);
@@ -171,6 +177,16 @@ export function ManageAccessDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {permissionDenied ? (
+          <div className="flex flex-col items-center gap-2 py-6 text-center">
+            <Shield className="h-8 w-8 text-muted-foreground" />
+            <p className="text-sm font-medium">Access Denied</p>
+            <p className="text-xs text-muted-foreground">
+              You do not have permission to manage access for this folder.
+              Contact a folder admin or owner to get access.
+            </p>
+          </div>
+        ) : (
         <div className="space-y-4">
           <div className="flex gap-2">
             <Input
@@ -283,6 +299,7 @@ export function ManageAccessDialog({
             </div>
           )}
         </div>
+        )}
       </DialogContent>
     </Dialog>
   );

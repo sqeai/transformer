@@ -46,13 +46,19 @@ export default function FolderMembersPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [inheritedMembers, setInheritedMembers] = useState<InheritedMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const [permissionDenied, setPermissionDenied] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [newRole, setNewRole] = useState("viewer");
   const [adding, setAdding] = useState(false);
 
   const fetchMembers = useCallback(async () => {
+    setPermissionDenied(false);
     try {
       const res = await fetch(`/api/folders/${folderId}/members`);
+      if (res.status === 403) {
+        setPermissionDenied(true);
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         setMembers(data.members ?? []);
@@ -133,6 +139,32 @@ export default function FolderMembersPage() {
       toast.error("Failed to update role");
     }
   };
+
+  if (permissionDenied) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <Shield className="h-6 w-6" />
+            Members
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Manage who has access to this folder and its contents
+          </p>
+        </div>
+        <Card>
+          <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
+            <Shield className="h-8 w-8 text-muted-foreground" />
+            <p className="text-sm font-medium">Access Denied</p>
+            <p className="text-xs text-muted-foreground">
+              You do not have permission to manage access for this folder.
+              Contact a folder admin or owner to get access.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

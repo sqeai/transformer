@@ -23,7 +23,6 @@ export async function POST(req: NextRequest) {
       body.dataSourceContexts ?? [];
     const attachments: ChatAttachment[] = Array.isArray(body.attachments) ? body.attachments : [];
     const persona: Persona | null = body.persona ?? null;
-    const chatId: string | null = body.chatId ?? null;
     const companyContext: string = body.companyContext ?? "";
 
     let attachmentContext = "";
@@ -145,22 +144,6 @@ export async function POST(req: NextRequest) {
       },
       { version: "v2", recursionLimit: 50 },
     );
-
-    // Save chat history asynchronously
-    if (chatId) {
-      const allMessages = body.messages ?? [];
-      supabase
-        .from("chat_history")
-        .upsert({
-          id: chatId,
-          user_id: authResult.user.id,
-          agent_type: "analyst",
-          title: allMessages[0]?.content?.slice(0, 100) || "Untitled Chat",
-          messages: allMessages,
-          persona,
-        })
-        .then(() => {});
-    }
 
     return createUIMessageStreamResponse({
       stream: toUIMessageStream(eventStream),

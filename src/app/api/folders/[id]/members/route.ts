@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, requireFolderAccess } from "@/lib/api-auth";
+import { requireFolderAccess } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getFolderMembers, getInheritedMembers } from "@/lib/rbac";
 
@@ -8,8 +8,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const result = await requireAuth();
-  if (result.error) return result.error;
+  const access = await requireFolderAccess(id, "manage_users");
+  if (access.error) return access.error;
 
   const members = await getFolderMembers(id);
   const inherited = await getInheritedMembers(id);
