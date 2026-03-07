@@ -353,6 +353,15 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
     localStorage.setItem(DASHBOARD_PANELS_KEY, JSON.stringify(panels));
   }, [panels]);
 
+  useEffect(() => {
+    if (!expandedPanel) return;
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setExpandedPanel(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [expandedPanel]);
+
   const dbInitialLoadDone = useRef(false);
   const dbPanelsSnapshot = useRef<string>("");
   const dbAutoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -639,8 +648,14 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
             ) : (
               <>
                 {expandedPanel && (
-                  <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-8">
-                    <div className="w-full max-w-5xl h-full max-h-[80vh] bg-card rounded-xl border shadow-2xl flex flex-col">
+                  <div
+                    className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-8"
+                    onClick={() => setExpandedPanel(null)}
+                  >
+                    <div
+                      className="w-full max-w-5xl h-full max-h-[80vh] bg-card rounded-xl border shadow-2xl flex flex-col"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <div className="flex items-center justify-between px-4 py-3 border-b">
                         <h3 className="font-semibold">{panels.find(p => p.id === expandedPanel)?.title}</h3>
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setExpandedPanel(null)}>

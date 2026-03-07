@@ -686,6 +686,15 @@ export default function FolderDashboardPage() {
     setEditMode((prev) => !prev);
   }, [editMode, saveDashboard]);
 
+  useEffect(() => {
+    if (!expandedPanel) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setExpandedPanel(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [expandedPanel]);
+
   const expandedPanelData = useMemo(() => {
     if (!expandedPanel) return null;
     const panel = panels.find((p) => p.id === expandedPanel);
@@ -810,8 +819,14 @@ export default function FolderDashboardPage() {
           <>
             {/* Expanded panel overlay — uses full InlineChart with type selector */}
             {expandedPanelData && (
-              <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-8">
-                <div className="w-full max-w-5xl h-full max-h-[80vh] bg-card rounded-xl border shadow-2xl flex flex-col">
+              <div
+                className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-8"
+                onClick={() => setExpandedPanel(null)}
+              >
+                <div
+                  className="w-full max-w-5xl h-full max-h-[80vh] bg-card rounded-xl border shadow-2xl flex flex-col"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div className="flex items-center justify-between px-4 py-3 border-b">
                     <h3 className="font-semibold">{expandedPanelData.panel.title}</h3>
                     <Button
