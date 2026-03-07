@@ -658,6 +658,7 @@ function NewDatasetPageContent() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             schemaId, name, rows: allRows,
+            ...(folderIdParam ? { folderId: folderIdParam } : {}),
             mappingSnapshot: {
               toolsUsed: exportableResults.map((r) => r.result?.toolsUsed ?? []),
               transformations: exportableResults.map((r) => {

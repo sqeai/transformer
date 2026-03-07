@@ -101,7 +101,9 @@ function FolderNodeItem({
       <div
         className={cn(
           "group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm font-medium transition-colors hover:bg-sidebar-accent/50",
-          isActive && "bg-sidebar-accent/30",
+          isActive
+            ? "bg-sidebar-accent text-sidebar-accent-foreground border-l-2 border-primary"
+            : "border-l-2 border-transparent",
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >
@@ -110,9 +112,9 @@ function FolderNodeItem({
           className="shrink-0 p-0.5 rounded hover:bg-sidebar-accent"
         >
           {expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            <ChevronDown className={cn("h-3.5 w-3.5", isActive ? "text-primary" : "text-muted-foreground")} />
           ) : (
-            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+            <ChevronRight className={cn("h-3.5 w-3.5", isActive ? "text-primary" : "text-muted-foreground")} />
           )}
         </button>
         <Link
@@ -120,11 +122,11 @@ function FolderNodeItem({
           className="flex items-center gap-2 min-w-0 flex-1"
         >
           {expanded ? (
-            <FolderOpen className="h-4 w-4 shrink-0 text-amber-500" />
+            <FolderOpen className={cn("h-4 w-4 shrink-0", isActive ? "text-primary" : "text-amber-500")} />
           ) : (
-            <Folder className="h-4 w-4 shrink-0 text-amber-500" />
+            <Folder className={cn("h-4 w-4 shrink-0", isActive ? "text-primary" : "text-amber-500")} />
           )}
-          <span className="truncate text-sidebar-foreground">{node.name}</span>
+          <span className={cn("truncate font-medium", isActive ? "text-sidebar-accent-foreground" : "text-sidebar-foreground")}>{node.name}</span>
         </Link>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

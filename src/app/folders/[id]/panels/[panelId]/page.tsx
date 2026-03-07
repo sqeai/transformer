@@ -11,6 +11,7 @@ import {
   TrendingUp,
   PieChart,
   Trash2,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ export default function PanelEditPage() {
   const [saving, setSaving] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [translating, setTranslating] = useState(false);
 
   const [title, setTitle] = useState("");
   const [chartType, setChartType] = useState<ChartType>("bar");
@@ -53,6 +55,7 @@ export default function PanelEditPage() {
   const [sqlQuery, setSqlQuery] = useState("");
   const [data, setData] = useState<Record<string, unknown>[]>([]);
   const [config, setConfig] = useState<DashboardPanel["config"]>({});
+  const [nlInput, setNlInput] = useState("");
 
   useEffect(() => {
     fetch(`/api/panels/${panelId}`)
@@ -205,6 +208,66 @@ export default function PanelEditPage() {
     }
   }, [panelId, folderId, router]);
 
+  const handleTranslate = useCallback(async () => {
+    const text = nlInput.trim();
+    if (!text) return;
+
+    setTranslating(true);
+    try {
+      const ctxRes = await fetch("/api/contexts");
+      if (!ctxRes.ok) throw new Error("Failed to load contexts");
+      const ctxData = await ctxRes.json();
+      const contexts: { tables: { dataSourceId: string; dataSourceName: string; dataSourceType: string; schemaName: string; tableName: string; columns: { name: string; type: string }[] }[] }[] = ctxData.contexts ?? [];
+
+      const dsMap = new Map<string, { id: string; name: string; type: string; tables: { schema: string; name: string; columns: { name: string; type: string }[] }[] }>();
+      for (const ctx of contexts) {
+        for (const t of ctx.tables) {
+          let ds = dsMap.get(t.dataSourceId);
+          if (!ds) {
+            ds = { id: t.dataSourceId, name: t.dataSourceName, type: t.dataSourceType, tables: [] };
+            dsMap.set(t.dataSourceId, ds);
+          }
+          if (!ds.tables.some((tb) => tb.schema === t.schemaName && tb.name === t.tableName)) {
+            ds.tables.push({ schema: t.schemaName, name: t.tableName, columns: t.columns });
+          }
+        }
+      }
+
+      const dataSourceContexts = Array.from(dsMap.values());
+      if (dataSourceContexts.length === 0) {
+        toast.error("No data sources available");
+        return;
+      }
+
+      const res = await fetch("/api/panel-query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: text, dataSourceContexts }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Translation failed");
+      }
+
+      const result = await res.json();
+      if (result.error) throw new Error(result.error);
+
+      if (result.sqlQuery) setSqlQuery(result.sqlQuery);
+      if (result.title) setTitle(result.title);
+      if (result.chartType) setChartType(result.chartType as ChartType);
+      if (Array.isArray(result.data) && result.data.length > 0) setData(result.data);
+      if (result.config) setConfig(result.config);
+
+      setNlInput("");
+      toast.success("Query generated from natural language");
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to translate to SQL");
+    } finally {
+      setTranslating(false);
+    }
+  }, [nlInput]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -305,6 +368,47 @@ export default function PanelEditPage() {
                   placeholder="Describe what this panel should show"
                 />
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" />
+                Modify using natural language
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Textarea
+                value={nlInput}
+                onChange={(e) => setNlInput(e.target.value)}
+                placeholder="e.g. Show me total revenue by month for the last year"
+                rows={3}
+                className="text-sm"
+                disabled={translating}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && nlInput.trim()) {
+                    e.preventDefault();
+                    handleTranslate();
+                  }
+                }}
+              />
+              <Button
+                onClick={handleTranslate}
+                disabled={translating || !nlInput.trim()}
+                size="sm"
+                className="w-full"
+              >
+                {translating ? (
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4 mr-1" />
+                )}
+                {translating ? "Generating SQL..." : "Generate SQL"}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Describe what you want to see and we&apos;ll generate the SQL query, chart type, and configuration automatically.
+              </p>
             </CardContent>
           </Card>
 
