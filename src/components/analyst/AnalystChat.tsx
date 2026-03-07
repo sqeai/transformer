@@ -691,6 +691,35 @@ export function AnalystChat() {
     },
   });
 
+  const prevStatusRef = useRef(status);
+
+  const saveChatMessages = useCallback(
+    async (id: string, msgs: typeof messages) => {
+      try {
+        await fetch(`/api/chat-history/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: msgs }),
+        });
+      } catch {
+        // silent – best-effort persistence
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const wasStreaming =
+      prevStatusRef.current === "streaming" ||
+      prevStatusRef.current === "submitted";
+    const nowReady = status === "ready" || status === "error";
+
+    if (wasStreaming && nowReady && chatId && messages.length > 0) {
+      saveChatMessages(chatId, messages);
+    }
+    prevStatusRef.current = status;
+  }, [status, chatId, messages, saveChatMessages]);
+
   const loadChat = useCallback(async (id: string) => {
     try {
       const res = await fetch(`/api/chat-history/${id}`);
