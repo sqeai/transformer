@@ -55,6 +55,7 @@ import { InlineChartFromVisualization } from "./InlineChart";
 import type { VisualizationPayload } from "@/lib/agents/analyst-agent/tools";
 
 const ANALYST_STORAGE_KEY = "analyst-chat-history";
+const ANALYST_PERSONA_KEY = "analyst-persona-preference";
 const THINKING_START = "<!-- THINKING_START -->";
 const THINKING_END = "<!-- THINKING_END -->";
 
@@ -672,7 +673,17 @@ export function AnalystChat() {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
-  const [persona, setPersona] = useState<Persona | null>(null);
+  const [persona, setPersona] = useState<Persona>(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem(ANALYST_PERSONA_KEY);
+      if (stored === "financial" || stored === "operations" || stored === "business_development") {
+        return stored;
+      }
+    }
+    return "financial";
+  });
+  const [personaDropdownOpen, setPersonaDropdownOpen] = useState(false);
+  const personaDropdownRef = useRef<HTMLDivElement>(null);
   const [chatId, setChatId] = useState<string | null>(null);
   const [contextSelection, setContextSelection] =
     useState<ContextSelection | null>(null);
@@ -686,6 +697,22 @@ export function AnalystChat() {
   const dragCounter = useRef(0);
   const isNewChatRef = useRef(false);
   const justCreatedChatRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem(ANALYST_PERSONA_KEY, persona);
+  }, [persona]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (personaDropdownRef.current && !personaDropdownRef.current.contains(e.target as Node)) {
+        setPersonaDropdownOpen(false);
+      }
+    }
+    if (personaDropdownOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [personaDropdownOpen]);
 
   const transport = useRef(
     new DefaultChatTransport({ api: "/api/analyst-chat" }),
@@ -752,7 +779,6 @@ export function AnalystChat() {
   const loadChat = useCallback(async (id: string) => {
     setMessages([]);
     setChatId(id);
-    setPersona(null);
     setInput("");
     setAttachedFiles([]);
     setBackgroundStreaming(false);
@@ -763,7 +789,9 @@ export function AnalystChat() {
       if (res.ok) {
         const data = await res.json();
         setChatId(data.id);
-        setPersona(data.persona || null);
+        if (data.persona === "financial" || data.persona === "operations" || data.persona === "business_development") {
+          setPersona(data.persona);
+        }
         if (Array.isArray(data.messages) && data.messages.length > 0) {
           setMessages(data.messages);
         }
@@ -792,7 +820,6 @@ export function AnalystChat() {
       isNewChatRef.current = true;
       setChatId(null);
       setMessages([]);
-      setPersona(null);
       localStorage.removeItem(ANALYST_STORAGE_KEY);
     }
   }, [searchParams, chatId, loadChat, setMessages]);
@@ -802,7 +829,6 @@ export function AnalystChat() {
       isNewChatRef.current = true;
       setChatId(null);
       setMessages([]);
-      setPersona(null);
       setInput("");
       setAttachedFiles([]);
       setChatLoading(false);
@@ -1184,29 +1210,6 @@ export function AnalystChat() {
             </div> */}
           </div>
           <div className="flex items-center gap-1">
-            {/* Persona selector */}
-            <div className="flex items-center gap-1 mr-2">
-              {PERSONA_OPTIONS.map((opt) => {
-                const Icon = opt.icon;
-                const isActive = persona === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    onClick={() => setPersona(isActive ? null : opt.value)}
-                    title={`${opt.label}: ${opt.description}`}
-                    className={cn(
-                      "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors",
-                      isActive
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground",
-                    )}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    <span className="hidden lg:inline">{opt.label}</span>
-                  </button>
-                );
-              })}
-            </div>
             <Button
               variant="ghost"
               size="icon"
@@ -1504,18 +1507,62 @@ export function AnalystChat() {
               style={{ fieldSizing: "content" } as React.CSSProperties}
               disabled={isUploading}
             />
-            <Button
-              type="submit"
-              size="icon"
-              className="h-11 w-11 shrink-0 rounded-xl"
-              disabled={(!input.trim() && attachedFiles.length === 0) || isLoading || isUploading}
-            >
-              {isLoading || isUploading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4" />
+            <div className="relative flex items-end" ref={personaDropdownRef}>
+              <Button
+                type="submit"
+                size="icon"
+                className="h-11 w-11 shrink-0 rounded-xl rounded-r-none border-r border-primary-foreground/20"
+                disabled={(!input.trim() && attachedFiles.length === 0) || isLoading || isUploading}
+              >
+                {isLoading || isUploading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+              </Button>
+              <Button
+                type="button"
+                size="icon"
+                className="h-11 w-7 shrink-0 rounded-xl rounded-l-none"
+                onClick={() => setPersonaDropdownOpen((o) => !o)}
+                title={`Persona: ${PERSONA_OPTIONS.find((o) => o.value === persona)?.label}`}
+              >
+                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", personaDropdownOpen && "rotate-180")} />
+              </Button>
+              {personaDropdownOpen && (
+                <div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl border border-border bg-card shadow-lg z-50 overflow-hidden">
+                  {PERSONA_OPTIONS.map((opt) => {
+                    const Icon = opt.icon;
+                    const isActive = persona === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => {
+                          setPersona(opt.value);
+                          setPersonaDropdownOpen(false);
+                        }}
+                        className={cn(
+                          "flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors",
+                          isActive
+                            ? "bg-primary/10 text-primary"
+                            : "text-foreground hover:bg-muted",
+                        )}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="font-medium text-sm">{opt.label}</p>
+                          <p className="text-xs text-muted-foreground">{opt.description}</p>
+                        </div>
+                        {isActive && (
+                          <div className="ml-auto h-2 w-2 rounded-full bg-primary shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
-            </Button>
+            </div>
           </div>
         </form>
       </div>
