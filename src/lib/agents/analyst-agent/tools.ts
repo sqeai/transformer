@@ -154,7 +154,7 @@ Keep data to ≤50 rows for readability; aggregate in SQL if needed.`,
       const client = new Anthropic();
       try {
         const response = await (client.messages.create as Function)({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-6",
           max_tokens: 1024,
           tools: [
             {

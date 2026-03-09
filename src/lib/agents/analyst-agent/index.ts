@@ -26,7 +26,7 @@ function createAnalystAgent(
   companyContext?: string,
 ) {
   const llm = new ChatAnthropic({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     anthropicApiKey: config.apiKey,
     temperature: 0,
   });

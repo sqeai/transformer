@@ -121,7 +121,7 @@ export async function structureTextWithAnthropic(
   const prompt = buildStructuringPrompt(extractedText, fileName, targetPaths);
 
   const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     max_tokens: 8192,
     messages: [{ role: "user", content: prompt }],
   });
@@ -178,7 +178,7 @@ export async function extractWithAnthropic(input: OcrInput): Promise<OcrResult> 
   contentBlocks.push({ type: "text", text: prompt });
 
   const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     max_tokens: 8192,
     messages: [{ role: "user", content: contentBlocks }],
   });

@@ -96,7 +96,7 @@ export interface InvokeResult {
 
 function createLocalAgent(config: AgentConfig, workspaceContext: string | null) {
   const llm = new ChatAnthropic({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     anthropicApiKey: config.apiKey,
     temperature: 0,
   });

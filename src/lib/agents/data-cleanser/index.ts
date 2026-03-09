@@ -199,7 +199,7 @@ async function generatePlan(
   runId?: string,
 ): Promise<PlannerResult> {
   const llm = new ChatAnthropic({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     anthropicApiKey: apiKey,
     temperature: 0,
   });
@@ -409,7 +409,7 @@ async function askJudge(
   runId?: string,
 ): Promise<JudgeVerdict> {
   const llm = new ChatAnthropic({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     anthropicApiKey: apiKey,
     temperature: 0,
   });

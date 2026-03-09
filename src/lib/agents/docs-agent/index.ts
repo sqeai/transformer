@@ -33,7 +33,7 @@ async function getReadmeContent() {
 async function createDocsAgent(apiKey: string) {
   const readme = await getReadmeContent();
   const llm = new ChatAnthropic({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     anthropicApiKey: apiKey,
     temperature: 0,
   });
