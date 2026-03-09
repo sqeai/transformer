@@ -1,20 +1,25 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Loader2, Save, Plus, X, Eye, Edit3 } from "lucide-react";
+  Loader2,
+  Save,
+  X,
+  Eye,
+  Edit3,
+  ChevronRight,
+  ChevronDown,
+  Database,
+  Table2,
+  FolderOpen,
+  Check,
+} from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface DataSource {
   id: string;
@@ -39,17 +44,95 @@ interface FolderContextEditorProps {
   folderId: string;
 }
 
+type TreeNode = {
+  dataSourceId: string;
+  dataSourceName: string;
+  schemas: {
+    schemaName: string;
+    tables: { tableName: string; selected: boolean }[];
+  }[];
+};
+
+function buildTree(
+  dataSources: DataSource[],
+  allTables: Map<string, TableInfo[]>,
+  selectedTables: ContextTable[],
+): TreeNode[] {
+  const selectedSet = new Set(
+    selectedTables.map(
+      (t) => `${t.dataSourceId}::${t.schemaName}::${t.tableName}`,
+    ),
+  );
+
+  return dataSources.map((ds) => {
+    const tables = allTables.get(ds.id) ?? [];
+    const schemaMap = new Map<
+      string,
+      { tableName: string; selected: boolean }[]
+    >();
+
+    for (const t of tables) {
+      const key = `${ds.id}::${t.schema}::${t.name}`;
+      const list = schemaMap.get(t.schema) ?? [];
+      list.push({ tableName: t.name, selected: selectedSet.has(key) });
+      schemaMap.set(t.schema, list);
+    }
+
+    const schemas = Array.from(schemaMap.entries())
+      .map(([schemaName, tables]) => ({
+        schemaName,
+        tables: tables.sort((a, b) => a.tableName.localeCompare(b.tableName)),
+      }))
+      .sort((a, b) => a.schemaName.localeCompare(b.schemaName));
+
+    return { dataSourceId: ds.id, dataSourceName: ds.name, schemas };
+  });
+}
+
+function buildSelectedTree(selectedTables: ContextTable[]): TreeNode[] {
+  const dsMap = new Map<
+    string,
+    { name: string; schemas: Map<string, string[]> }
+  >();
+
+  for (const t of selectedTables) {
+    let ds = dsMap.get(t.dataSourceId);
+    if (!ds) {
+      ds = { name: t.dataSourceName ?? t.dataSourceId, schemas: new Map() };
+      dsMap.set(t.dataSourceId, ds);
+    }
+    const tables = ds.schemas.get(t.schemaName) ?? [];
+    tables.push(t.tableName);
+    ds.schemas.set(t.schemaName, tables);
+  }
+
+  return Array.from(dsMap.entries()).map(([dataSourceId, ds]) => ({
+    dataSourceId,
+    dataSourceName: ds.name,
+    schemas: Array.from(ds.schemas.entries())
+      .map(([schemaName, tables]) => ({
+        schemaName,
+        tables: tables
+          .sort((a, b) => a.localeCompare(b))
+          .map((t) => ({ tableName: t, selected: true })),
+      }))
+      .sort((a, b) => a.schemaName.localeCompare(b.schemaName)),
+  }));
+}
+
 export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
   const [content, setContent] = useState("");
   const [contextTables, setContextTables] = useState<ContextTable[]>([]);
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
-  const [availableTables, setAvailableTables] = useState<TableInfo[]>([]);
-  const [selectedDataSource, setSelectedDataSource] = useState("");
-  const [selectedTable, setSelectedTable] = useState("");
+  const [allTablesMap, setAllTablesMap] = useState<Map<string, TableInfo[]>>(
+    new Map(),
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [previewMode, setPreviewMode] = useState(false);
-  const [loadingTables, setLoadingTables] = useState(false);
+  const [previewMode, setPreviewMode] = useState(true);
+  const [editingTables, setEditingTables] = useState(false);
+  const [loadingAllTables, setLoadingAllTables] = useState(false);
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
 
   const fetchContext = useCallback(async () => {
     setLoading(true);
@@ -84,29 +167,33 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
     fetchDataSources();
   }, [fetchContext, fetchDataSources]);
 
-  const fetchTablesForSource = useCallback(async (dsId: string) => {
-    if (!dsId) return;
-    setLoadingTables(true);
-    try {
-      const res = await fetch(`/api/data-sources/${dsId}/tables`);
-      if (res.ok) {
-        const data = await res.json();
-        setAvailableTables(data.tables ?? []);
-      }
-    } catch {
-      setAvailableTables([]);
-    } finally {
-      setLoadingTables(false);
-    }
-  }, []);
+  const fetchAllTables = useCallback(async () => {
+    if (dataSources.length === 0) return;
+    setLoadingAllTables(true);
+    const newMap = new Map<string, TableInfo[]>();
+    await Promise.all(
+      dataSources.map(async (ds) => {
+        try {
+          const res = await fetch(`/api/data-sources/${ds.id}/tables`);
+          if (res.ok) {
+            const data = await res.json();
+            newMap.set(ds.id, data.tables ?? []);
+          }
+        } catch {
+          /* ignore */
+        }
+      }),
+    );
+    setAllTablesMap(newMap);
+    setLoadingAllTables(false);
+  }, [dataSources]);
 
-  useEffect(() => {
-    if (selectedDataSource) {
-      fetchTablesForSource(selectedDataSource);
-    } else {
-      setAvailableTables([]);
+  const handleEditTables = useCallback(() => {
+    setEditingTables(true);
+    if (allTablesMap.size === 0) {
+      fetchAllTables();
     }
-  }, [selectedDataSource, fetchTablesForSource]);
+  }, [allTablesMap.size, fetchAllTables]);
 
   const saveContext = async () => {
     setSaving(true);
@@ -129,35 +216,75 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
     }
   };
 
-  const addTable = () => {
-    if (!selectedDataSource || !selectedTable) return;
-    const [schema, table] = selectedTable.split(".");
-    const ds = dataSources.find((d) => d.id === selectedDataSource);
-    const alreadyAdded = contextTables.some(
+  const toggleTable = (
+    dataSourceId: string,
+    dataSourceName: string,
+    schemaName: string,
+    tableName: string,
+  ) => {
+    const exists = contextTables.some(
       (t) =>
-        t.dataSourceId === selectedDataSource &&
-        t.schemaName === schema &&
-        t.tableName === table,
+        t.dataSourceId === dataSourceId &&
+        t.schemaName === schemaName &&
+        t.tableName === tableName,
     );
-    if (alreadyAdded) {
-      toast.info("Table already added");
-      return;
+    if (exists) {
+      setContextTables((prev) =>
+        prev.filter(
+          (t) =>
+            !(
+              t.dataSourceId === dataSourceId &&
+              t.schemaName === schemaName &&
+              t.tableName === tableName
+            ),
+        ),
+      );
+    } else {
+      setContextTables((prev) => [
+        ...prev,
+        { dataSourceId, dataSourceName, schemaName, tableName },
+      ]);
     }
-    setContextTables((prev) => [
-      ...prev,
-      {
-        dataSourceId: selectedDataSource,
-        dataSourceName: ds?.name,
-        schemaName: schema,
-        tableName: table,
-      },
-    ]);
-    setSelectedTable("");
   };
 
-  const removeTable = (index: number) => {
-    setContextTables((prev) => prev.filter((_, i) => i !== index));
+  const removeTable = (
+    dataSourceId: string,
+    schemaName: string,
+    tableName: string,
+  ) => {
+    setContextTables((prev) =>
+      prev.filter(
+        (t) =>
+          !(
+            t.dataSourceId === dataSourceId &&
+            t.schemaName === schemaName &&
+            t.tableName === tableName
+          ),
+      ),
+    );
   };
+
+  const toggleNode = (nodeKey: string) => {
+    setExpandedNodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeKey)) {
+        next.delete(nodeKey);
+      } else {
+        next.add(nodeKey);
+      }
+      return next;
+    });
+  };
+
+  const fullTree = useMemo(
+    () => buildTree(dataSources, allTablesMap, contextTables),
+    [dataSources, allTablesMap, contextTables],
+  );
+
+  const selectedTree = useMemo(
+    () => buildSelectedTree(contextTables),
+    [contextTables],
+  );
 
   if (loading) {
     return (
@@ -169,6 +296,7 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Context</h2>
         <div className="flex items-center gap-2">
@@ -200,89 +328,326 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-h-[400px]">
-        {!previewMode ? (
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            className="w-full h-full min-h-[400px] rounded-lg border bg-background p-4 font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-            placeholder="Describe what this entity does... (Markdown supported)"
-          />
-        ) : null}
-        <div
-          className={cn(
-            "rounded-lg border bg-muted/30 p-4 overflow-auto prose prose-sm dark:prose-invert max-w-none",
-            previewMode && "col-span-2",
-          )}
-        >
+      {/* Markdown Editor / Preview */}
+      {previewMode ? (
+        <div className="rounded-lg border bg-muted/30 p-4 min-h-[300px] overflow-auto prose prose-sm dark:prose-invert max-w-none">
           {content ? (
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
           ) : (
             <p className="text-muted-foreground italic">No content yet.</p>
           )}
         </div>
-      </div>
+      ) : (
+        <textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          className="w-full min-h-[300px] rounded-lg border bg-background p-4 font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+          placeholder="Describe what this entity does... (Markdown supported)"
+        />
+      )}
 
+      {/* Related Tables */}
       <div className="space-y-3">
-        <h3 className="text-sm font-semibold">Related Tables</h3>
-        <div className="flex flex-wrap gap-2">
-          {contextTables.map((t, i) => (
-            <Badge key={i} variant="secondary" className="gap-1 pr-1">
-              {t.schemaName}.{t.tableName}
-              <button
-                onClick={() => removeTable(i)}
-                className="ml-1 rounded-full p-0.5 hover:bg-muted"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </Badge>
-          ))}
-        </div>
-        <div className="flex gap-2 items-end">
-          <div className="flex-1">
-            <Select value={selectedDataSource} onValueChange={setSelectedDataSource}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select data source" />
-              </SelectTrigger>
-              <SelectContent>
-                {dataSources.map((ds) => (
-                  <SelectItem key={ds.id} value={ds.id}>
-                    {ds.name} ({ds.type})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex-1">
-            <Select
-              value={selectedTable}
-              onValueChange={setSelectedTable}
-              disabled={!selectedDataSource || loadingTables}
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Related Tables</h3>
+          {!editingTables ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleEditTables}
             >
-              <SelectTrigger>
-                <SelectValue
-                  placeholder={loadingTables ? "Loading..." : "Select table"}
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {availableTables.map((t) => (
-                  <SelectItem key={`${t.schema}.${t.name}`} value={`${t.schema}.${t.name}`}>
-                    {t.schema}.{t.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={addTable}
-            disabled={!selectedDataSource || !selectedTable}
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
+              <Edit3 className="mr-1.5 h-3.5 w-3.5" />
+              Edit
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEditingTables(false)}
+            >
+              Done
+            </Button>
+          )}
         </div>
+
+        {editingTables ? (
+          <EditableTableTree
+            tree={fullTree}
+            loading={loadingAllTables}
+            expandedNodes={expandedNodes}
+            toggleNode={toggleNode}
+            toggleTable={toggleTable}
+          />
+        ) : (
+          <SelectedTableTree
+            tree={selectedTree}
+            expandedNodes={expandedNodes}
+            toggleNode={toggleNode}
+            removeTable={removeTable}
+          />
+        )}
       </div>
     </div>
+  );
+}
+
+function SelectedTableTree({
+  tree,
+  expandedNodes,
+  toggleNode,
+  removeTable,
+}: {
+  tree: TreeNode[];
+  expandedNodes: Set<string>;
+  toggleNode: (key: string) => void;
+  removeTable: (dsId: string, schema: string, table: string) => void;
+}) {
+  if (tree.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground italic">
+        No tables selected.
+      </p>
+    );
+  }
+
+  return (
+    <ScrollArea className="max-h-[400px]">
+      <div className="rounded-lg border bg-muted/20 p-2 space-y-0.5">
+        {tree.map((ds) => {
+          const dsKey = `selected-ds-${ds.dataSourceId}`;
+          const dsExpanded = expandedNodes.has(dsKey);
+          return (
+            <div key={ds.dataSourceId}>
+              <button
+                onClick={() => toggleNode(dsKey)}
+                className="flex items-center gap-1.5 w-full rounded px-2 py-1.5 text-sm font-medium hover:bg-muted/60 transition-colors"
+              >
+                {dsExpanded ? (
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                )}
+                <Database className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                <span className="truncate">{ds.dataSourceName}</span>
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {ds.schemas.reduce((n, s) => n + s.tables.length, 0)}
+                </span>
+              </button>
+              {dsExpanded && (
+                <div className="ml-4">
+                  {ds.schemas.map((schema) => {
+                    const schemaKey = `selected-schema-${ds.dataSourceId}-${schema.schemaName}`;
+                    const schemaExpanded = expandedNodes.has(schemaKey);
+                    return (
+                      <div key={schema.schemaName}>
+                        <button
+                          onClick={() => toggleNode(schemaKey)}
+                          className="flex items-center gap-1.5 w-full rounded px-2 py-1 text-sm hover:bg-muted/60 transition-colors"
+                        >
+                          {schemaExpanded ? (
+                            <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+                          ) : (
+                            <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                          )}
+                          <FolderOpen className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                          <span className="truncate">{schema.schemaName}</span>
+                          <span className="ml-auto text-xs text-muted-foreground">
+                            {schema.tables.length}
+                          </span>
+                        </button>
+                        {schemaExpanded && (
+                          <div className="ml-4">
+                            {schema.tables.map((t) => (
+                              <div
+                                key={t.tableName}
+                                className="flex items-center gap-1.5 rounded px-2 py-1 text-sm group hover:bg-muted/60 transition-colors"
+                              >
+                                <Table2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                <span className="truncate">{t.tableName}</span>
+                                <button
+                                  onClick={() =>
+                                    removeTable(
+                                      ds.dataSourceId,
+                                      schema.schemaName,
+                                      t.tableName,
+                                    )
+                                  }
+                                  className="ml-auto p-0.5 rounded hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  <X className="h-3.5 w-3.5 text-destructive" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </ScrollArea>
+  );
+}
+
+function EditableTableTree({
+  tree,
+  loading,
+  expandedNodes,
+  toggleNode,
+  toggleTable,
+}: {
+  tree: TreeNode[];
+  loading: boolean;
+  expandedNodes: Set<string>;
+  toggleNode: (key: string) => void;
+  toggleTable: (
+    dsId: string,
+    dsName: string,
+    schema: string,
+    table: string,
+  ) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <span className="ml-2 text-sm text-muted-foreground">
+          Loading tables...
+        </span>
+      </div>
+    );
+  }
+
+  if (tree.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground italic">
+        No data sources available.
+      </p>
+    );
+  }
+
+  const sortedTree = tree.map((ds) => ({
+    ...ds,
+    schemas: ds.schemas.map((s) => {
+      const selected = s.tables.filter((t) => t.selected);
+      const unselected = s.tables.filter((t) => !t.selected);
+      return { ...s, tables: [...selected, ...unselected] };
+    }),
+  }));
+
+  const withSelected = sortedTree.filter((ds) =>
+    ds.schemas.some((s) => s.tables.some((t) => t.selected)),
+  );
+  const withoutSelected = sortedTree.filter(
+    (ds) => !ds.schemas.some((s) => s.tables.some((t) => t.selected)),
+  );
+  const orderedTree = [...withSelected, ...withoutSelected];
+
+  return (
+    <ScrollArea className="max-h-[500px]">
+      <div className="rounded-lg border bg-muted/20 p-2 space-y-0.5">
+        {orderedTree.map((ds) => {
+          const dsKey = `edit-ds-${ds.dataSourceId}`;
+          const dsExpanded = expandedNodes.has(dsKey);
+          const selectedCount = ds.schemas.reduce(
+            (n, s) => n + s.tables.filter((t) => t.selected).length,
+            0,
+          );
+          return (
+            <div key={ds.dataSourceId}>
+              <button
+                onClick={() => toggleNode(dsKey)}
+                className="flex items-center gap-1.5 w-full rounded px-2 py-1.5 text-sm font-medium hover:bg-muted/60 transition-colors"
+              >
+                {dsExpanded ? (
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                )}
+                <Database className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                <span className="truncate">{ds.dataSourceName}</span>
+                {selectedCount > 0 && (
+                  <span className="ml-auto text-xs font-normal rounded-full bg-primary/10 text-primary px-1.5 py-0.5">
+                    {selectedCount} selected
+                  </span>
+                )}
+              </button>
+              {dsExpanded && (
+                <div className="ml-4">
+                  {ds.schemas.map((schema) => {
+                    const schemaKey = `edit-schema-${ds.dataSourceId}-${schema.schemaName}`;
+                    const schemaExpanded = expandedNodes.has(schemaKey);
+                    const schemaSelectedCount = schema.tables.filter(
+                      (t) => t.selected,
+                    ).length;
+                    return (
+                      <div key={schema.schemaName}>
+                        <button
+                          onClick={() => toggleNode(schemaKey)}
+                          className="flex items-center gap-1.5 w-full rounded px-2 py-1 text-sm hover:bg-muted/60 transition-colors"
+                        >
+                          {schemaExpanded ? (
+                            <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+                          ) : (
+                            <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                          )}
+                          <FolderOpen className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                          <span className="truncate">{schema.schemaName}</span>
+                          {schemaSelectedCount > 0 && (
+                            <span className="ml-auto text-xs font-normal rounded-full bg-primary/10 text-primary px-1.5 py-0.5">
+                              {schemaSelectedCount}
+                            </span>
+                          )}
+                        </button>
+                        {schemaExpanded && (
+                          <div className="ml-4">
+                            {schema.tables.map((t) => (
+                              <button
+                                key={t.tableName}
+                                onClick={() =>
+                                  toggleTable(
+                                    ds.dataSourceId,
+                                    ds.dataSourceName,
+                                    schema.schemaName,
+                                    t.tableName,
+                                  )
+                                }
+                                className={cn(
+                                  "flex items-center gap-1.5 w-full rounded px-2 py-1 text-sm hover:bg-muted/60 transition-colors",
+                                  t.selected && "bg-primary/5",
+                                )}
+                              >
+                                <div
+                                  className={cn(
+                                    "h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors",
+                                    t.selected
+                                      ? "bg-primary border-primary"
+                                      : "border-muted-foreground/40",
+                                  )}
+                                >
+                                  {t.selected && (
+                                    <Check className="h-3 w-3 text-primary-foreground" />
+                                  )}
+                                </div>
+                                <Table2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                <span className="truncate">{t.tableName}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </ScrollArea>
   );
 }
