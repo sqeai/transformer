@@ -453,7 +453,7 @@ export default function DatasetPage() {
     setExportDialogOpen(true);
   };
 
-  // --- Starlight ---
+  // --- AI Data Cleanser ---
 
   const escapeCsvCell = useCallback((value: unknown): string => {
     const text = String(value ?? "");
@@ -512,10 +512,10 @@ export default function DatasetPage() {
         const job = Array.isArray(statusData.jobs) ? statusData.jobs[0] : null;
         if (!job) continue;
         if (job.status === "completed") { nextResult = (job.result ?? null) as AiCleanseJobResult | null; break; }
-        if (job.status === "failed") throw new Error(String(job.error ?? "Starlight job failed"));
+        if (job.status === "failed") throw new Error(String(job.error ?? "AI Data Cleanser job failed"));
       }
 
-      if (!nextResult) throw new Error("Timed out waiting for Starlight");
+      if (!nextResult) throw new Error("Timed out waiting for AI Data Cleanser");
       const finalResult = nextResult;
 
       const nextRows = Array.isArray(finalResult.transformedRows) ? finalResult.transformedRows : [];
@@ -537,12 +537,12 @@ export default function DatasetPage() {
       const patchData = await patchRes.json().catch(() => ({}));
       if (!patchRes.ok) throw new Error(patchData.error ?? "Failed to save cleansed dataset");
 
-      toast.success(`Starlight updated dataset (${nextRows.length} rows)`);
+      toast.success(`AI Data Cleanser updated dataset (${nextRows.length} rows)`);
       setAiCleanserDialogOpen(false);
       setAiCleanserInstructions("");
       await fetchDataset();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to run Starlight");
+      toast.error(error instanceof Error ? error.message : "Failed to run AI Data Cleanser");
     } finally { setAiCleanserRunning(false); }
   };
 

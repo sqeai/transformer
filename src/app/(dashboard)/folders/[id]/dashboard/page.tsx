@@ -898,7 +898,7 @@ export default function FolderDashboardPage() {
       <StarlightInput
         onSubmit={handleStarlightSubmit}
         isLoading={isLoading}
-        placeholder="Ask Starlight anything (⌘K)"
+        placeholder="Ask AI Data Cleanser anything (⌘K)"
         messages={messages}
         view="dashboard"
       />

@@ -331,7 +331,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                       <Sparkles className="h-5 w-5 text-primary-foreground" />
                     </div>
                     <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent truncate">
-                      Starlight
+                      AI Data Cleanser
                     </span>
                   </Link>
                   <Button

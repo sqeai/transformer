@@ -81,7 +81,7 @@ export function TransformationsTab({
             </div>
             <CardDescription>
               Transformations applied to the dataset after initial creation
-              via the Starlight.
+              via the AI Data Cleanser.
             </CardDescription>
           </CardHeader>
           <CardContent>

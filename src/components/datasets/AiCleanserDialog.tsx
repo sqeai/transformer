@@ -37,7 +37,7 @@ export function AiCleanserDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-4 w-4" />
-            Starlight
+            AI Data Cleanser
           </DialogTitle>
           <DialogDescription>
             Transform this dataset using the same AI agent. Output columns stay

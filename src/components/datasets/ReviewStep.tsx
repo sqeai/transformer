@@ -375,7 +375,7 @@ export function ReviewStep({
                       <div className="flex items-center justify-between gap-2 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
                         <div className="flex items-center gap-2">
                           <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                          Starlight is re-processing this file...
+                          AI Data Cleanser is re-processing this file...
                         </div>
                         <Button
                           variant="outline"
