@@ -34,6 +34,7 @@ import {
   BarChart3,
   Sparkles,
   Search,
+  BookOpen,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -659,7 +660,7 @@ function exportChatAsMarkdown(messages: { role: string; parts?: { type: string; 
 export function AnalystChat() {
   const searchParams = useSearchParams();
   const [input, setInput] = useState("");
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [persona, setPersona] = useState<Persona | null>(null);
   const [chatId, setChatId] = useState<string | null>(null);
   const [contextSelection, setContextSelection] =
@@ -667,6 +668,7 @@ export function AnalystChat() {
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -722,6 +724,12 @@ export function AnalystChat() {
   }, [status, chatId, messages, saveChatMessages]);
 
   const loadChat = useCallback(async (id: string) => {
+    setMessages([]);
+    setChatId(id);
+    setPersona(null);
+    setInput("");
+    setAttachedFiles([]);
+    setChatLoading(true);
     try {
       const res = await fetch(`/api/chat-history/${id}`);
       if (res.ok) {
@@ -734,6 +742,8 @@ export function AnalystChat() {
       }
     } catch {
       toast.error("Failed to load chat");
+    } finally {
+      setChatLoading(false);
     }
   }, [setMessages]);
 
@@ -760,6 +770,7 @@ export function AnalystChat() {
       setInput("");
       setAttachedFiles([]);
       setContextSelection(null);
+      setChatLoading(false);
       localStorage.removeItem(ANALYST_STORAGE_KEY);
     };
     window.addEventListener("new-chat", handleNewChat);
@@ -1099,6 +1110,25 @@ export function AnalystChat() {
             >
               <Download className="h-4 w-4" />
             </Button>
+            {!panelOpen && contextSelection && contextSelection.contexts.length > 0 && (
+              <div className="flex items-center gap-1 mr-1 max-w-[200px] overflow-hidden">
+                {contextSelection.contexts.slice(0, 3).map((ctx) => (
+                  <span
+                    key={ctx.folderId}
+                    className="inline-flex items-center gap-1 rounded-md bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium truncate max-w-[80px]"
+                    title={ctx.folderName}
+                  >
+                    <BookOpen className="h-2.5 w-2.5 flex-shrink-0" />
+                    <span className="truncate">{ctx.folderName}</span>
+                  </span>
+                ))}
+                {contextSelection.contexts.length > 3 && (
+                  <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                    +{contextSelection.contexts.length - 3}
+                  </span>
+                )}
+              </div>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -1120,7 +1150,14 @@ export function AnalystChat() {
           ref={scrollRef}
           className="flex-1 overflow-y-auto px-6 py-4 space-y-4"
         >
-          {messages.length === 0 && !isLoading && (
+          {chatLoading && (
+            <div className="flex flex-1 flex-col items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary/60 mb-3" />
+              <p className="text-sm text-muted-foreground">Loading chat...</p>
+            </div>
+          )}
+
+          {messages.length === 0 && !isLoading && !chatLoading && (
             <WelcomeScreen
               onPromptClick={(text) => {
                 setInput(text);

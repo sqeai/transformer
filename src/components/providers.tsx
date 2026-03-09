@@ -21,7 +21,7 @@ export function Providers({ children }: { children: ReactNode }) {
             <SchemaStoreProvider>
               <ChatProvider>
                 {children}
-                <ChatBubble />
+                {/* <ChatBubble /> */}
                 <Toaster richColors position="top-right" />
               </ChatProvider>
             </SchemaStoreProvider>

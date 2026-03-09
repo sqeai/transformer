@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useState, useEffect, useCallback } from "react";
 import {
   LogOut,
@@ -14,6 +14,8 @@ import {
   ShieldCheck,
   ChevronDown,
   ChevronRight,
+  MoreHorizontal,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -41,6 +43,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
@@ -76,7 +84,9 @@ function buildTree(
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, signOut } = useAuth();
+  const activeChatId = pathname === "/assistant" ? searchParams.get("chat") : null;
   const [collapsed, setCollapsed] = useState(false);
   const [foldersCollapsed, setFoldersCollapsed] = useState(false);
   const [folders, setFolders] = useState<FolderNode[]>([]);
@@ -96,6 +106,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteFolderId, setDeleteFolderId] = useState("");
+
+  const [deleteChatDialogOpen, setDeleteChatDialogOpen] = useState(false);
+  const [deleteChatId, setDeleteChatId] = useState("");
 
   useEffect(() => {
     const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
@@ -220,6 +233,33 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     }
   };
 
+  const handleDeleteChat = (chatId: string) => {
+    setDeleteChatId(chatId);
+    setDeleteChatDialogOpen(true);
+  };
+
+  const confirmDeleteChat = async () => {
+    try {
+      const res = await fetch(`/api/chat-history/${deleteChatId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        toast.success("Chat deleted");
+        loadChatHistory();
+        if (activeChatId === deleteChatId) {
+          router.push("/assistant");
+        }
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error ?? "Failed to delete chat");
+      }
+    } catch {
+      toast.error("Failed to delete chat");
+    } finally {
+      setDeleteChatDialogOpen(false);
+    }
+  };
+
   const isAssistantActive =
     pathname === "/assistant" || pathname.startsWith("/assistant/");
   const isProfileActive = pathname === "/profile";
@@ -328,6 +368,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 foldersCollapsed ? "flex-1 min-h-0" : "min-h-[300px] shrink-0",
               )}>
                 {(() => {
+                  const isNewChatActive = isAssistantActive && !activeChatId;
                   const handleNewChat = (e: React.MouseEvent) => {
                     e.preventDefault();
                     window.dispatchEvent(new CustomEvent("new-chat"));
@@ -339,7 +380,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                       onClick={handleNewChat}
                       className={cn(
                         "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                        "text-sidebar-foreground hover:bg-sidebar-accent/50",
+                        isNewChatActive
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                          : "text-sidebar-foreground hover:bg-sidebar-accent/50",
                         collapsed && "justify-center px-0",
                       )}
                     >
@@ -365,19 +408,59 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                       <p className="text-xs text-muted-foreground text-center py-4">No saved chats</p>
                     ) : (
                       <div className="space-y-0.5 px-2">
-                        {chatHistory.map((chat) => (
-                          <Link
-                            key={chat.id}
-                            href={`/assistant?chat=${chat.id}`}
-                            className="block rounded-lg px-2 py-1.5 hover:bg-sidebar-accent/50 transition-colors"
-                          >
-                            <p className="text-xs font-medium truncate text-sidebar-foreground">{chat.title}</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
-                              {chat.persona && <span className="capitalize">{chat.persona.replace("_", " ")} · </span>}
-                              {new Date(chat.updated_at).toLocaleDateString()}
-                            </p>
-                          </Link>
-                        ))}
+                        {chatHistory.map((chat) => {
+                          const isActive = activeChatId === chat.id;
+                          return (
+                            <div
+                              key={chat.id}
+                              className={cn(
+                                "group relative rounded-lg transition-colors",
+                                isActive
+                                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                                  : "hover:bg-sidebar-accent/50",
+                              )}
+                            >
+                              <Link
+                                href={`/assistant?chat=${chat.id}`}
+                                className="block px-2 py-1.5 pr-7"
+                              >
+                                <p className={cn(
+                                  "text-xs font-medium truncate",
+                                  isActive ? "text-sidebar-accent-foreground" : "text-sidebar-foreground",
+                                )}>{chat.title}</p>
+                                <p className={cn(
+                                  "text-[10px] mt-0.5 truncate",
+                                  isActive ? "text-sidebar-accent-foreground/70" : "text-muted-foreground",
+                                )}>
+                                  {chat.persona && <span className="capitalize">{chat.persona.replace("_", " ")} · </span>}
+                                  {new Date(chat.updated_at).toLocaleDateString()}
+                                </p>
+                              </Link>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    className={cn(
+                                      "absolute right-1 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded-md opacity-0 transition-opacity hover:bg-sidebar-accent",
+                                      "group-hover:opacity-100 focus:opacity-100 data-[state=open]:opacity-100",
+                                    )}
+                                    onClick={(e) => e.preventDefault()}
+                                  >
+                                    <MoreHorizontal className="h-3.5 w-3.5 text-sidebar-foreground" />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent side="right" align="start" className="w-36">
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onClick={() => handleDeleteChat(chat.id)}
+                                  >
+                                    <Trash2 className="mr-2 h-3.5 w-3.5" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -529,6 +612,27 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={deleteChatDialogOpen} onOpenChange={setDeleteChatDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete chat?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this chat and its message history.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDeleteChat}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete
