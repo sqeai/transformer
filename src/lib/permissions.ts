@@ -220,11 +220,21 @@ export const PermissionsService = {
   },
 
   /**
-   * Get all folder IDs a user can access — direct memberships plus all
-   * their descendant folders (inheriting the same level of access).
+   * Get all folder IDs a user can access — superadmins get everything,
+   * otherwise direct memberships plus all their descendant folders.
    */
   async getAccessibleFolderIds(userId: string): Promise<string[]> {
     const supabase = createAdminClient();
+
+    const isSuperadmin = await fetchIsSuperadmin(userId);
+    if (isSuperadmin) {
+      const { data, error } = await supabase
+        .from("folders")
+        .select("id");
+      if (error || !data) return [];
+      return data.map((f) => f.id);
+    }
+
     const { data, error } = await supabase
       .from("folder_members")
       .select("folder_id")
@@ -242,6 +252,85 @@ export const PermissionsService = {
     }
 
     return Array.from(allIds);
+  },
+
+  /**
+   * Get all folders a user can access, including ancestor folders needed
+   * for tree rendering. This is the single source of truth for what
+   * folders should appear in the sidebar.
+   *
+   * Returns the full folder records so the API layer doesn't need to
+   * re-query or implement its own traversal logic.
+   */
+  async getAccessibleFolders(
+    userId: string,
+  ): Promise<
+    { id: string; name: string; parent_id: string | null; created_by: string; created_at: string; updated_at: string }[]
+  > {
+    const supabase = createAdminClient();
+    const isSuperadmin = await fetchIsSuperadmin(userId);
+
+    if (isSuperadmin) {
+      const { data, error } = await supabase
+        .from("folders")
+        .select("id, name, parent_id, created_by, created_at, updated_at")
+        .order("name");
+      if (error) return [];
+      return data ?? [];
+    }
+
+    const accessibleIds = await this.getAccessibleFolderIds(userId);
+    if (accessibleIds.length === 0) return [];
+
+    const { data: accessibleFolders, error } = await supabase
+      .from("folders")
+      .select("id, name, parent_id, created_by, created_at, updated_at")
+      .in("id", accessibleIds)
+      .order("name");
+
+    if (error || !accessibleFolders) return [];
+
+    // Walk up ancestor chains so the client can render a proper tree
+    const knownIds = new Set(accessibleIds);
+    const ancestorIds = new Set<string>();
+    const toResolve: string[] = [];
+
+    for (const f of accessibleFolders) {
+      if (f.parent_id && !knownIds.has(f.parent_id)) {
+        toResolve.push(f.parent_id);
+      }
+    }
+
+    while (toResolve.length > 0) {
+      const parentId = toResolve.pop()!;
+      if (knownIds.has(parentId) || ancestorIds.has(parentId)) continue;
+      ancestorIds.add(parentId);
+      const { data: parent } = await supabase
+        .from("folders")
+        .select("id, parent_id")
+        .eq("id", parentId)
+        .maybeSingle();
+      if (parent?.parent_id) {
+        toResolve.push(parent.parent_id);
+      }
+    }
+
+    let ancestorFolders: typeof accessibleFolders = [];
+    if (ancestorIds.size > 0) {
+      const { data: ancestors } = await supabase
+        .from("folders")
+        .select("id, name, parent_id, created_by, created_at, updated_at")
+        .in("id", Array.from(ancestorIds));
+      ancestorFolders = ancestors ?? [];
+    }
+
+    const allFolders = [...accessibleFolders, ...ancestorFolders];
+    const seen = new Set<string>();
+    return allFolders.filter((f) => {
+      if (seen.has(f.id)) return false;
+      seen.add(f.id);
+      return true;
+    });
   },
 
   /**

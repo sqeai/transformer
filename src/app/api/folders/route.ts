@@ -7,77 +7,8 @@ export async function GET() {
   const result = await requireAuth();
   if (result.error) return result.error;
 
-  const supabase = createAdminClient();
-  const userId = result.user.id;
-  const isAdmin = await PermissionsService.isSuperadmin(userId);
-
-  if (isAdmin) {
-    const { data, error } = await supabase
-      .from("folders")
-      .select("id, name, parent_id, created_by, created_at, updated_at")
-      .order("name");
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-    return NextResponse.json({ folders: data ?? [] });
-  }
-
-  const accessibleIds = await PermissionsService.getAccessibleFolderIds(userId);
-  if (accessibleIds.length === 0) {
-    return NextResponse.json({ folders: [] });
-  }
-
-  // Fetch all accessible folders (direct + inherited descendants)
-  const { data: accessibleFolders, error } = await supabase
-    .from("folders")
-    .select("id, name, parent_id, created_by, created_at, updated_at")
-    .in("id", accessibleIds)
-    .order("name");
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  // Also fetch ancestor folders for tree rendering (walk up until root)
-  const knownIds = new Set(accessibleIds);
-  const ancestorIds = new Set<string>();
-  const toResolve = (accessibleFolders ?? [])
-    .filter((f) => f.parent_id && !knownIds.has(f.parent_id))
-    .map((f) => f.parent_id!);
-
-  while (toResolve.length > 0) {
-    const parentId = toResolve.pop()!;
-    if (knownIds.has(parentId) || ancestorIds.has(parentId)) continue;
-    ancestorIds.add(parentId);
-    const { data: parent } = await supabase
-      .from("folders")
-      .select("id, parent_id")
-      .eq("id", parentId)
-      .maybeSingle();
-    if (parent?.parent_id) {
-      toResolve.push(parent.parent_id);
-    }
-  }
-
-  let ancestorFolders: typeof accessibleFolders = [];
-  if (ancestorIds.size > 0) {
-    const { data: ancestors } = await supabase
-      .from("folders")
-      .select("id, name, parent_id, created_by, created_at, updated_at")
-      .in("id", Array.from(ancestorIds));
-    ancestorFolders = ancestors ?? [];
-  }
-
-  const allFolders = [...(accessibleFolders ?? []), ...ancestorFolders];
-  const seen = new Set<string>();
-  const unique = allFolders.filter((f) => {
-    if (seen.has(f.id)) return false;
-    seen.add(f.id);
-    return true;
-  });
-
-  return NextResponse.json({ folders: unique });
+  const folders = await PermissionsService.getAccessibleFolders(result.user.id);
+  return NextResponse.json({ folders });
 }
 
 export async function POST(request: NextRequest) {

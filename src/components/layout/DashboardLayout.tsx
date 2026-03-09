@@ -289,7 +289,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 {!collapsed ? (
                   <button
                     onClick={toggleFoldersCollapsed}
-                    className="flex w-full items-center gap-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+                    className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
                   >
                     {foldersCollapsed ? (
                       <ChevronRight className="h-3 w-3" />

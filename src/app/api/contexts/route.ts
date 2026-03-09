@@ -21,13 +21,7 @@ export async function GET(request: NextRequest) {
   if (folderIdsParam) {
     folderIds = folderIdsParam.split(",").filter(Boolean);
   } else {
-    const isAdmin = await PermissionsService.isSuperadmin(userId);
-    if (isAdmin) {
-      const { data } = await supabase.from("folders").select("id");
-      folderIds = (data ?? []).map((f) => f.id);
-    } else {
-      folderIds = await PermissionsService.getAccessibleFolderIds(userId);
-    }
+    folderIds = await PermissionsService.getAccessibleFolderIds(userId);
   }
 
   if (folderIds.length === 0) {
