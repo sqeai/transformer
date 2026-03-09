@@ -57,6 +57,7 @@ export function ManageAccessDialog({
   const [inheritedMembers, setInheritedMembers] = useState<InheritedMember[]>([]);
   const [loading, setLoading] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
+  const [canManage, setCanManage] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [newRole, setNewRole] = useState("viewer");
   const [adding, setAdding] = useState(false);
@@ -75,6 +76,7 @@ export function ManageAccessDialog({
         const data = await res.json();
         setMembers(data.members ?? []);
         setInheritedMembers(data.inherited ?? []);
+        setCanManage(data.canManage ?? false);
       }
     } catch {
       toast.error("Failed to load members");
@@ -174,7 +176,9 @@ export function ManageAccessDialog({
             Manage Access
           </DialogTitle>
           <DialogDescription>
-            Manage who has access to <strong>{folderName}</strong>
+            {canManage
+              ? <>Manage who has access to <strong>{folderName}</strong></>
+              : <>View who has access to <strong>{folderName}</strong></>}
           </DialogDescription>
         </DialogHeader>
 
@@ -189,34 +193,36 @@ export function ManageAccessDialog({
           </div>
         ) : (
         <div className="space-y-4">
-          <div className="flex gap-2">
-            <Input
-              placeholder="Email address"
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addMember()}
-              className="flex-1"
-            />
-            <Select value={newRole} onValueChange={setNewRole}>
-              <SelectTrigger className="w-28">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ROLES.map((r) => (
-                  <SelectItem key={r.value} value={r.value}>
-                    {r.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button onClick={addMember} disabled={adding || !newEmail.trim()} size="sm">
-              {adding ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
+          {canManage && (
+            <div className="flex gap-2">
+              <Input
+                placeholder="Email address"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addMember()}
+                className="flex-1"
+              />
+              <Select value={newRole} onValueChange={setNewRole}>
+                <SelectTrigger className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLES.map((r) => (
+                    <SelectItem key={r.value} value={r.value}>
+                      {r.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button onClick={addMember} disabled={adding || !newEmail.trim()} size="sm">
+                {adding ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          )}
 
           {loading ? (
             <div className="flex justify-center py-4">
@@ -238,31 +244,37 @@ export function ManageAccessDialog({
                         <p className="text-sm font-medium truncate">{member.name || member.email}</p>
                         <p className="text-xs text-muted-foreground truncate">{member.email}</p>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Select
-                          value={member.role}
-                          onValueChange={(role) => updateRole(member.userId, role)}
-                        >
-                          <SelectTrigger className="w-24 h-7 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ROLES.map((r) => (
-                              <SelectItem key={r.value} value={r.value}>
-                                {r.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                          onClick={() => removeMember(member.userId)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
+                      {canManage ? (
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Select
+                            value={member.role}
+                            onValueChange={(role) => updateRole(member.userId, role)}
+                          >
+                            <SelectTrigger className="w-24 h-7 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {ROLES.map((r) => (
+                                <SelectItem key={r.value} value={r.value}>
+                                  {r.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                            onClick={() => removeMember(member.userId)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <Badge variant={roleBadgeVariant(member.role)} className="text-xs">
+                          {ROLES.find((r) => r.value === member.role)?.label ?? member.role}
+                        </Badge>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -294,7 +306,7 @@ export function ManageAccessDialog({
 
               {members.length === 0 && inheritedMembers.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-4">
-                  No members yet. Add someone to get started.
+                  {canManage ? "No members yet. Add someone to get started." : "No members yet."}
                 </p>
               )}
             </div>

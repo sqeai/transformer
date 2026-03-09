@@ -17,6 +17,7 @@ export type Permission =
   | "view_schemas"
   | "view_panels"
   | "view_alerts"
+  | "view_members"
   | "use_chat"
   | "edit_context"
   | "edit_data_sources"
@@ -32,6 +33,7 @@ const ROLE_PERMISSIONS: Record<FolderRole, Permission[]> = {
   data_engineer: [
     "view_datasets",
     "view_schemas",
+    "view_members",
     "edit_datasets",
     "edit_schemas",
   ],
@@ -42,6 +44,7 @@ const ROLE_PERMISSIONS: Record<FolderRole, Permission[]> = {
     "view_schemas",
     "view_panels",
     "view_alerts",
+    "view_members",
     "use_chat",
   ],
   editor: [
@@ -51,6 +54,7 @@ const ROLE_PERMISSIONS: Record<FolderRole, Permission[]> = {
     "view_schemas",
     "view_panels",
     "view_alerts",
+    "view_members",
     "use_chat",
     "edit_context",
     "edit_data_sources",
@@ -66,6 +70,7 @@ const ROLE_PERMISSIONS: Record<FolderRole, Permission[]> = {
     "view_schemas",
     "view_panels",
     "view_alerts",
+    "view_members",
     "use_chat",
     "edit_context",
     "edit_data_sources",
@@ -83,6 +88,7 @@ const ROLE_PERMISSIONS: Record<FolderRole, Permission[]> = {
     "view_schemas",
     "view_panels",
     "view_alerts",
+    "view_members",
     "use_chat",
     "edit_context",
     "edit_data_sources",

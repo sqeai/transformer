@@ -8,13 +8,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const access = await requireFolderAccess(id, "manage_users");
+  const access = await requireFolderAccess(id, "view_members");
   if (access.error) return access.error;
 
+  const canManage = await PermissionsService.can(access.user.id, id, "manage_users");
   const members = await PermissionsService.getFolderMembers(id);
   const inherited = await PermissionsService.getDescendantMembers(id);
 
-  return NextResponse.json({ members, inherited });
+  return NextResponse.json({ members, inherited, canManage });
 }
 
 export async function POST(

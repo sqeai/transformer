@@ -154,7 +154,7 @@ function FolderNodeItem({
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onManageAccess(node.id)}>
               <Users className="mr-2 h-4 w-4" />
-              Manage Access
+              {node.role === "admin" || node.role === "owner" ? "Manage Access" : "View Access"}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem

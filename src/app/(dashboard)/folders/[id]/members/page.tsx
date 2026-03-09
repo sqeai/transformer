@@ -48,6 +48,7 @@ export default function FolderMembersPage() {
   const [inheritedMembers, setInheritedMembers] = useState<InheritedMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [permissionDenied, setPermissionDenied] = useState(false);
+  const [canManage, setCanManage] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [newRole, setNewRole] = useState("viewer");
   const [adding, setAdding] = useState(false);
@@ -64,6 +65,7 @@ export default function FolderMembersPage() {
         const data = await res.json();
         setMembers(data.members ?? []);
         setInheritedMembers(data.inherited ?? []);
+        setCanManage(data.canManage ?? false);
       }
     } catch {
       toast.error("Failed to load members");
@@ -175,49 +177,53 @@ export default function FolderMembersPage() {
             Members
           </h1>
           <p className="text-sm text-muted-foreground">
-            Manage who has access to this folder and its contents
+            {canManage
+              ? "Manage who has access to this folder and its contents"
+              : "View who has access to this folder and its contents"}
           </p>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Add Member</CardTitle>
-            <CardDescription>
-              Invite someone by email address and assign a role
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex gap-2">
-              <Input
-                placeholder="Email address"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addMember()}
-                className="flex-1"
-              />
-              <Select value={newRole} onValueChange={setNewRole}>
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ROLES.map((r) => (
-                    <SelectItem key={r.value} value={r.value}>
-                      {r.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button onClick={addMember} disabled={adding || !newEmail.trim()}>
-                {adding ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="mr-2 h-4 w-4" />
-                )}
-                Add
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        {canManage && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Add Member</CardTitle>
+              <CardDescription>
+                Invite someone by email address and assign a role
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Email address"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addMember()}
+                  className="flex-1"
+                />
+                <Select value={newRole} onValueChange={setNewRole}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ROLES.map((r) => (
+                      <SelectItem key={r.value} value={r.value}>
+                        {r.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button onClick={addMember} disabled={adding || !newEmail.trim()}>
+                  {adding ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="mr-2 h-4 w-4" />
+                  )}
+                  Add
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-8">
@@ -235,7 +241,7 @@ export default function FolderMembersPage() {
               <CardContent>
                 {members.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-4 text-center">
-                    No direct members. Add someone above.
+                    {canManage ? "No direct members. Add someone above." : "No direct members."}
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -252,33 +258,39 @@ export default function FolderMembersPage() {
                             {member.email}
                           </p>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <Select
-                            value={member.role}
-                            onValueChange={(role) =>
-                              updateRole(member.userId, role)
-                            }
-                          >
-                            <SelectTrigger className="w-28 h-8">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {ROLES.map((r) => (
-                                <SelectItem key={r.value} value={r.value}>
-                                  {r.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                            onClick={() => removeMember(member.userId)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        {canManage ? (
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Select
+                              value={member.role}
+                              onValueChange={(role) =>
+                                updateRole(member.userId, role)
+                              }
+                            >
+                              <SelectTrigger className="w-28 h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {ROLES.map((r) => (
+                                  <SelectItem key={r.value} value={r.value}>
+                                    {r.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              onClick={() => removeMember(member.userId)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <Badge variant="outline" className="text-xs">
+                            {ROLES.find((r) => r.value === member.role)?.label ?? member.role}
+                          </Badge>
+                        )}
                       </div>
                     ))}
                   </div>
