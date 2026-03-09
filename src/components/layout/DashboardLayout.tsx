@@ -297,7 +297,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               ) : (
                 <>
                   <Link
-                    href="/folders"
+                    href="/assistant"
                     className="flex items-center gap-2 font-semibold text-sidebar-foreground min-w-0 flex-1"
                   >
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent">

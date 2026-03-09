@@ -28,7 +28,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!loading && user) {
-      router.replace("/folders");
+      router.replace("/assistant");
     }
   }, [user, loading, router]);
 
@@ -52,7 +52,7 @@ export default function LoginPage() {
       setError(err.message);
       setIsLoading(false);
     } else {
-      router.push("/folders");
+      router.push("/assistant");
     }
   };
 
