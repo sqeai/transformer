@@ -311,6 +311,7 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
       if (res.ok) {
         toast.success("Related tables saved");
         setEditingTables(false);
+        refreshAllDimensions();
       } else {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error ?? "Failed to save tables");
