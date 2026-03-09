@@ -1,11 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useState, useEffect, useCallback } from "react";
 import {
   LogOut,
-  Sparkles,
   PanelLeftClose,
   PanelLeftOpen,
   SquarePen,
@@ -327,9 +327,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                     href="/assistant"
                     className="flex items-center gap-2 font-semibold text-sidebar-foreground min-w-0 flex-1"
                   >
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent">
-                      <Sparkles className="h-5 w-5 text-primary-foreground" />
-                    </div>
+                    <Image
+                      src="/ai-data-cleanser-logo.png"
+                      alt="AI Data Cleanser"
+                      width={36}
+                      height={36}
+                      className="h-9 w-9 shrink-0 rounded-lg object-contain"
+                    />
                     <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent truncate">
                       AI Data Cleanser
                     </span>
