@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from("users")
-    .select("id, email, full_name, is_activated, is_superadmin, created_at")
+    .select("id, email, full_name, is_activated, is_superadmin, created_at, deleted_at")
     .order("created_at", { ascending: false });
 
   if (search) {
@@ -56,13 +56,16 @@ export async function POST(req: NextRequest) {
 
   const { data: existing } = await supabase
     .from("users")
-    .select("id")
+    .select("id, deleted_at")
     .eq("email", email)
     .maybeSingle();
 
   if (existing) {
+    const hint = existing.deleted_at
+      ? " This email belongs to a deleted user — restore them instead."
+      : "";
     return NextResponse.json(
-      { error: "A user with this email already exists" },
+      { error: `A user with this email already exists.${hint}` },
       { status: 409 },
     );
   }

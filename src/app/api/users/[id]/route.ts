@@ -37,7 +37,10 @@ export async function DELETE(_req: NextRequest, { params }: RouteParams) {
   }
 
   const supabase = createAdminClient();
-  const { error } = await supabase.from("users").delete().eq("id", id);
+  const { error } = await supabase
+    .from("users")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id);
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

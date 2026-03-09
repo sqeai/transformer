@@ -46,6 +46,7 @@ import {
   Copy,
   FolderKey,
   Plus,
+  Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -57,6 +58,7 @@ interface UserRecord {
   is_activated: boolean;
   is_superadmin: boolean;
   created_at: string;
+  deleted_at: string | null;
 }
 
 interface FolderMembership {
@@ -207,7 +209,7 @@ export default function AdminUsersPage() {
     }
   };
 
-  // --- Delete User ---
+  // --- Delete User (soft delete) ---
   const handleDeleteClick = (user: UserRecord) => {
     setDeleteUserId(user.id);
     setDeleteUserEmail(user.email);
@@ -218,7 +220,13 @@ export default function AdminUsersPage() {
     try {
       const res = await fetch(`/api/users/${deleteUserId}`, { method: "DELETE" });
       if (res.ok) {
-        setUsers((prev) => prev.filter((u) => u.id !== deleteUserId));
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === deleteUserId
+              ? { ...u, deleted_at: new Date().toISOString() }
+              : u,
+          ),
+        );
         toast.success("User deleted");
       } else {
         const data = await res.json();
@@ -228,6 +236,26 @@ export default function AdminUsersPage() {
       toast.error("Failed to delete user");
     } finally {
       setDeleteDialogOpen(false);
+    }
+  };
+
+  // --- Restore User ---
+  const handleRestore = async (user: UserRecord) => {
+    try {
+      const res = await fetch(`/api/users/${user.id}/restore`, { method: "POST" });
+      if (res.ok) {
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === user.id ? { ...u, deleted_at: null } : u,
+          ),
+        );
+        toast.success("User restored");
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Failed to restore user");
+      }
+    } catch {
+      toast.error("Failed to restore user");
     }
   };
 
@@ -411,101 +439,174 @@ export default function AdminUsersPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="border rounded-lg overflow-hidden">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">User</th>
-                  <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Status</th>
-                  <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Role</th>
-                  <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Joined</th>
-                  <th className="text-right text-xs font-medium text-muted-foreground px-4 py-3">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => (
-                  <tr key={user.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3">
-                      <div>
-                        <p className="text-sm font-medium">{user.full_name || "—"}</p>
-                        <p className="text-xs text-muted-foreground">{user.email}</p>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full",
-                          user.is_activated
-                            ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                            : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-                        )}
-                      >
-                        {user.is_activated ? (
-                          <CheckCircle2 className="h-3 w-3" />
-                        ) : (
-                          <XCircle className="h-3 w-3" />
-                        )}
-                        {user.is_activated ? "Active" : "Pending"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {user.is_superadmin ? (
-                        <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full bg-primary/10 text-primary">
-                          <ShieldCheck className="h-3 w-3" />
-                          Superadmin
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">User</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">
-                      {new Date(user.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => handleManageAccess(user)}
-                          title="Manage folder access"
-                        >
-                          <FolderKey className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => handleResetClick(user)}
-                          title="Reset password"
-                        >
-                          <KeyRound className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => setEditUser(user)}
-                          title="Edit user"
-                        >
-                          <UserCog className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                          onClick={() => handleDeleteClick(user)}
-                          title="Delete user"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {/* Active users */}
+            {users.filter((u) => !u.deleted_at).length > 0 && (
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">User</th>
+                      <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Status</th>
+                      <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Role</th>
+                      <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Joined</th>
+                      <th className="text-right text-xs font-medium text-muted-foreground px-4 py-3">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users
+                      .filter((u) => !u.deleted_at)
+                      .map((user) => (
+                        <tr key={user.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                          <td className="px-4 py-3">
+                            <div>
+                              <p className="text-sm font-medium">{user.full_name || "—"}</p>
+                              <p className="text-xs text-muted-foreground">{user.email}</p>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full",
+                                user.is_activated
+                                  ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                  : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+                              )}
+                            >
+                              {user.is_activated ? (
+                                <CheckCircle2 className="h-3 w-3" />
+                              ) : (
+                                <XCircle className="h-3 w-3" />
+                              )}
+                              {user.is_activated ? "Active" : "Pending"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            {user.is_superadmin ? (
+                              <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full bg-primary/10 text-primary">
+                                <ShieldCheck className="h-3 w-3" />
+                                Superadmin
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">User</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground">
+                            {new Date(user.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => handleManageAccess(user)}
+                                title="Manage folder access"
+                              >
+                                <FolderKey className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => handleResetClick(user)}
+                                title="Reset password"
+                              >
+                                <KeyRound className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => setEditUser(user)}
+                                title="Edit user"
+                              >
+                                <UserCog className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                onClick={() => handleDeleteClick(user)}
+                                title="Delete user"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Deleted users */}
+            {users.filter((u) => u.deleted_at).length > 0 && (
+              <div className="space-y-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-muted-foreground flex items-center gap-2">
+                    <Trash2 className="h-4 w-4" />
+                    Deleted Users
+                  </h2>
+                  <p className="text-xs text-muted-foreground">
+                    These users cannot log in. Restore them to re-enable access.
+                  </p>
+                </div>
+                <div className="border rounded-lg overflow-hidden border-dashed opacity-75">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b bg-muted/30">
+                        <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">User</th>
+                        <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Status</th>
+                        <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Deleted</th>
+                        <th className="text-right text-xs font-medium text-muted-foreground px-4 py-3">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {users
+                        .filter((u) => u.deleted_at)
+                        .map((user) => (
+                          <tr key={user.id} className="border-b last:border-0 hover:bg-muted/20 transition-colors">
+                            <td className="px-4 py-3">
+                              <div>
+                                <p className="text-sm font-medium text-muted-foreground">{user.full_name || "—"}</p>
+                                <p className="text-xs text-muted-foreground/70">{user.email}</p>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                                <XCircle className="h-3 w-3" />
+                                Deleted
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-muted-foreground">
+                              {user.deleted_at
+                                ? new Date(user.deleted_at).toLocaleDateString()
+                                : "—"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 gap-1.5 text-xs"
+                                  onClick={() => handleRestore(user)}
+                                  title="Restore user"
+                                >
+                                  <Undo2 className="h-3.5 w-3.5" />
+                                  Restore
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -653,7 +754,7 @@ export default function AdminUsersPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete user?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete <strong>{deleteUserEmail}</strong> and remove all their folder memberships. This action cannot be undone.
+              <strong>{deleteUserEmail}</strong> will be soft-deleted and will no longer be able to log in. You can restore them later from the Deleted Users section.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -52,11 +52,12 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const admin = createAdminClient();
         const { data: profile, error } = await admin
           .from("users")
-          .select("id, email, full_name, password, is_activated, is_superadmin")
+          .select("id, email, full_name, password, is_activated, is_superadmin, deleted_at")
           .eq("email", email)
           .maybeSingle();
 
         if (error || !profile) return null;
+        if (profile.deleted_at) return null;
         if (!profile.is_activated) return null;
         if (!profile.password) return null;
 
