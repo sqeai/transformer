@@ -350,6 +350,25 @@ export const PermissionsService = {
   },
 
   /**
+   * Check if a user has an admin or owner role on any folder,
+   * or is a superadmin.
+   */
+  async canManageUsers(userId: string): Promise<boolean> {
+    if (await fetchIsSuperadmin(userId)) return true;
+
+    const supabase = createAdminClient();
+    const { data, error } = await supabase
+      .from("folder_members")
+      .select("id")
+      .eq("user_id", userId)
+      .in("role", ["admin", "owner"])
+      .limit(1);
+
+    if (error || !data) return false;
+    return data.length > 0;
+  },
+
+  /**
    * Get the permissions list for a given role (useful for UI display).
    */
   getPermissionsForRole(role: FolderRole): Permission[] {

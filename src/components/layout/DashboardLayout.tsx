@@ -11,7 +11,7 @@ import {
   SquarePen,
   Loader2,
   UserCircle,
-  ShieldCheck,
+  Settings,
   ChevronDown,
   ChevronRight,
   MoreHorizontal,
@@ -59,6 +59,7 @@ interface ChatHistoryItem {
   title: string;
   agent_type: string;
   persona: string | null;
+  streaming_status: string;
   created_at: string;
   updated_at: string;
 }
@@ -92,6 +93,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const [folders, setFolders] = useState<FolderNode[]>([]);
   const [foldersLoading, setFoldersLoading] = useState(true);
   const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
+  const [canManageUsers, setCanManageUsers] = useState(false);
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createParentId, setCreateParentId] = useState<string | null>(null);
@@ -146,6 +148,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     fetchFolders();
     loadChatHistory();
+    fetch("/api/users/me/can-manage")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setCanManageUsers(data.canManageUsers);
+      })
+      .catch(() => {});
   }, [fetchFolders, loadChatHistory]);
 
   useEffect(() => {
@@ -153,6 +161,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     window.addEventListener("chat-history-updated", handler);
     return () => window.removeEventListener("chat-history-updated", handler);
   }, [loadChatHistory]);
+
+  useEffect(() => {
+    const hasStreaming = chatHistory.some((c) => c.streaming_status === "streaming");
+    if (!hasStreaming) return;
+    const interval = setInterval(loadChatHistory, 3000);
+    return () => clearInterval(interval);
+  }, [chatHistory, loadChatHistory]);
 
   useEffect(() => {
     const handler = () => fetchFolders();
@@ -430,14 +445,20 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                                 href={`/assistant?chat=${chat.id}`}
                                 className="block px-2 py-1.5 pr-7"
                               >
-                                <p className={cn(
-                                  "text-xs font-medium truncate",
-                                  isActive ? "text-sidebar-accent-foreground" : "text-sidebar-foreground",
-                                )}>{chat.title}</p>
+                                <div className="flex items-center gap-1.5">
+                                  {chat.streaming_status === "streaming" && (
+                                    <Loader2 className="h-3 w-3 animate-spin shrink-0 text-primary" />
+                                  )}
+                                  <p className={cn(
+                                    "text-xs font-medium truncate",
+                                    isActive ? "text-sidebar-accent-foreground" : "text-sidebar-foreground",
+                                  )}>{chat.title}</p>
+                                </div>
                                 <p className={cn(
                                   "text-[10px] mt-0.5 truncate",
                                   isActive ? "text-sidebar-accent-foreground/70" : "text-muted-foreground",
                                 )}>
+                                  {chat.streaming_status === "streaming" && <span className="text-primary">Processing… · </span>}
                                   {chat.persona && <span className="capitalize">{chat.persona.replace("_", " ")} · </span>}
                                   {new Date(chat.updated_at).toLocaleDateString()}
                                 </p>
@@ -472,8 +493,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                   </div>
                 )}
 
-                {user?.isSuperadmin && (() => {
-                  const adminLink = (
+              </div>
+            </div>
+
+            {/* Sticky bottom: Settings + Profile */}
+            <div className="shrink-0 border-t border-sidebar-border">
+              <div className="p-2 space-y-1">
+                {canManageUsers && (() => {
+                  const settingsLink = (
                     <Link
                       href="/admin/users"
                       className={cn(
@@ -484,26 +511,20 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                         collapsed && "justify-center px-0",
                       )}
                     >
-                      <ShieldCheck className="h-4 w-4 shrink-0" />
-                      {!collapsed && "User Management"}
+                      <Settings className="h-4 w-4 shrink-0" />
+                      {!collapsed && "Settings"}
                     </Link>
                   );
                   if (collapsed) {
                     return (
                       <Tooltip>
-                        <TooltipTrigger asChild>{adminLink}</TooltipTrigger>
-                        <TooltipContent side="right">User Management</TooltipContent>
+                        <TooltipTrigger asChild>{settingsLink}</TooltipTrigger>
+                        <TooltipContent side="right">Settings</TooltipContent>
                       </Tooltip>
                     );
                   }
-                  return adminLink;
+                  return settingsLink;
                 })()}
-              </div>
-            </div>
-
-            {/* Sticky bottom: Profile */}
-            <div className="shrink-0 border-t border-sidebar-border">
-              <div className="p-2 space-y-1">
                 {(() => {
                   const profileLink = (
                     <Link

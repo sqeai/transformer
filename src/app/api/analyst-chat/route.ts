@@ -7,8 +7,13 @@ import { createConnector } from "@/lib/connectors";
 import type { DataSourceType } from "@/lib/connectors";
 import { type BaseMessage } from "@langchain/core/messages";
 import { toUIMessageStream, toBaseMessages } from "@ai-sdk/langchain";
-import { createUIMessageStreamResponse, type UIMessage } from "ai";
+import {
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  type UIMessage,
+} from "ai";
 import { resolveAttachments, type ChatAttachment } from "@/lib/chat-attachments";
+import { saveChatOnFinish, markChatStreaming } from "@/lib/chat-persistence";
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,6 +29,7 @@ export async function POST(req: NextRequest) {
     const attachments: ChatAttachment[] = Array.isArray(body.attachments) ? body.attachments : [];
     const persona: Persona | null = body.persona ?? null;
     const companyContext: string = body.companyContext ?? "";
+    const chatId: string | null = body.chatId ?? null;
 
     let attachmentContext = "";
     if (attachments.length > 0) {
@@ -145,9 +151,22 @@ export async function POST(req: NextRequest) {
       { version: "v2", recursionLimit: 50 },
     );
 
-    return createUIMessageStreamResponse({
-      stream: toUIMessageStream(eventStream),
+    const userId = authResult.user.id;
+    const langchainStream = toUIMessageStream(eventStream);
+
+    if (chatId) {
+      await markChatStreaming(chatId, userId);
+    }
+
+    const stream = createUIMessageStream({
+      execute({ writer }) {
+        writer.merge(langchainStream);
+      },
+      originalMessages: rawMessages,
+      onFinish: saveChatOnFinish({ chatId, userId }),
     });
+
+    return createUIMessageStreamResponse({ stream });
   } catch (e: unknown) {
     const error = e as Error & { status?: number };
     return NextResponse.json(

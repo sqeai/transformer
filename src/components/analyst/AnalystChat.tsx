@@ -35,6 +35,7 @@ import {
   Sparkles,
   Search,
   BookOpen,
+  ArrowDown,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -694,34 +695,48 @@ export function AnalystChat() {
     },
   });
 
-  const prevStatusRef = useRef(status);
+  const [backgroundStreaming, setBackgroundStreaming] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const saveChatMessages = useCallback(
-    async (id: string, msgs: typeof messages) => {
-      try {
-        await fetch(`/api/chat-history/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: msgs }),
-        });
-      } catch {
-        // silent – best-effort persistence
-      }
+  const pollForCompletion = useCallback(
+    (id: string) => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+
+      const poll = async () => {
+        try {
+          const res = await fetch(`/api/chat-history/${id}`);
+          if (!res.ok) return;
+          const data = await res.json();
+
+          if (data.streaming_status === "idle") {
+            setBackgroundStreaming(false);
+            if (Array.isArray(data.messages) && data.messages.length > 0) {
+              setMessages(data.messages);
+            }
+            window.dispatchEvent(new CustomEvent("chat-history-updated"));
+            return;
+          }
+
+          if (Array.isArray(data.messages) && data.messages.length > 0) {
+            setMessages(data.messages);
+          }
+          pollRef.current = setTimeout(poll, 2000);
+        } catch {
+          pollRef.current = setTimeout(poll, 3000);
+        }
+      };
+
+      setBackgroundStreaming(true);
+      pollRef.current = setTimeout(poll, 1500);
     },
-    [],
+    [setMessages],
   );
 
   useEffect(() => {
-    const wasStreaming =
-      prevStatusRef.current === "streaming" ||
-      prevStatusRef.current === "submitted";
-    const nowReady = status === "ready" || status === "error";
-
-    if (wasStreaming && nowReady && chatId && messages.length > 0) {
-      saveChatMessages(chatId, messages);
-    }
-    prevStatusRef.current = status;
-  }, [status, chatId, messages, saveChatMessages]);
+    return () => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
+  }, []);
 
   const loadChat = useCallback(async (id: string) => {
     setMessages([]);
@@ -729,6 +744,8 @@ export function AnalystChat() {
     setPersona(null);
     setInput("");
     setAttachedFiles([]);
+    setBackgroundStreaming(false);
+    if (pollRef.current) clearTimeout(pollRef.current);
     setChatLoading(true);
     try {
       const res = await fetch(`/api/chat-history/${id}`);
@@ -739,13 +756,16 @@ export function AnalystChat() {
         if (Array.isArray(data.messages) && data.messages.length > 0) {
           setMessages(data.messages);
         }
+        if (data.streaming_status === "streaming") {
+          pollForCompletion(data.id);
+        }
       }
     } catch {
       toast.error("Failed to load chat");
     } finally {
       setChatLoading(false);
     }
-  }, [setMessages]);
+  }, [setMessages, pollForCompletion]);
 
   useEffect(() => {
     const chatParam = searchParams.get("chat");
@@ -769,8 +789,9 @@ export function AnalystChat() {
       setPersona(null);
       setInput("");
       setAttachedFiles([]);
-      setContextSelection(null);
       setChatLoading(false);
+      setBackgroundStreaming(false);
+      if (pollRef.current) clearTimeout(pollRef.current);
       localStorage.removeItem(ANALYST_STORAGE_KEY);
     };
     window.addEventListener("new-chat", handleNewChat);
@@ -816,7 +837,7 @@ export function AnalystChat() {
     URL.revokeObjectURL(url);
   }, [messages]);
 
-  const isLoading = status === "streaming" || status === "submitted";
+  const isLoading = status === "streaming" || status === "submitted" || backgroundStreaming;
 
   useEffect(() => {
     if (isNewChatRef.current) return;
@@ -844,11 +865,46 @@ export function AnalystChat() {
     }
   }, [messages]);
 
+  const [hasNewResponses, setHasNewResponses] = useState(false);
+  const isNearBottomRef = useRef(true);
+  const prevMessageCountRef = useRef(messages.length);
+
+  const checkIfNearBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
+
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const nearBottom = checkIfNearBottom();
+      isNearBottomRef.current = nearBottom;
+      if (nearBottom) setHasNewResponses(false);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [checkIfNearBottom]);
+
+  useEffect(() => {
+    if (messages.length > prevMessageCountRef.current) {
+      if (!isNearBottomRef.current) {
+        setHasNewResponses(true);
+      }
     }
-  }, [messages]);
+    prevMessageCountRef.current = messages.length;
+  }, [messages.length]);
+
+  const scrollToBottom = useCallback(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({
+        top: scrollRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+    setHasNewResponses(false);
+  }, []);
 
   const addFiles = useCallback((files: File[]) => {
     const accepted = files.filter(isAcceptedFile);
@@ -1110,7 +1166,7 @@ export function AnalystChat() {
             >
               <Download className="h-4 w-4" />
             </Button>
-            {!panelOpen && contextSelection && contextSelection.contexts.length > 0 && (
+            {contextSelection && contextSelection.contexts.length > 0 && (
               <div className="flex items-center gap-1 mr-1 max-w-[200px] overflow-hidden">
                 {contextSelection.contexts.slice(0, 3).map((ctx) => (
                   <span
@@ -1292,6 +1348,19 @@ export function AnalystChat() {
               <p className="text-sm font-medium text-primary">Drop files here</p>
               <p className="text-xs text-muted-foreground">PDF, images, TXT, DOCX, PPTX</p>
             </div>
+          </div>
+        )}
+
+        {/* New responses indicator */}
+        {hasNewResponses && (
+          <div className="flex justify-center -mt-2 mb-0 relative z-10">
+            <button
+              onClick={scrollToBottom}
+              className="flex items-center gap-1.5 rounded-full bg-primary text-primary-foreground px-4 py-1.5 text-xs font-medium shadow-lg hover:bg-primary/90 transition-colors animate-in fade-in slide-in-from-bottom-2 duration-200"
+            >
+              <ArrowDown className="h-3.5 w-3.5" />
+              New Responses
+            </button>
           </div>
         )}
 

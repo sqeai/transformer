@@ -77,6 +77,25 @@ export async function requireSuperadmin(): Promise<
 }
 
 /**
+ * Returns the authenticated user if they are a superadmin or have an
+ * admin/owner role on at least one folder. Otherwise returns a 403 response.
+ */
+export async function requireUserManager(): Promise<
+  { user: AuthUser; error?: never } | { user?: never; error: NextResponse }
+> {
+  const result = await requireAuth();
+  if (result.error) return result;
+
+  const canManage = await PermissionsService.canManageUsers(result.user.id);
+  if (!canManage) {
+    return {
+      error: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
+    };
+  }
+  return { user: result.user };
+}
+
+/**
  * Checks if the authenticated user has a specific permission on a folder.
  * Uses the PermissionsService which handles role inheritance and superadmin bypass.
  */

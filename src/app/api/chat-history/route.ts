@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from("chat_history")
-    .select("id, title, agent_type, persona, folder_id, created_at, updated_at")
+    .select("id, title, agent_type, persona, folder_id, streaming_status, created_at, updated_at")
     .eq("user_id", authResult.user.id)
     .eq("agent_type", agentType)
     .order("updated_at", { ascending: false })

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSuperadmin } from "@/lib/api-auth";
+import { requireUserManager } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 interface RouteParams {
@@ -7,7 +7,7 @@ interface RouteParams {
 }
 
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
-  const authResult = await requireSuperadmin();
+  const authResult = await requireUserManager();
   if (authResult.error) return authResult.error;
 
   const { id } = await params;
@@ -27,7 +27,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 }
 
 export async function DELETE(_req: NextRequest, { params }: RouteParams) {
-  const authResult = await requireSuperadmin();
+  const authResult = await requireUserManager();
   if (authResult.error) return authResult.error;
 
   const { id } = await params;
