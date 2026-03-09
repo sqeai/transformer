@@ -889,12 +889,23 @@ export function AnalystChat() {
 
   useEffect(() => {
     if (messages.length > prevMessageCountRef.current) {
-      if (!isNearBottomRef.current) {
+      const lastMessage = messages[messages.length - 1];
+      const isAssistantMessage = lastMessage?.role === "assistant";
+
+      if (isNearBottomRef.current) {
+        // User was at the bottom — auto-scroll, don't show indicator
+        requestAnimationFrame(() => {
+          scrollRef.current?.scrollTo({
+            top: scrollRef.current.scrollHeight,
+            behavior: "smooth",
+          });
+        });
+      } else if (isAssistantMessage) {
         setHasNewResponses(true);
       }
     }
     prevMessageCountRef.current = messages.length;
-  }, [messages.length]);
+  }, [messages]);
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
