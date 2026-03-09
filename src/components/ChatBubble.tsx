@@ -224,6 +224,39 @@ function getFileIcon(file: File) {
   return FileIcon;
 }
 
+const BUBBLE_POSITION_KEY = "chat-bubble-position";
+const DEFAULT_BUBBLE_POSITION = { right: 24, bottom: 24 };
+
+function loadBubblePosition(): { right: number; bottom: number } {
+  if (typeof window === "undefined") return DEFAULT_BUBBLE_POSITION;
+  try {
+    const stored = localStorage.getItem(BUBBLE_POSITION_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (typeof parsed.right === "number" && typeof parsed.bottom === "number") {
+        return parsed;
+      }
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_BUBBLE_POSITION;
+}
+
+function saveBubblePosition(pos: { right: number; bottom: number }) {
+  try {
+    localStorage.setItem(BUBBLE_POSITION_KEY, JSON.stringify(pos));
+  } catch { /* ignore */ }
+}
+
+function clampPosition(right: number, bottom: number): { right: number; bottom: number } {
+  const bubbleSize = 56;
+  const maxRight = window.innerWidth - bubbleSize;
+  const maxBottom = window.innerHeight - bubbleSize;
+  return {
+    right: Math.max(0, Math.min(right, maxRight)),
+    bottom: Math.max(0, Math.min(bottom, maxBottom)),
+  };
+}
+
 export function ChatBubble() {
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -231,6 +264,7 @@ export function ChatBubble() {
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [bubblePos, setBubblePos] = useState(DEFAULT_BUBBLE_POSITION);
   const { messages, sendMessage, setMessages, status } = useChatContext();
   const {
     schemas,
@@ -241,6 +275,65 @@ export function ChatBubble() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const appliedPayloads = useRef<Set<string>>(new Set());
   const dragCounter = useRef(0);
+
+  const bubbleDrag = useRef({
+    active: false,
+    startX: 0,
+    startY: 0,
+    startRight: 0,
+    startBottom: 0,
+    moved: false,
+  });
+
+  useEffect(() => {
+    setBubblePos(loadBubblePosition());
+  }, []);
+
+  const onBubblePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      bubbleDrag.current = {
+        active: true,
+        startX: e.clientX,
+        startY: e.clientY,
+        startRight: bubblePos.right,
+        startBottom: bubblePos.bottom,
+        moved: false,
+      };
+    },
+    [bubblePos],
+  );
+
+  const onBubblePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      if (!bubbleDrag.current.active) return;
+      const dx = e.clientX - bubbleDrag.current.startX;
+      const dy = e.clientY - bubbleDrag.current.startY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        bubbleDrag.current.moved = true;
+      }
+      const newPos = clampPosition(
+        bubbleDrag.current.startRight - dx,
+        bubbleDrag.current.startBottom - dy,
+      );
+      setBubblePos(newPos);
+    },
+    [],
+  );
+
+  const onBubblePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      if (!bubbleDrag.current.active) return;
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      bubbleDrag.current.active = false;
+      if (bubbleDrag.current.moved) {
+        saveBubblePosition(bubblePos);
+      } else {
+        setOpen((o) => !o);
+      }
+    },
+    [bubblePos],
+  );
 
   const isLoading = status === "streaming" || status === "submitted";
 
@@ -495,16 +588,20 @@ export function ChatBubble() {
     <>
       {/* Floating toggle button */}
       <button
-        onClick={() => setOpen((o) => !o)}
+        onPointerDown={onBubblePointerDown}
+        onPointerMove={onBubblePointerMove}
+        onPointerUp={onBubblePointerUp}
+        style={{ right: bubblePos.right, bottom: bubblePos.bottom }}
         className={cn(
-          "fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-200",
+          "fixed z-50 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-opacity duration-200 select-none touch-none",
           "bg-gradient-to-br from-primary to-accent text-primary-foreground",
-          "hover:scale-105 hover:shadow-xl active:scale-95",
+          "hover:shadow-xl",
+          !bubbleDrag.current.active && "hover:scale-105 active:scale-95 transition-all",
           open && "rotate-90 scale-0 opacity-0 pointer-events-none",
         )}
         aria-label="Open chat"
       >
-        <MessageCircle className="h-6 w-6" />
+        <MessageCircle className="h-6 w-6 pointer-events-none" />
       </button>
 
       {/* Chat panel */}
@@ -513,11 +610,16 @@ export function ChatBubble() {
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
+        style={
+          expanded
+            ? { bottom: 16, right: 16 }
+            : { bottom: bubblePos.bottom, right: bubblePos.right }
+        }
         className={cn(
           "fixed z-50 flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl transition-all duration-300 ease-out",
           expanded
-            ? "bottom-4 right-4 w-[700px] max-w-[calc(100vw-2rem)]"
-            : "bottom-6 right-6 w-[400px] max-w-[calc(100vw-3rem)]",
+            ? "w-[700px] max-w-[calc(100vw-2rem)]"
+            : "w-[400px] max-w-[calc(100vw-3rem)]",
           open
             ? expanded
               ? "h-[calc(100vh-2rem)] opacity-100 translate-y-0"
