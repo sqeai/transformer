@@ -9,7 +9,7 @@ import {
   type FormEvent,
   type ComponentPropsWithoutRef,
 } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import {
@@ -669,6 +669,7 @@ function exportChatAsMarkdown(messages: { role: string; parts?: { type: string; 
 
 export function AnalystChat() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [input, setInput] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
   const [persona, setPersona] = useState<Persona | null>(null);
@@ -684,6 +685,7 @@ export function AnalystChat() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
   const isNewChatRef = useRef(false);
+  const justCreatedChatRef = useRef<string | null>(null);
 
   const transport = useRef(
     new DefaultChatTransport({ api: "/api/analyst-chat" }),
@@ -779,6 +781,11 @@ export function AnalystChat() {
   useEffect(() => {
     const chatParam = searchParams.get("chat");
     if (chatParam && chatParam !== chatId) {
+      if (justCreatedChatRef.current === chatParam) {
+        justCreatedChatRef.current = null;
+        setChatId(chatParam);
+        return;
+      }
       isNewChatRef.current = false;
       loadChat(chatParam);
     } else if (!chatParam && chatId) {
@@ -825,7 +832,9 @@ export function AnalystChat() {
       if (res.ok) {
         const data = await res.json();
         isNewChatRef.current = false;
+        justCreatedChatRef.current = data.id;
         setChatId(data.id);
+        router.replace(`/assistant?chat=${data.id}`, { scroll: false });
         window.dispatchEvent(new CustomEvent("chat-history-updated"));
         return data.id;
       }
@@ -833,7 +842,7 @@ export function AnalystChat() {
       /* ignore */
     }
     return null;
-  }, [persona]);
+  }, [persona, router]);
 
   const handleExport = useCallback(() => {
     const md = exportChatAsMarkdown(messages as { role: string; parts?: { type: string; text?: string }[] }[]);

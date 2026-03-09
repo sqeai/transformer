@@ -65,7 +65,34 @@ export async function PATCH(
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (typeof body.name === "string" && body.name.trim()) updates.name = body.name.trim();
-  if (body.config && typeof body.config === "object") updates.config = body.config;
+
+  if (body.config && typeof body.config === "object") {
+    const sensitiveKeys = ["credentials", "service_account", "password"] as const;
+    const hasMissingSensitive = sensitiveKeys.some((k) => !(k in body.config!));
+
+    if (hasMissingSensitive) {
+      const { data: existing } = await supabase!
+        .from("data_sources")
+        .select("config")
+        .eq("id", id)
+        .single();
+
+      if (existing?.config && typeof existing.config === "object" && !Array.isArray(existing.config)) {
+        const existingConfig = existing.config as Record<string, unknown>;
+        const merged = { ...body.config };
+        for (const key of sensitiveKeys) {
+          if (!(key in merged) && key in existingConfig) {
+            merged[key] = existingConfig[key];
+          }
+        }
+        updates.config = merged;
+      } else {
+        updates.config = body.config;
+      }
+    } else {
+      updates.config = body.config;
+    }
+  }
 
   const { error } = await supabase!.from("data_sources").update(updates).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -114,6 +114,8 @@ export async function POST(req: NextRequest) {
         data.config as Record<string, unknown>,
       );
 
+      console.log("data", JSON.stringify(data, null, 2));
+
       try {
         const rows = await connector.query(sql);
         return { rows, rowCount: rows.length };

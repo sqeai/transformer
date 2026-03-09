@@ -102,6 +102,7 @@ export default function DataSourceDetailPage({
   const [mysqlDatabase, setMysqlDatabase] = useState("");
   const [bqProjectId, setBqProjectId] = useState("");
   const [bqCredentials, setBqCredentials] = useState("");
+  const [bqCredentialsTouched, setBqCredentialsTouched] = useState(false);
   const [pgHost, setPgHost] = useState("");
   const [pgPort, setPgPort] = useState("5432");
   const [pgUser, setPgUser] = useState("");
@@ -190,6 +191,9 @@ export default function DataSourceDetailPage({
       };
     }
     if (ds.type === "bigquery") {
+      if (!bqCredentialsTouched) {
+        return { projectId: bqProjectId };
+      }
       let credentials: Record<string, unknown> | undefined;
       let projectId = bqProjectId;
       if (bqCredentials.trim()) {
@@ -230,7 +234,7 @@ export default function DataSourceDetailPage({
       };
     }
     return {};
-  }, [ds, mysqlHost, mysqlPort, mysqlUser, mysqlPassword, mysqlDatabase, bqProjectId, bqCredentials, pgHost, pgPort, pgUser, pgPassword, pgDatabase, pgSsl, rsHost, rsPort, rsUser, rsPassword, rsDatabase]);
+  }, [ds, mysqlHost, mysqlPort, mysqlUser, mysqlPassword, mysqlDatabase, bqProjectId, bqCredentials, bqCredentialsTouched, pgHost, pgPort, pgUser, pgPassword, pgDatabase, pgSsl, rsHost, rsPort, rsUser, rsPassword, rsDatabase]);
 
   const handleTestConnection = async () => {
     setTesting(true);
@@ -532,7 +536,10 @@ export default function DataSourceDetailPage({
                       id="credentials"
                       className="font-mono text-xs min-h-[120px]"
                       value={bqCredentials}
-                      onChange={(e) => setBqCredentials(e.target.value)}
+                      onChange={(e) => {
+                        setBqCredentials(e.target.value);
+                        setBqCredentialsTouched(true);
+                      }}
                     />
                     <p className="text-xs text-muted-foreground">
                       Leave empty to use Application Default Credentials.

@@ -34,6 +34,7 @@ Be proactive with charts. Call visualize_data without waiting for the user to as
 - Proportions / distributions → "pie"
 - Correlations → "scatter"
 - Cumulative changes → "waterfall"
+- Unless otherwise specified, only query the current year-to-date data.
 
 Aggregate data to ≤50 rows for readability. Always include the sql parameter.`;
 
