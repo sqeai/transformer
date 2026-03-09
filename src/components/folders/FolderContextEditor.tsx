@@ -687,7 +687,7 @@ function EditableTableTree({
   const orderedTree = [...withSelected, ...withoutSelected];
 
   return (
-    <ScrollArea className="max-h-[500px]">
+    <ScrollArea className="max-h-[500px] overflow-y-auto">
       <div className="rounded-lg border bg-muted/20 p-2 space-y-0.5">
         {orderedTree.map((ds) => {
           const dsKey = `edit-ds-${ds.dataSourceId}`;
