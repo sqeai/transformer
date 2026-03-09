@@ -220,7 +220,8 @@ export const PermissionsService = {
   },
 
   /**
-   * Get all folder IDs a user has direct membership on (for listing).
+   * Get all folder IDs a user can access — direct memberships plus all
+   * their descendant folders (inheriting the same level of access).
    */
   async getAccessibleFolderIds(userId: string): Promise<string[]> {
     const supabase = createAdminClient();
@@ -230,7 +231,17 @@ export const PermissionsService = {
       .eq("user_id", userId);
 
     if (error || !data) return [];
-    return data.map((row) => row.folder_id);
+    const directIds = data.map((row) => row.folder_id);
+
+    const allIds = new Set(directIds);
+    for (const folderId of directIds) {
+      const descendants = await getDescendantFolderIds(folderId);
+      for (const id of descendants) {
+        allIds.add(id);
+      }
+    }
+
+    return Array.from(allIds);
   },
 
   /**

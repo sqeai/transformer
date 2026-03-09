@@ -771,7 +771,7 @@ export default function DatasetPage() {
                     disabled={aiCleanserRunning || dataset.rows.length === 0}
                   >
                     {aiCleanserRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                    Starlight
+                    Modify
                   </Button>
                 </div>
               )}

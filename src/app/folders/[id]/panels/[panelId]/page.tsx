@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
 import {
   ArrowLeft,
   Loader2,
@@ -27,7 +29,73 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineChart, type ChartData, type ViewType } from "@/components/analyst/InlineChart";
+import { StarlightInput } from "@/components/dashboard/StarlightInput";
 import type { ChartType, DashboardPanel } from "@/components/dashboard/types";
+
+const PANEL_REGEX = /<!-- DASHBOARD_PANEL:(.*?) -->/g;
+
+interface DataSourceContext {
+  id: string;
+  name: string;
+  type: string;
+  tables: { schema: string; name: string; columns: { name: string; type: string }[] }[];
+}
+
+interface FolderContext {
+  tables: {
+    dataSourceId: string;
+    dataSourceName: string;
+    dataSourceType: string;
+    schemaName: string;
+    tableName: string;
+    columns: { name: string; type: string }[];
+  }[];
+}
+
+async function fetchDataSourceContexts(): Promise<DataSourceContext[]> {
+  try {
+    const res = await fetch("/api/contexts");
+    if (!res.ok) return [];
+    const data = await res.json();
+    const contexts: FolderContext[] = data.contexts ?? [];
+    const dsMap = new Map<string, DataSourceContext>();
+    for (const ctx of contexts) {
+      for (const t of ctx.tables) {
+        let ds = dsMap.get(t.dataSourceId);
+        if (!ds) {
+          ds = { id: t.dataSourceId, name: t.dataSourceName, type: t.dataSourceType, tables: [] };
+          dsMap.set(t.dataSourceId, ds);
+        }
+        if (!ds.tables.some((tb) => tb.schema === t.schemaName && tb.name === t.tableName)) {
+          ds.tables.push({ schema: t.schemaName, name: t.tableName, columns: t.columns });
+        }
+      }
+    }
+    return Array.from(dsMap.values());
+  } catch {
+    return [];
+  }
+}
+
+interface PanelAction {
+  action: "add" | "update" | "remove";
+  panel?: DashboardPanel;
+  panelId?: string;
+}
+
+function extractPanelActions(text: string): PanelAction[] {
+  const actions: PanelAction[] = [];
+  let match: RegExpExecArray | null;
+  const regex = new RegExp(PANEL_REGEX);
+  while ((match = regex.exec(text)) !== null) {
+    try {
+      actions.push(JSON.parse(match[1]));
+    } catch {
+      // skip
+    }
+  }
+  return actions;
+}
 
 const CHART_TYPES: { value: ChartType; label: string; icon: React.ElementType }[] = [
   { value: "bar", label: "Bar Chart", icon: BarChart3 },
@@ -56,6 +124,76 @@ export default function PanelEditPage() {
   const [data, setData] = useState<Record<string, unknown>[]>([]);
   const [config, setConfig] = useState<DashboardPanel["config"]>({});
   const [nlInput, setNlInput] = useState("");
+
+  const dsContextsCache = useRef<DataSourceContext[] | null>(null);
+  const appliedActions = useRef<Set<string>>(new Set());
+
+  const transport = useRef(
+    new DefaultChatTransport({ api: "/api/dashboard-chat" }),
+  );
+
+  const { messages: chatMessages, sendMessage, status: chatStatus } = useChat({
+    transport: transport.current,
+    onError: (e: Error) => {
+      console.error(e);
+      toast.error("Error while processing your request", {
+        description: e.message,
+      });
+    },
+  });
+
+  const isChatLoading = chatStatus === "streaming" || chatStatus === "submitted";
+
+  useEffect(() => {
+    for (const msg of chatMessages) {
+      if (msg.role !== "assistant") continue;
+      const textParts = (msg.parts ?? []).filter(
+        (p): p is { type: "text"; text: string } => p.type === "text",
+      );
+      const fullText = textParts.map((p) => p.text).join("");
+      const actions = extractPanelActions(fullText);
+      for (const action of actions) {
+        const key = JSON.stringify(action);
+        if (appliedActions.current.has(key)) continue;
+        appliedActions.current.add(key);
+
+        if ((action.action === "add" || action.action === "update") && action.panel) {
+          const p = action.panel;
+          if (p.title) setTitle(p.title);
+          if (p.chartType) setChartType(p.chartType);
+          if (p.data) setData(p.data);
+          if (p.config) setConfig(p.config);
+          if (p.sqlQuery) setSqlQuery(p.sqlQuery);
+          if (p.prompt) setPrompt(p.prompt);
+          toast.success(`Panel "${p.title}" updated via Starlight`);
+        }
+      }
+    }
+  }, [chatMessages]);
+
+  const handleStarlightSubmit = useCallback(
+    async (text: string) => {
+      if (!text.trim() || isChatLoading) return;
+
+      if (!dsContextsCache.current) {
+        dsContextsCache.current = await fetchDataSourceContexts();
+      }
+      const dsContexts = dsContextsCache.current;
+
+      sendMessage(
+        { text: text.trim() },
+        {
+          body: {
+            dataSourceIds: dsContexts.map((ds) => ds.id),
+            dataSourceContexts: dsContexts,
+            currentPanels: JSON.stringify([{ id: panelId, title, chartType, prompt, sqlQuery }]),
+            companyContext: "",
+          },
+        },
+      );
+    },
+    [isChatLoading, sendMessage, panelId, title, chartType, prompt, sqlQuery],
+  );
 
   useEffect(() => {
     fetch(`/api/panels/${panelId}`)
@@ -277,7 +415,7 @@ export default function PanelEditPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
+    <div className="space-y-6 max-w-5xl mx-auto pb-24">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Button
@@ -512,6 +650,14 @@ export default function PanelEditPage() {
           )}
         </div>
       </div>
+
+      <StarlightInput
+        onSubmit={handleStarlightSubmit}
+        isLoading={isChatLoading}
+        placeholder="Ask Starlight to modify this panel (⌘K)"
+        messages={chatMessages}
+        view="panel"
+      />
     </div>
   );
 }

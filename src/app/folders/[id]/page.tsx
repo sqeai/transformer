@@ -895,6 +895,8 @@ export default function FolderDashboardPage() {
         onSubmit={handleStarlightSubmit}
         isLoading={isLoading}
         placeholder="Ask Starlight anything (⌘K)"
+        messages={messages}
+        view="dashboard"
       />
 
       {/* Add Panel Dialog */}

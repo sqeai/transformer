@@ -28,8 +28,8 @@ export async function GET() {
     return NextResponse.json({ folders: [] });
   }
 
-  // Fetch all folders the user has direct access to, plus their ancestors
-  const { data: directFolders, error } = await supabase
+  // Fetch all accessible folders (direct + inherited descendants)
+  const { data: accessibleFolders, error } = await supabase
     .from("folders")
     .select("id, name, parent_id, created_by, created_at, updated_at")
     .in("id", accessibleIds)
@@ -39,22 +39,37 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Also fetch ancestor folders for tree rendering
-  const allIds = new Set(accessibleIds);
-  const toFetch = (directFolders ?? [])
-    .filter((f) => f.parent_id && !allIds.has(f.parent_id))
+  // Also fetch ancestor folders for tree rendering (walk up until root)
+  const knownIds = new Set(accessibleIds);
+  const ancestorIds = new Set<string>();
+  const toResolve = (accessibleFolders ?? [])
+    .filter((f) => f.parent_id && !knownIds.has(f.parent_id))
     .map((f) => f.parent_id!);
 
-  let ancestorFolders: typeof directFolders = [];
-  if (toFetch.length > 0) {
+  while (toResolve.length > 0) {
+    const parentId = toResolve.pop()!;
+    if (knownIds.has(parentId) || ancestorIds.has(parentId)) continue;
+    ancestorIds.add(parentId);
+    const { data: parent } = await supabase
+      .from("folders")
+      .select("id, parent_id")
+      .eq("id", parentId)
+      .maybeSingle();
+    if (parent?.parent_id) {
+      toResolve.push(parent.parent_id);
+    }
+  }
+
+  let ancestorFolders: typeof accessibleFolders = [];
+  if (ancestorIds.size > 0) {
     const { data: ancestors } = await supabase
       .from("folders")
       .select("id, name, parent_id, created_by, created_at, updated_at")
-      .in("id", toFetch);
+      .in("id", Array.from(ancestorIds));
     ancestorFolders = ancestors ?? [];
   }
 
-  const allFolders = [...(directFolders ?? []), ...ancestorFolders];
+  const allFolders = [...(accessibleFolders ?? []), ...ancestorFolders];
   const seen = new Set<string>();
   const unique = allFolders.filter((f) => {
     if (seen.has(f.id)) return false;
