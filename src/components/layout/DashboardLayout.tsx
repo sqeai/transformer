@@ -95,6 +95,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
   const [canChat, setCanChat] = useState(false);
   const [canManageUsers, setCanManageUsers] = useState(false);
+  const [isSuperadmin, setIsSuperadmin] = useState(false);
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createParentId, setCreateParentId] = useState<string | null>(null);
@@ -155,6 +156,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         if (data) {
           setCanChat(data.canChat);
           setCanManageUsers(data.canManageUsers);
+          setIsSuperadmin(data.isSuperadmin ?? false);
         }
       })
       .catch(() => {});
@@ -375,6 +377,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                       <FolderTree
                         folders={folders}
                         collapsed={collapsed}
+                        isSuperadmin={isSuperadmin}
                         onCreateFolder={handleCreateFolder}
                         onRenameFolder={handleRenameFolder}
                         onDeleteFolder={handleDeleteFolder}

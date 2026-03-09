@@ -42,6 +42,7 @@ export interface FolderNode {
 interface FolderTreeProps {
   folders: FolderNode[];
   collapsed: boolean;
+  isSuperadmin?: boolean;
   onCreateFolder: (parentId: string | null) => void;
   onRenameFolder: (folderId: string) => void;
   onDeleteFolder: (folderId: string) => void;
@@ -141,10 +142,12 @@ function FolderNodeItem({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="right">
-            <DropdownMenuItem onClick={() => onCreateFolder(node.id)}>
-              <Plus className="mr-2 h-4 w-4" />
-              New Sub-Folder
-            </DropdownMenuItem>
+            {(node.role === "admin" || node.role === "owner") && (
+              <DropdownMenuItem onClick={() => onCreateFolder(node.id)}>
+                <Plus className="mr-2 h-4 w-4" />
+                New Sub-Folder
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={() => onRenameFolder(node.id)}>
               <Pencil className="mr-2 h-4 w-4" />
               Rename
@@ -216,6 +219,7 @@ function FolderNodeItem({
 export function FolderTree({
   folders,
   collapsed,
+  isSuperadmin,
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
@@ -237,15 +241,17 @@ export function FolderTree({
           onManageAccess={onManageAccess}
         />
       ))}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="w-full justify-start text-muted-foreground text-xs mt-1"
-        onClick={() => onCreateFolder(null)}
-      >
-        <Plus className="mr-2 h-3.5 w-3.5" />
-        New Folder
-      </Button>
+      {isSuperadmin && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start text-muted-foreground text-xs mt-1"
+          onClick={() => onCreateFolder(null)}
+        >
+          <Plus className="mr-2 h-3.5 w-3.5" />
+          New Folder
+        </Button>
+      )}
     </div>
   );
 }

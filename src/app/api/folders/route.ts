@@ -37,9 +37,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
+  if (parentId) {
+    const canManage = await PermissionsService.can(
+      result.user.id,
+      parentId,
+      "manage_folder",
+    );
+    if (!canManage) {
+      return NextResponse.json(
+        { error: "Only admins and owners can create sub-folders" },
+        { status: 403 },
+      );
+    }
+  } else {
+    const isSuperadmin = await PermissionsService.isSuperadmin(result.user.id);
+    if (!isSuperadmin) {
+      return NextResponse.json(
+        { error: "Only superadmins can create root folders" },
+        { status: 403 },
+      );
+    }
+  }
+
   const supabase = createAdminClient();
 
-  // If creating a sub-folder, verify parent exists and user has manage_folder permission
   if (parentId) {
     const { data: parent } = await supabase
       .from("folders")
