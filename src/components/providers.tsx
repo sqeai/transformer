@@ -4,6 +4,7 @@ import { type ReactNode } from "react";
 import { SessionProvider } from "next-auth/react";
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/hooks/useAuth";
+import { ImpersonationProvider } from "@/hooks/useImpersonation";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SchemaStoreProvider } from "@/lib/schema-store";
 import { ChatProvider } from "@/components/ChatProvider";
@@ -15,6 +16,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <SessionProvider>
       <AuthProvider>
+        <ImpersonationProvider>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <LivingBackground />
           <TooltipProvider>
@@ -27,6 +29,7 @@ export function Providers({ children }: { children: ReactNode }) {
             </SchemaStoreProvider>
           </TooltipProvider>
         </ThemeProvider>
+        </ImpersonationProvider>
       </AuthProvider>
     </SessionProvider>
   );

@@ -50,6 +50,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
+import { ImpersonationSelector } from "@/components/layout/ImpersonationSelector";
+import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
 const FOLDERS_COLLAPSED_KEY = "sidebar-folders-collapsed";
@@ -532,6 +534,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             {/* Sticky bottom: Settings + Profile */}
             <div className="shrink-0 border-t border-sidebar-border">
               <div className="p-2 space-y-1">
+                {isSuperadmin && (
+                  <ImpersonationSelector collapsed={collapsed} />
+                )}
                 {canManageUsers && (() => {
                   const settingsLink = (
                     <Link
@@ -632,6 +637,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             collapsed ? "pl-16" : "pl-64",
           )}
         >
+          <ImpersonationBanner />
           <div className="h-full p-6">{children}</div>
         </main>
       </div>
