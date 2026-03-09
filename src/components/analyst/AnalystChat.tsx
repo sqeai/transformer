@@ -886,6 +886,7 @@ export function AnalystChat() {
   const [hasNewResponses, setHasNewResponses] = useState(false);
   const isNearBottomRef = useRef(true);
   const prevMessageCountRef = useRef(messages.length);
+  const prevContentLenRef = useRef(0);
 
   const checkIfNearBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -911,7 +912,6 @@ export function AnalystChat() {
       const isAssistantMessage = lastMessage?.role === "assistant";
 
       if (isNearBottomRef.current) {
-        // User was at the bottom — auto-scroll, don't show indicator
         requestAnimationFrame(() => {
           scrollRef.current?.scrollTo({
             top: scrollRef.current.scrollHeight,
@@ -923,15 +923,34 @@ export function AnalystChat() {
       }
     }
     prevMessageCountRef.current = messages.length;
+  }, [messages.length]);
+
+  useEffect(() => {
+    const lastMsg = messages[messages.length - 1];
+    const textParts = (lastMsg?.parts ?? []).filter(
+      (p): p is { type: "text"; text: string } => p.type === "text",
+    );
+    const currentLen = textParts.reduce((sum, p) => sum + p.text.length, 0);
+
+    if (currentLen > prevContentLenRef.current) {
+      if (isNearBottomRef.current) {
+        requestAnimationFrame(() => {
+          const el = scrollRef.current;
+          if (el) el.scrollTop = el.scrollHeight;
+        });
+      } else if (lastMsg?.role === "assistant") {
+        setHasNewResponses(true);
+      }
+    }
+    prevContentLenRef.current = currentLen;
   }, [messages]);
 
   const scrollToBottom = useCallback(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({
-        top: scrollRef.current.scrollHeight,
-        behavior: "smooth",
-      });
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
+    isNearBottomRef.current = true;
     setHasNewResponses(false);
   }, []);
 
@@ -1058,6 +1077,9 @@ export function AnalystChat() {
     async (e: FormEvent) => {
       e.preventDefault();
       if ((!input.trim() && attachedFiles.length === 0) || isLoading || isUploading) return;
+
+      isNearBottomRef.current = true;
+      setHasNewResponses(false);
 
       const dataSources = contextSelection?.dataSources ?? [];
       const dataSourceIds = dataSources.map((s) => s.id);
@@ -1386,7 +1408,7 @@ export function AnalystChat() {
 
         {/* New responses indicator */}
         {hasNewResponses && (
-          <div className="flex justify-center -mt-2 mb-0 relative z-10">
+          <div className="flex justify-center py-1.5 border-t border-border/50 bg-card/60">
             <button
               onClick={scrollToBottom}
               className="flex items-center gap-1.5 rounded-full bg-primary text-primary-foreground px-4 py-1.5 text-xs font-medium shadow-lg hover:bg-primary/90 transition-colors animate-in fade-in slide-in-from-bottom-2 duration-200"
