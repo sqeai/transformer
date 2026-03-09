@@ -561,7 +561,7 @@ function AssistantMessage({
           </div>
         )}
 
-        {isStreaming && !hasResponse && <ThinkingIndicator />}
+        {isStreaming && <ThinkingIndicator />}
       </div>
     </div>
   );
