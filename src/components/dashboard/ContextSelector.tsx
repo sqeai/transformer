@@ -266,7 +266,7 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
       <div
         key={ctx.folderId}
         className={cn(
-          "rounded-lg border",
+          "rounded-lg border overflow-hidden",
           isSelected
             ? "border-primary/40 bg-primary/5"
             : "border-border/50",
@@ -318,7 +318,7 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
         </div>
 
         {isExpanded && (
-          <div className="border-t border-border/30 px-2 py-1">
+          <div className="border-t border-border/30 px-2 py-1 overflow-hidden">
             {ctx.content.trim() && (
               <div className="px-2 py-1.5 mb-1 rounded bg-muted/30 border border-dashed border-border/50">
                 <p className="text-[10px] font-medium text-muted-foreground mb-0.5">
@@ -345,7 +345,7 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
                 <div key={tKey}>
                   <button
                     onClick={() => toggleTableExpand(tKey)}
-                    className="flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 transition-colors"
+                    className="flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 transition-colors min-w-0"
                   >
                     {tExpanded ? (
                       <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
@@ -362,11 +362,11 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
                     </span>
                   </button>
                   {tExpanded && table.columns.length > 0 && (
-                    <div className="ml-8 space-y-0.5 py-0.5">
+                    <div className="ml-8 space-y-0.5 py-0.5 overflow-hidden">
                       {table.columns.map((col) => (
                         <div
                           key={col.name}
-                          className="flex items-center gap-1.5 px-2 py-0.5"
+                          className="flex items-center gap-1.5 px-2 py-0.5 min-w-0"
                         >
                           <Columns3 className="h-2.5 w-2.5 flex-shrink-0 text-muted-foreground/60" />
                           <span className="text-[10px] text-muted-foreground truncate">
@@ -389,9 +389,9 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
   }, [selectedIds, expandedContexts, expandedTables, toggleContext, toggleExpand, toggleTableExpand]);
 
   return (
-    <div className="flex h-full flex-col border-l border-border bg-card/50">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div className="flex items-center gap-2">
+    <div className="flex h-full flex-col overflow-hidden border-l border-border bg-card/50">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3 flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
           <BookOpen className="h-4 w-4 text-primary" />
           <h3 className="text-sm font-semibold">Contexts</h3>
           {selectedIds.size > 0 && (
@@ -418,8 +418,8 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
         </Button>
       </div>
 
-      <ScrollArea className="flex-1">
-        <div className="p-2 space-y-1">
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="p-2 space-y-1 overflow-hidden">
           {isRefreshing && allContexts.length === 0 && (
             <div className="flex items-center justify-center py-8 text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin mr-2" />

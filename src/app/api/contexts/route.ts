@@ -68,18 +68,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  let dimensionsMap = new Map<
-    string,
-    Record<
-      string,
-      {
-        type: string;
-        uniqueValues?: string[];
-        sampleValues?: string[];
-        nullPercentage?: number;
-      }
-    >
-  >();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let dimensionsMap = new Map<string, any>();
 
   if (!lightweight) {
     const tableKeys = (contextTables ?? []).map((t) => ({
@@ -100,18 +90,7 @@ export async function GET(request: NextRequest) {
       if (dims) {
         for (const d of dims) {
           const key = `${d.data_source_id}:${d.schema_name}.${d.table_name}`;
-          dimensionsMap.set(
-            key,
-            d.dimensions as Record<
-              string,
-              {
-                type: string;
-                uniqueValues?: string[];
-                sampleValues?: string[];
-                nullPercentage?: number;
-              }
-            >,
-          );
+          dimensionsMap.set(key, d.dimensions);
         }
       }
     }
@@ -127,8 +106,14 @@ export async function GET(request: NextRequest) {
 
         const columns: { name: string; type: string }[] = [];
         if (dimensions) {
-          for (const [colName, colInfo] of Object.entries(dimensions)) {
-            columns.push({ name: colName, type: colInfo.type });
+          if (Array.isArray(dimensions)) {
+            for (const dim of dimensions) {
+              columns.push({ name: dim.column ?? dim.name ?? "", type: dim.type ?? "unknown" });
+            }
+          } else {
+            for (const [colName, colInfo] of Object.entries(dimensions)) {
+              columns.push({ name: colName, type: (colInfo as { type: string }).type });
+            }
           }
         }
 
