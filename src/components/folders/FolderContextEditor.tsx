@@ -8,7 +8,6 @@ import {
   Loader2,
   Save,
   X,
-  Eye,
   Edit3,
   ChevronRight,
   ChevronDown,
@@ -130,7 +129,8 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
     new Map(),
   );
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingContent, setSavingContent] = useState(false);
+  const [savingTables, setSavingTables] = useState(false);
   const [previewMode, setPreviewMode] = useState(true);
   const [editingTables, setEditingTables] = useState(false);
   const [loadingAllTables, setLoadingAllTables] = useState(false);
@@ -275,8 +275,8 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
     }
   }, [allTablesMap.size, fetchAllTables]);
 
-  const saveContext = async () => {
-    setSaving(true);
+  const saveContent = async () => {
+    setSavingContent(true);
     try {
       const res = await fetch(`/api/folders/${folderId}/context`, {
         method: "PUT",
@@ -285,6 +285,7 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
       });
       if (res.ok) {
         toast.success("Context saved");
+        setPreviewMode(true);
       } else {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error ?? "Failed to save context");
@@ -292,7 +293,29 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
     } catch {
       toast.error("Failed to save context");
     } finally {
-      setSaving(false);
+      setSavingContent(false);
+    }
+  };
+
+  const saveTables = async () => {
+    setSavingTables(true);
+    try {
+      const res = await fetch(`/api/folders/${folderId}/context`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, tables: contextTables }),
+      });
+      if (res.ok) {
+        toast.success("Related tables saved");
+        setEditingTables(false);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error ?? "Failed to save tables");
+      }
+    } catch {
+      toast.error("Failed to save tables");
+    } finally {
+      setSavingTables(false);
     }
   };
 
@@ -379,33 +402,6 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Context</h2>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPreviewMode(!previewMode)}
-          >
-            {previewMode ? (
-              <>
-                <Edit3 className="mr-1.5 h-3.5 w-3.5" />
-                Edit
-              </>
-            ) : (
-              <>
-                <Eye className="mr-1.5 h-3.5 w-3.5" />
-                Preview
-              </>
-            )}
-          </Button>
-          <Button size="sm" onClick={saveContext} disabled={saving}>
-            {saving ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Save className="mr-1.5 h-3.5 w-3.5" />
-            )}
-            Save
-          </Button>
-        </div>
       </div>
 
       {/* Logo */}
@@ -470,22 +466,58 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
       </div>
 
       {/* Markdown Editor / Preview */}
-      {previewMode ? (
-        <div className="rounded-lg border bg-muted/30 p-4 min-h-[300px] overflow-auto prose prose-sm dark:prose-invert max-w-none">
-          {content ? (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-          ) : (
-            <p className="text-muted-foreground italic">No content yet.</p>
-          )}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Description</h3>
+          <div className="flex items-center gap-2">
+            {previewMode ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPreviewMode(false)}
+              >
+                <Edit3 className="mr-1.5 h-3.5 w-3.5" />
+                Edit
+              </Button>
+            ) : (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPreviewMode(true)}
+                >
+                  <X className="mr-1.5 h-3.5 w-3.5" />
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={saveContent} disabled={savingContent}>
+                  {savingContent ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Save className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  Save
+                </Button>
+              </>
+            )}
+          </div>
         </div>
-      ) : (
-        <textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          className="w-full min-h-[300px] rounded-lg border bg-background p-4 font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-ring"
-          placeholder="Describe what this entity does... (Markdown supported)"
-        />
-      )}
+        {previewMode ? (
+          <div className="rounded-lg border bg-muted/30 p-4 min-h-[300px] overflow-auto prose prose-sm dark:prose-invert max-w-none">
+            {content ? (
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            ) : (
+              <p className="text-muted-foreground italic">No content yet.</p>
+            )}
+          </div>
+        ) : (
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            className="w-full min-h-[300px] rounded-lg border bg-background p-4 font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+            placeholder="Describe what this entity does... (Markdown supported)"
+          />
+        )}
+      </div>
 
       {/* Related Tables */}
       <div className="space-y-3">
@@ -501,13 +533,28 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
               Edit
             </Button>
           ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setEditingTables(false)}
-            >
-              Done
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEditingTables(false)}
+              >
+                <X className="mr-1.5 h-3.5 w-3.5" />
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={saveTables}
+                disabled={savingTables}
+              >
+                {savingTables ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Save
+              </Button>
+            </div>
           )}
         </div>
 
