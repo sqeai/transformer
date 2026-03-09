@@ -219,6 +219,7 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
 
       setHasLogo(true);
       setLogoVersion((v) => v + 1);
+      window.dispatchEvent(new CustomEvent("folder-logo-updated"));
       toast.success("Logo uploaded");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to upload logo");
@@ -234,6 +235,7 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
       if (res.ok) {
         setHasLogo(false);
         setLogoVersion((v) => v + 1);
+        window.dispatchEvent(new CustomEvent("folder-logo-updated"));
         toast.success("Logo removed");
       } else {
         toast.error("Failed to remove logo");

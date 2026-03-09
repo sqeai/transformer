@@ -124,7 +124,7 @@ function FolderNodeItem({
         >
           {node.logoUrl ? (
             <img
-              src={`/api/folder-logos/${node.id}`}
+              src={`/api/folder-logos/${node.id}?v=${encodeURIComponent(node.logoUrl)}`}
               alt=""
               className="h-4 w-4 shrink-0 rounded object-cover"
             />

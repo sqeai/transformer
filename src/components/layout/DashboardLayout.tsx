@@ -154,6 +154,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("chat-history-updated", handler);
   }, [loadChatHistory]);
 
+  useEffect(() => {
+    const handler = () => fetchFolders();
+    window.addEventListener("folder-logo-updated", handler);
+    return () => window.removeEventListener("folder-logo-updated", handler);
+  }, [fetchFolders]);
+
   const toggleCollapsed = () => {
     setCollapsed((c) => {
       const next = !c;

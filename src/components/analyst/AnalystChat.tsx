@@ -1120,7 +1120,7 @@ export function AnalystChat() {
                   >
                     {ctx.logoUrl ? (
                       <img
-                        src={`/api/folder-logos/${ctx.folderId}`}
+                        src={`/api/folder-logos/${ctx.folderId}?v=${encodeURIComponent(ctx.logoUrl)}`}
                         alt=""
                         className="h-2.5 w-2.5 flex-shrink-0 rounded object-cover"
                       />

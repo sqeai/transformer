@@ -295,7 +295,7 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
             )}
             {ctx.logoUrl ? (
               <img
-                src={`/api/folder-logos/${ctx.folderId}`}
+                src={`/api/folder-logos/${ctx.folderId}?v=${encodeURIComponent(ctx.logoUrl)}`}
                 alt=""
                 className="h-3.5 w-3.5 flex-shrink-0 rounded object-cover"
               />

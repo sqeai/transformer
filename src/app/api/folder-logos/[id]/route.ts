@@ -44,7 +44,7 @@ export async function GET(
     return new NextResponse(Buffer.from(bytes), {
       headers: {
         "Content-Type": contentType,
-        "Cache-Control": "public, max-age=3600, immutable",
+        "Cache-Control": "public, max-age=0, must-revalidate",
       },
     });
   } catch {
