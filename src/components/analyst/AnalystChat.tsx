@@ -656,6 +656,7 @@ function exportChatAsMarkdown(messages: { role: string; parts?: { type: string; 
     const text = textParts.map((p: { type: string; text?: string }) => p.text ?? "").join("");
     if (!text) continue;
     const cleaned = text
+      .replace(/<!-- ATTACHMENTS_META:[\s\S]*? -->\n?/g, "")
       .replace(/<!-- THINKING_START -->[\s\S]*?<!-- THINKING_END -->/g, "")
       .replace(/<!-- VISUALIZATION:[\s\S]*? -->/g, "")
       .replace(/<!-- CITATIONS_JSON:[\s\S]*? -->/g, "")
@@ -1151,9 +1152,12 @@ export function AnalystChat() {
           const fileLabel = fileNames.length > 0
             ? `[Attached: ${fileNames.join(", ")}]\n\n`
             : "";
+          const metaTag = attachmentsMeta.length > 0
+            ? `<!-- ATTACHMENTS_META:${JSON.stringify(attachmentsMeta)} -->\n`
+            : "";
 
           sendMessage(
-            { text: `${fileLabel}${input.trim()}` },
+            { text: `${metaTag}${fileLabel}${input.trim()}` },
             { body: { dataSourceIds, dataSourceContexts, attachments: attachmentsMeta, persona, chatId: activeChatId, companyContext } },
           );
           setInput("");
@@ -1296,16 +1300,16 @@ export function AnalystChat() {
               if (!text) return null;
 
               const attachedFileNames: string[] = [];
-              let userText = text;
+              let userText = text.replace(/<!-- ATTACHMENTS_META:[\s\S]*? -->\n?/g, "");
 
-              const newFormatMatch = text.match(/^\[Attached: (.+?)\]\n\n/);
+              const newFormatMatch = userText.match(/^\[Attached: (.+?)\]\n\n/);
               if (newFormatMatch) {
-                userText = text.replace(newFormatMatch[0], "").trim();
+                userText = userText.replace(newFormatMatch[0], "").trim();
                 attachedFileNames.push(...newFormatMatch[1].split(", "));
               } else {
-                const oldFormatMatch = text.match(/\[Attached file content\]\n([\s\S]*?)\n\[End of attached file content\]\n\n/);
+                const oldFormatMatch = userText.match(/\[Attached file content\]\n([\s\S]*?)\n\[End of attached file content\]\n\n/);
                 if (oldFormatMatch) {
-                  userText = text.replace(oldFormatMatch[0], "").trim();
+                  userText = userText.replace(oldFormatMatch[0], "").trim();
                   const fileHeaders = oldFormatMatch[1].match(/--- File: (.+?) ---/g);
                   if (fileHeaders) {
                     for (const h of fileHeaders) {

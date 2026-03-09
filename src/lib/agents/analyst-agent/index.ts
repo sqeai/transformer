@@ -3,6 +3,7 @@ import { createAgent } from "langchain";
 import { AIMessage, type BaseMessage } from "@langchain/core/messages";
 import { createAnalystTools, type DataSourceContext, type DimensionsLookupFn } from "./tools";
 import { getSystemPrompt, type Persona } from "./personas";
+import { FILES_BETA } from "@/lib/anthropic-files";
 
 export interface AnalystAgentConfig {
   apiKey: string;
@@ -15,6 +16,7 @@ export interface AnalystInvokeOptions {
   persona?: Persona | null;
   dimensionsLookupFn?: DimensionsLookupFn;
   companyContext?: string;
+  hasFileAttachments?: boolean;
 }
 
 function createAnalystAgent(
@@ -24,11 +26,16 @@ function createAnalystAgent(
   persona?: Persona | null,
   dimensionsLookupFn?: DimensionsLookupFn,
   companyContext?: string,
+  hasFileAttachments?: boolean,
 ) {
+  const betas: string[] = [];
+  if (hasFileAttachments) betas.push(FILES_BETA);
+
   const llm = new ChatAnthropic({
     model: "claude-sonnet-4-6",
     anthropicApiKey: config.apiKey,
     temperature: 0,
+    ...(betas.length > 0 ? { betas } : {}),
   });
 
   const tools = createAnalystTools(dataSources, queryFn, dimensionsLookupFn);
@@ -63,6 +70,7 @@ export class AnalystAgentGraph {
       inputs.persona,
       inputs.dimensionsLookupFn,
       inputs.companyContext,
+      inputs.hasFileAttachments,
     );
     return agent.streamEvents({ messages: inputs.messages }, config);
   }
@@ -79,6 +87,7 @@ export class AnalystAgentGraph {
         inputs.persona,
         inputs.dimensionsLookupFn,
         inputs.companyContext,
+        inputs.hasFileAttachments,
       );
       const result = await agent.invoke(
         { messages: inputs.messages },

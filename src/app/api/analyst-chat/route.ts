@@ -12,10 +12,60 @@ import {
   createUIMessageStreamResponse,
   type UIMessage,
 } from "ai";
-import { resolveAttachments, type ChatAttachment } from "@/lib/chat-attachments";
+import type { ChatAttachment } from "@/lib/chat-attachments";
 import { saveChatOnFinish, markChatStreaming } from "@/lib/chat-persistence";
+import {
+  uploadFileToAnthropic,
+  deleteFilesFromAnthropic,
+  type UploadedFile,
+} from "@/lib/anthropic-files";
+import { downloadS3FileToTmp } from "@/lib/s3-files";
+import { promises as fs } from "fs";
+
+const ATTACHMENTS_META_RE = /<!-- ATTACHMENTS_META:([\s\S]*?) -->/;
+
+/**
+ * Parse embedded attachment metadata from a message's text content.
+ */
+function parseAttachmentsMeta(text: string): ChatAttachment[] {
+  const match = text.match(ATTACHMENTS_META_RE);
+  if (!match) return [];
+  try {
+    return JSON.parse(match[1]) as ChatAttachment[];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Strip the ATTACHMENTS_META comment and the [Attached: ...] label from text,
+ * leaving only the user's actual message.
+ */
+function stripAttachmentMarkers(text: string): string {
+  return text
+    .replace(/<!-- ATTACHMENTS_META:[\s\S]*? -->\n?/g, "")
+    .replace(/^\[Attached: .+?\]\n\n/, "")
+    .trim();
+}
+
+/**
+ * Download a file from S3 and upload it to the Anthropic Files API.
+ */
+async function uploadS3FileToAnthropic(
+  att: ChatAttachment,
+): Promise<UploadedFile> {
+  const tmpPath = await downloadS3FileToTmp(att.filePath);
+  try {
+    const buffer = await fs.readFile(tmpPath);
+    return await uploadFileToAnthropic(buffer, att.fileName, att.mimeType);
+  } finally {
+    await fs.unlink(tmpPath).catch(() => {});
+  }
+}
 
 export async function POST(req: NextRequest) {
+  const uploadedAnthropicFileIds: string[] = [];
+
   try {
     const authResult = await requireAuth();
     if (authResult.error) return authResult.error;
@@ -30,11 +80,6 @@ export async function POST(req: NextRequest) {
     const persona: Persona | null = body.persona ?? null;
     const companyContext: string = body.companyContext ?? "";
     const chatId: string | null = body.chatId ?? null;
-
-    let attachmentContext = "";
-    if (attachments.length > 0) {
-      attachmentContext = await resolveAttachments(attachments);
-    }
 
     const filteredMessages = (body.messages ?? []).filter(
       (message: Record<string, unknown>) =>
@@ -68,11 +113,87 @@ export async function POST(req: NextRequest) {
 
     const messages: BaseMessage[] = await toBaseMessages(rawMessages);
 
-    if (attachmentContext && messages.length > 0) {
-      const last = messages[messages.length - 1];
-      if (last._getType() === "human" && typeof last.content === "string") {
-        last.content = attachmentContext + last.content;
+    // ── Collect all attachments from every user message ──
+    // For the latest message, use body.attachments (has fresh S3 paths).
+    // For historical messages, parse embedded ATTACHMENTS_META from the text.
+    interface MessageAttachmentInfo {
+      messageIndex: number;
+      attachments: ChatAttachment[];
+    }
+
+    const allMessageAttachments: MessageAttachmentInfo[] = [];
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (msg._getType() !== "human") continue;
+
+      const isLastHuman = i === messages.length - 1;
+      const text = typeof msg.content === "string" ? msg.content : "";
+
+      if (isLastHuman && attachments.length > 0) {
+        allMessageAttachments.push({ messageIndex: i, attachments });
+      } else {
+        const parsed = parseAttachmentsMeta(text);
+        if (parsed.length > 0) {
+          allMessageAttachments.push({ messageIndex: i, attachments: parsed });
+        }
       }
+    }
+
+    const hasFileAttachments = allMessageAttachments.length > 0;
+
+    // ── Upload all files to Anthropic Files API ──
+    // Build a map: messageIndex → array of Anthropic file IDs
+    const fileIdsByMessage = new Map<number, UploadedFile[]>();
+
+    if (hasFileAttachments) {
+      const uploadPromises: Promise<{ messageIndex: number; uploaded: UploadedFile }>[] = [];
+
+      for (const { messageIndex, attachments: atts } of allMessageAttachments) {
+        for (const att of atts) {
+          uploadPromises.push(
+            uploadS3FileToAnthropic(att).then((uploaded) => ({
+              messageIndex,
+              uploaded,
+            })),
+          );
+        }
+      }
+
+      const results = await Promise.allSettled(uploadPromises);
+
+      for (const result of results) {
+        if (result.status !== "fulfilled") {
+          console.error("[analyst-chat] Failed to upload file to Anthropic:", result.reason);
+          continue;
+        }
+        const { messageIndex, uploaded } = result.value;
+        uploadedAnthropicFileIds.push(uploaded.fileId);
+
+        const existing = fileIdsByMessage.get(messageIndex) ?? [];
+        existing.push(uploaded);
+        fileIdsByMessage.set(messageIndex, existing);
+      }
+    }
+
+    // ── Inject document content blocks into messages that have files ──
+    for (const [messageIndex, uploadedFiles] of fileIdsByMessage) {
+      const msg = messages[messageIndex];
+      const originalText = typeof msg.content === "string" ? msg.content : "";
+      const cleanText = stripAttachmentMarkers(originalText);
+
+      const contentBlocks: Array<Record<string, unknown>> = [];
+
+      for (const uf of uploadedFiles) {
+        contentBlocks.push({
+          type: "document",
+          source: { type: "file", file_id: uf.fileId },
+        });
+      }
+
+      contentBlocks.push({ type: "text", text: cleanText || "(see attached files)" });
+
+      msg.content = contentBlocks as unknown as string;
     }
 
     const agent = getAnalystAgent();
@@ -149,6 +270,7 @@ export async function POST(req: NextRequest) {
         persona,
         dimensionsLookupFn,
         companyContext,
+        hasFileAttachments,
       },
       { version: "v2", recursionLimit: 50 },
     );
@@ -160,16 +282,32 @@ export async function POST(req: NextRequest) {
       await markChatStreaming(chatId, userId);
     }
 
+    const originalOnFinish = saveChatOnFinish({ chatId, userId });
+
     const stream = createUIMessageStream({
       execute({ writer }) {
         writer.merge(langchainStream);
       },
       originalMessages: rawMessages,
-      onFinish: saveChatOnFinish({ chatId, userId }),
+      onFinish: async (event) => {
+        await originalOnFinish(event);
+        // Delete all uploaded files from Anthropic to avoid data retention
+        if (uploadedAnthropicFileIds.length > 0) {
+          deleteFilesFromAnthropic(uploadedAnthropicFileIds).catch((err) =>
+            console.error("[analyst-chat] Failed to cleanup Anthropic files:", err),
+          );
+        }
+      },
     });
 
     return createUIMessageStreamResponse({ stream });
   } catch (e: unknown) {
+    // Clean up any uploaded files on error
+    if (uploadedAnthropicFileIds.length > 0) {
+      deleteFilesFromAnthropic(uploadedAnthropicFileIds).catch((err) =>
+        console.error("[analyst-chat] Failed to cleanup Anthropic files on error:", err),
+      );
+    }
     const error = e as Error & { status?: number };
     return NextResponse.json(
       { error: error.message },
