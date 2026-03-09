@@ -18,13 +18,15 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Cable, Plus, Loader2, ArrowLeft, Database, Server, Container, Warehouse } from "lucide-react";
+import { Cable, Plus, Loader2, ArrowLeft, Database, Server, Container, Warehouse, FolderOpen } from "lucide-react";
 
 interface DataSource {
   id: string;
   name: string;
   type: string;
   createdAt: string;
+  folderId?: string;
+  folderName?: string | null;
 }
 
 export default function FolderDataSourcesPage() {
@@ -58,6 +60,30 @@ export default function FolderDataSourcesPage() {
     router.push(`/data-sources/new?type=${type}&folderId=${folderId}`);
   };
 
+  const ownDataSources = dataSources.filter(
+    (ds) => !ds.folderId || ds.folderId === folderId,
+  );
+  const subfolderDataSources = dataSources.filter(
+    (ds) => ds.folderId && ds.folderId !== folderId,
+  );
+
+  const subfolderGroups = subfolderDataSources.reduce<
+    Record<string, { folderName: string; folderId: string; dataSources: DataSource[] }>
+  >((acc, ds) => {
+    const id = ds.folderId!;
+    if (!acc[id]) {
+      acc[id] = {
+        folderName: ds.folderName || "Unknown Folder",
+        folderId: id,
+        dataSources: [],
+      };
+    }
+    acc[id].dataSources.push(ds);
+    return acc;
+  }, {});
+
+  const hasSubfolders = Object.keys(subfolderGroups).length > 0;
+
   return (
     <>
       <div className="space-y-6">
@@ -73,7 +99,9 @@ export default function FolderDataSourcesPage() {
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Data Sources</h1>
               <p className="text-sm text-muted-foreground">
-                Database connections in this folder and its subfolders
+                {dataSources.length} data source{dataSources.length !== 1 ? "s" : ""} in this folder
+                {subfolderDataSources.length > 0 &&
+                  ` (${subfolderDataSources.length} from subfolders)`}
               </p>
             </div>
           </div>
@@ -102,25 +130,49 @@ export default function FolderDataSourcesPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {dataSources.map((ds) => (
-              <Card
-                key={ds.id}
-                className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => router.push(`/data-sources/${ds.id}`)}
-              >
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">{ds.name}</CardTitle>
-                    <Badge variant="secondary" className="text-xs">
-                      {ds.type}
-                    </Badge>
-                  </div>
-                  <CardDescription className="text-xs">
-                    Created {new Date(ds.createdAt).toLocaleDateString()}
-                  </CardDescription>
-                </CardHeader>
-              </Card>
+          <div className="space-y-6">
+            {ownDataSources.length > 0 && (
+              <div className="space-y-3">
+                {hasSubfolders && (
+                  <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider px-1">
+                    This Folder
+                  </h2>
+                )}
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {ownDataSources.map((ds) => (
+                    <DataSourceCard key={ds.id} ds={ds} router={router} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {Object.values(subfolderGroups).map((group) => (
+              <div key={group.folderId} className="space-y-3">
+                <button
+                  onClick={() =>
+                    router.push(`/folders/${group.folderId}/data-sources`)
+                  }
+                  className="flex items-center gap-2 px-1 group cursor-pointer"
+                >
+                  <FolderOpen className="h-3.5 w-3.5 text-muted-foreground" />
+                  <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider group-hover:text-foreground transition-colors">
+                    {group.folderName}
+                  </h2>
+                  <span className="text-xs text-muted-foreground">
+                    ({group.dataSources.length})
+                  </span>
+                </button>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {group.dataSources.map((ds) => (
+                    <DataSourceCard
+                      key={ds.id}
+                      ds={ds}
+                      router={router}
+                      isSubfolder
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         )}
@@ -187,5 +239,34 @@ export default function FolderDataSourcesPage() {
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+function DataSourceCard({
+  ds,
+  router,
+  isSubfolder,
+}: {
+  ds: DataSource;
+  router: ReturnType<typeof useRouter>;
+  isSubfolder?: boolean;
+}) {
+  return (
+    <Card
+      className={`cursor-pointer hover:shadow-md transition-shadow ${isSubfolder ? "border-dashed" : ""}`}
+      onClick={() => router.push(`/data-sources/${ds.id}`)}
+    >
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base">{ds.name}</CardTitle>
+          <Badge variant="secondary" className="text-xs">
+            {ds.type}
+          </Badge>
+        </div>
+        <CardDescription className="text-xs">
+          Created {new Date(ds.createdAt).toLocaleDateString()}
+        </CardDescription>
+      </CardHeader>
+    </Card>
   );
 }

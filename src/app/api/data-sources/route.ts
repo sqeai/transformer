@@ -41,19 +41,22 @@ function redactSensitiveConfig(config: unknown) {
 
 /**
  * Get folderId and all descendant folder IDs (so a parent folder sees data sources from subfolders).
+ * Returns both the list of IDs and a map of folderId -> folderName.
  */
 async function getFolderAndDescendantIds(
   supabase: Awaited<ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>>,
   folderId: string,
-): Promise<string[]> {
+): Promise<{ ids: string[]; folderNames: Map<string, string> }> {
   const { data: folders, error } = await supabase
     .from("folders")
-    .select("id, parent_id");
-  if (error || !folders) return [folderId];
-  const byParent = new Map<string | null, { id: string }[]>();
+    .select("id, parent_id, name");
+  if (error || !folders) return { ids: [folderId], folderNames: new Map() };
+  const byParent = new Map<string | null, { id: string; name: string }[]>();
+  const nameMap = new Map<string, string>();
   for (const f of folders) {
+    nameMap.set(f.id, f.name);
     const list = byParent.get(f.parent_id) ?? [];
-    list.push({ id: f.id });
+    list.push({ id: f.id, name: f.name });
     byParent.set(f.parent_id, list);
   }
   const ids: string[] = [folderId];
@@ -66,7 +69,7 @@ async function getFolderAndDescendantIds(
       queue.push(c.id);
     }
   }
-  return ids;
+  return { ids, folderNames: nameMap };
 }
 
 export async function GET(request: NextRequest) {
@@ -82,11 +85,14 @@ export async function GET(request: NextRequest) {
     .select("id, name, type, config, created_at, updated_at, folder_id")
     .order("created_at", { ascending: false });
 
+  let folderNames = new Map<string, string>();
+
   if (folderId) {
     const access = await requireFolderAccess(folderId, "view_data_sources");
     if (access.error) return access.error;
-    const folderIds = await getFolderAndDescendantIds(supabase!, folderId);
-    query = query.in("folder_id", folderIds);
+    const result = await getFolderAndDescendantIds(supabase!, folderId);
+    folderNames = result.folderNames;
+    query = query.in("folder_id", result.ids);
   }
 
   const { data, error } = await query;
@@ -103,6 +109,8 @@ export async function GET(request: NextRequest) {
       config: redactSensitiveConfig(d.config),
       createdAt: d.created_at,
       updatedAt: d.updated_at,
+      folderId: d.folder_id,
+      folderName: d.folder_id ? folderNames.get(d.folder_id) ?? null : null,
     })),
   });
 }
