@@ -59,23 +59,47 @@ const THINKING_START = "<!-- THINKING_START -->";
 const THINKING_END = "<!-- THINKING_END -->";
 
 function parseThinking(text: string): { thinking: string; response: string } {
-  const startIdx = text.indexOf(THINKING_START);
-  const endIdx = text.indexOf(THINKING_END);
+  const thinkingParts: string[] = [];
+  let remaining = text;
+  let lastEndIdx = 0;
+  let responseParts: string[] = [];
+  let foundAny = false;
 
-  if (startIdx === -1 && endIdx === -1) {
+  let searchFrom = 0;
+  while (true) {
+    const startIdx = remaining.indexOf(THINKING_START, searchFrom);
+    if (startIdx === -1) break;
+    foundAny = true;
+
+    const beforeThinking = remaining.substring(searchFrom === 0 ? 0 : searchFrom, startIdx).trim();
+    if (beforeThinking) responseParts.push(beforeThinking);
+
+    const contentStart = startIdx + THINKING_START.length;
+    const endIdx = remaining.indexOf(THINKING_END, contentStart);
+
+    if (endIdx === -1) {
+      thinkingParts.push(remaining.substring(contentStart).trim());
+      lastEndIdx = remaining.length;
+      searchFrom = remaining.length;
+      break;
+    }
+
+    thinkingParts.push(remaining.substring(contentStart, endIdx).trim());
+    lastEndIdx = endIdx + THINKING_END.length;
+    searchFrom = lastEndIdx;
+  }
+
+  if (!foundAny) {
     return { thinking: "", response: text.trim() };
   }
 
-  const thinkingFrom = startIdx === -1 ? 0 : startIdx + THINKING_START.length;
-  const thinkingTo = endIdx === -1 ? text.length : endIdx;
-  const thinking = text.substring(thinkingFrom, thinkingTo).trim();
+  const afterLast = remaining.substring(lastEndIdx).trim();
+  if (afterLast) responseParts.push(afterLast);
 
-  let response = "";
-  if (endIdx !== -1) {
-    response = text.substring(endIdx + THINKING_END.length);
-  }
-
-  return { thinking, response: response.trim() };
+  return {
+    thinking: thinkingParts.filter(Boolean).join("\n\n"),
+    response: responseParts.join("\n\n").trim(),
+  };
 }
 
 interface AttachedFile {
@@ -334,30 +358,13 @@ function MarkdownContent({
 
 function ThinkingIndicator() {
   return (
-    <div className="flex items-center gap-1 text-muted-foreground py-1">
-      <Loader2 className="h-3 w-3 animate-spin" />
-      <span className="text-xs">Thinking</span>
-      <span className="flex gap-0.5">
-        <span
-          className="animate-bounce text-xs"
-          style={{ animationDelay: "0ms" }}
-        >
-          .
-        </span>
-        <span
-          className="animate-bounce text-xs"
-          style={{ animationDelay: "150ms" }}
-        >
-          .
-        </span>
-        <span
-          className="animate-bounce text-xs"
-          style={{ animationDelay: "300ms" }}
-        >
-          .
-        </span>
-      </span>
-    </div>
+    <button
+      type="button"
+      className="flex items-center gap-1.5 rounded-lg bg-muted/50 border border-border/50 px-3 py-1.5 text-xs text-muted-foreground cursor-default"
+    >
+      <Sparkles className="h-3.5 w-3.5 animate-pulse" />
+      <span className="font-medium">Thinking</span>
+    </button>
   );
 }
 
@@ -370,6 +377,7 @@ function AssistantMessage({
   hasThinking,
   hasResponse,
   hasTools,
+  isStreaming,
 }: {
   thinking: string;
   response: string;
@@ -379,6 +387,7 @@ function AssistantMessage({
   hasThinking: boolean;
   hasResponse: boolean;
   hasTools: boolean;
+  isStreaming?: boolean;
 }) {
   const [thinkingOpen, setThinkingOpen] = useState(!hasResponse);
   const [toolsOpen, setToolsOpen] = useState(!hasResponse);
@@ -552,7 +561,7 @@ function AssistantMessage({
           </div>
         )}
 
-        {!hasResponse && !hasThinking && !hasTools && <ThinkingIndicator />}
+        {isStreaming && !hasResponse && <ThinkingIndicator />}
       </div>
     </div>
   );
@@ -1321,8 +1330,11 @@ export function AnalystChat() {
             const hasResponse = response.trim().length > 0;
             const hasTools = toolParts.length > 0;
             const hasVisualizations = visualizations.length > 0;
+            const isLastAssistant =
+              messages.filter((m) => m.role === "assistant").at(-1)?.id === msg.id;
+            const msgIsStreaming = isLoading && isLastAssistant;
 
-            if (!hasThinking && !hasResponse && !hasTools && !hasVisualizations) return null;
+            if (!hasThinking && !hasResponse && !hasTools && !hasVisualizations && !msgIsStreaming) return null;
 
             return (
               <AssistantMessage
@@ -1335,6 +1347,7 @@ export function AnalystChat() {
                 hasThinking={hasThinking}
                 hasResponse={hasResponse}
                 hasTools={hasTools}
+                isStreaming={msgIsStreaming}
               />
             );
           })}
@@ -1344,7 +1357,7 @@ export function AnalystChat() {
               <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/20 to-accent/20">
                 <Bot className="h-3.5 w-3.5 text-primary" />
               </div>
-              <div className="rounded-2xl rounded-bl-md bg-muted px-3.5 py-2.5">
+              <div className="py-1.5">
                 <ThinkingIndicator />
               </div>
             </div>
