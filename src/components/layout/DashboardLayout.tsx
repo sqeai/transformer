@@ -346,6 +346,37 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               )}
             </div>
 
+            {/* New Chat icon pinned to top when collapsed */}
+            {canChat && collapsed && (() => {
+              const isNewChatActive = isAssistantActive && !activeChatId;
+              const handleNewChat = (e: React.MouseEvent) => {
+                e.preventDefault();
+                window.dispatchEvent(new CustomEvent("new-chat"));
+                router.push("/assistant");
+              };
+              return (
+                <div className="shrink-0 p-2">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Link
+                        href="/assistant"
+                        onClick={handleNewChat}
+                        className={cn(
+                          "flex items-center justify-center rounded-lg px-0 py-2 text-sm font-medium transition-colors",
+                          isNewChatActive
+                            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                            : "text-sidebar-foreground hover:bg-sidebar-accent/50",
+                        )}
+                      >
+                        <SquarePen className="h-4 w-4 shrink-0" />
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">New Chat</TooltipContent>
+                  </Tooltip>
+                </div>
+              );
+            })()}
+
             {/* Scrollable middle section */}
             <div className="flex-1 flex flex-col min-h-0">
               {/* Collapsible Folders panel */}
@@ -390,7 +421,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
               {canChat && !collapsed && <Separator className="mx-2" />}
 
-              {canChat && (
+              {canChat && !collapsed && (
               <div className={cn(
                 "p-2 space-y-1 flex flex-col",
                 foldersCollapsed ? "flex-1 min-h-0" : "min-h-[300px] shrink-0",
@@ -402,7 +433,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                     window.dispatchEvent(new CustomEvent("new-chat"));
                     router.push("/assistant");
                   };
-                  const newChatLink = (
+                  return (
                     <Link
                       href="/assistant"
                       onClick={handleNewChat}
@@ -411,22 +442,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                         isNewChatActive
                           ? "bg-sidebar-accent text-sidebar-accent-foreground"
                           : "text-sidebar-foreground hover:bg-sidebar-accent/50",
-                        collapsed && "justify-center px-0",
                       )}
                     >
                       <SquarePen className="h-4 w-4 shrink-0" />
-                      {!collapsed && "New Chat"}
+                      New Chat
                     </Link>
                   );
-                  if (collapsed) {
-                    return (
-                      <Tooltip>
-                        <TooltipTrigger asChild>{newChatLink}</TooltipTrigger>
-                        <TooltipContent side="right">New Chat</TooltipContent>
-                      </Tooltip>
-                    );
-                  }
-                  return newChatLink;
                 })()}
 
                 {/* Chat history */}
