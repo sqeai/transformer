@@ -345,21 +345,32 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
                 <div key={tKey}>
                   <button
                     onClick={() => toggleTableExpand(tKey)}
-                    className="flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 transition-colors min-w-0"
+                    className="flex w-full items-start gap-1.5 rounded px-2 py-1.5 hover:bg-muted/50 transition-colors min-w-0"
                   >
-                    {tExpanded ? (
-                      <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-                    )}
-                    <Table2 className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-                    <span className="text-[11px] truncate text-left">
-                      {table.schemaName}.{table.tableName}
-                    </span>
-                    <Database className="h-2.5 w-2.5 flex-shrink-0 text-muted-foreground/50 ml-auto" />
-                    <span className="text-[9px] text-muted-foreground/50 flex-shrink-0">
-                      {table.dataSourceName}
-                    </span>
+                    <div className="flex-shrink-0 mt-0.5">
+                      {tExpanded ? (
+                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                      )}
+                    </div>
+                    <div className="flex-shrink-0 mt-0.5">
+                      <Table2 className="h-3 w-3 text-muted-foreground" />
+                    </div>
+                    <div className="flex flex-col items-start min-w-0 text-left">
+                      <span className="text-[11px] font-medium truncate max-w-full">
+                        {table.tableName}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground/70 truncate max-w-full">
+                        {table.schemaName}
+                      </span>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <Database className="h-2.5 w-2.5 text-muted-foreground/50" />
+                        <span className="text-[9px] text-muted-foreground/50">
+                          {table.dataSourceName}
+                        </span>
+                      </div>
+                    </div>
                   </button>
                   {tExpanded && table.columns.length > 0 && (
                     <div className="ml-8 space-y-0.5 py-0.5 overflow-hidden">
@@ -368,11 +379,11 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
                           key={col.name}
                           className="flex items-center gap-1.5 px-2 py-0.5 min-w-0"
                         >
-                          <Columns3 className="h-2.5 w-2.5 flex-shrink-0 text-muted-foreground/60" />
-                          <span className="text-[10px] text-muted-foreground truncate">
+                          <Columns3 className="h-2.5 w-2.5 text-muted-foreground/60" />
+                          <span className="text-[10px] text-muted-foreground">
                             {col.name}
                           </span>
-                          <span className="text-[9px] text-muted-foreground/50 ml-auto flex-shrink-0">
+                          <span className="text-[9px] text-muted-foreground/50 ml-auto">
                             {col.type}
                           </span>
                         </div>
