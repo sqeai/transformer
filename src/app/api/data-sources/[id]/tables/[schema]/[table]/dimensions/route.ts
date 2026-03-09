@@ -62,6 +62,7 @@ export async function POST(
     const dimensions: {
       column: string;
       type: string;
+      distinctCount?: number;
       uniqueValues?: string[];
       sampleValues?: string[];
       nullPercentage?: number;
@@ -72,10 +73,12 @@ export async function POST(
         column: col.name,
         type: col.type ?? "unknown",
       };
+      const colRef = quoteIdentifier(col.name);
+      const tableRef = `${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}`;
 
       try {
         const countResult = await connector.query(
-          `SELECT COUNT(*) as total, COUNT(${quoteIdentifier(col.name)}) as non_null FROM ${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}`,
+          `SELECT COUNT(*) as total, COUNT(${colRef}) as non_null FROM ${tableRef}`,
         );
         if (countResult.length > 0) {
           const total = Number(countResult[0].total) || 0;
@@ -87,12 +90,19 @@ export async function POST(
         /* skip null analysis for this column */
       }
 
+      const important = isDimensionColumn(col.type ?? "unknown", col.name);
+      const uniqueLimit = important ? 200 : 50;
+
       try {
         const distinctResult = await connector.query(
-          `SELECT DISTINCT ${quoteIdentifier(col.name)} as val FROM ${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)} WHERE ${quoteIdentifier(col.name)} IS NOT NULL LIMIT 50`,
+          `SELECT DISTINCT ${colRef} as val FROM ${tableRef} WHERE ${colRef} IS NOT NULL LIMIT ${uniqueLimit + 1}`,
         );
         const values = distinctResult.map((r) => String(r.val));
-        if (values.length <= 20) {
+        const isLowCardinality = values.length <= uniqueLimit;
+
+        dim.distinctCount = isLowCardinality ? values.length : undefined;
+
+        if (isLowCardinality) {
           dim.uniqueValues = values;
         }
         dim.sampleValues = values.slice(0, 5);
@@ -137,4 +147,12 @@ export async function POST(
 
 function quoteIdentifier(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
+}
+
+const DIMENSION_TYPE_PATTERNS = /^(varchar|character varying|text|char|nvarchar|nchar|enum|boolean|bool|bit|smallint|tinyint|user-defined|citext)/i;
+const SKIP_NAME_PATTERNS = /^(id|uuid|guid|created|updated|modified|deleted|_at$|_id$|password|hash|token|secret|salt)/i;
+
+function isDimensionColumn(type: string, name: string): boolean {
+  if (SKIP_NAME_PATTERNS.test(name)) return false;
+  return DIMENSION_TYPE_PATTERNS.test(type);
 }
