@@ -671,6 +671,7 @@ export function AnalystChat() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
+  const isNewChatRef = useRef(false);
 
   const transport = useRef(
     new DefaultChatTransport({ api: "/api/analyst-chat" }),
@@ -739,18 +740,27 @@ export function AnalystChat() {
   useEffect(() => {
     const chatParam = searchParams.get("chat");
     if (chatParam && chatParam !== chatId) {
+      isNewChatRef.current = false;
       loadChat(chatParam);
+    } else if (!chatParam && chatId) {
+      isNewChatRef.current = true;
+      setChatId(null);
+      setMessages([]);
+      setPersona(null);
+      localStorage.removeItem(ANALYST_STORAGE_KEY);
     }
-  }, [searchParams, chatId, loadChat]);
+  }, [searchParams, chatId, loadChat, setMessages]);
 
   useEffect(() => {
     const handleNewChat = () => {
+      isNewChatRef.current = true;
       setChatId(null);
       setMessages([]);
       setPersona(null);
       setInput("");
       setAttachedFiles([]);
       setContextSelection(null);
+      localStorage.removeItem(ANALYST_STORAGE_KEY);
     };
     window.addEventListener("new-chat", handleNewChat);
     return () => window.removeEventListener("new-chat", handleNewChat);
@@ -773,6 +783,7 @@ export function AnalystChat() {
       });
       if (res.ok) {
         const data = await res.json();
+        isNewChatRef.current = false;
         setChatId(data.id);
         window.dispatchEvent(new CustomEvent("chat-history-updated"));
         return data.id;
@@ -797,6 +808,9 @@ export function AnalystChat() {
   const isLoading = status === "streaming" || status === "submitted";
 
   useEffect(() => {
+    if (isNewChatRef.current) return;
+    const chatParam = searchParams.get("chat");
+    if (chatParam) return;
     try {
       const stored = localStorage.getItem(ANALYST_STORAGE_KEY);
       if (stored) {
@@ -808,6 +822,7 @@ export function AnalystChat() {
     } catch {
       // ignore
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setMessages]);
 
   useEffect(() => {
