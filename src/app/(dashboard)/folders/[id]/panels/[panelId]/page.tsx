@@ -31,6 +31,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InlineChart, type ChartData, type ViewType } from "@/components/analyst/InlineChart";
 import { StarlightInput } from "@/components/dashboard/StarlightInput";
 import type { ChartType, DashboardPanel } from "@/components/dashboard/types";
+import { FolderPageGuard } from "@/components/auth/FolderPageGuard";
 
 const PANEL_REGEX = /<!-- DASHBOARD_PANEL:(.*?) -->/g;
 
@@ -408,13 +409,16 @@ export default function PanelEditPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
+      <FolderPageGuard folderId={folderId} requiredPermission="view_panels">
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      </FolderPageGuard>
     );
   }
 
   return (
+    <FolderPageGuard folderId={folderId} requiredPermission="view_panels">
     <div className="space-y-6 max-w-5xl mx-auto pb-24">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -659,5 +663,6 @@ export default function PanelEditPage() {
         view="panel"
       />
     </div>
+    </FolderPageGuard>
   );
 }

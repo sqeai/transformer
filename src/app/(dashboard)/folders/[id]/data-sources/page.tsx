@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Cable, Plus, Loader2, ArrowLeft, Database, Server, Container, Warehouse, FolderOpen } from "lucide-react";
+import { FolderPageGuard } from "@/components/auth/FolderPageGuard";
 
 interface DataSource {
   id: string;
@@ -85,6 +86,7 @@ export default function FolderDataSourcesPage() {
   const hasSubfolders = Object.keys(subfolderGroups).length > 0;
 
   return (
+    <FolderPageGuard folderId={folderId} requiredPermission="view_data_sources">
     <>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
@@ -239,6 +241,7 @@ export default function FolderDataSourcesPage() {
         </DialogContent>
       </Dialog>
     </>
+    </FolderPageGuard>
   );
 }
 

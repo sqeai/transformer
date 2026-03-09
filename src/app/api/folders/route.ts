@@ -8,7 +8,15 @@ export async function GET() {
   if (result.error) return result.error;
 
   const folders = await PermissionsService.getAccessibleFolders(result.user.id);
-  return NextResponse.json({ folders });
+
+  const foldersWithRoles = await Promise.all(
+    folders.map(async (f) => {
+      const { role } = await PermissionsService.resolveRole(result.user.id, f.id);
+      return { ...f, role };
+    }),
+  );
+
+  return NextResponse.json({ folders: foldersWithRoles });
 }
 
 export async function POST(request: NextRequest) {

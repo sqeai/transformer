@@ -35,6 +35,7 @@ export interface FolderNode {
   name: string;
   parentId: string | null;
   logoUrl: string | null;
+  role: string | null;
   children: FolderNode[];
 }
 
@@ -56,6 +57,8 @@ const FOLDER_SECTIONS = [
   { key: "data-sources", label: "Data Sources", icon: Cable, href: "/data-sources" },
   { key: "alerts", label: "Alerts", icon: Bell, href: "/alerts" },
 ];
+
+const DATA_ENGINEER_SECTIONS = new Set(["schemas", "datasets"]);
 
 function FolderNodeItem({
   node,
@@ -164,7 +167,13 @@ function FolderNodeItem({
 
       {expanded && (
         <div>
-          {FOLDER_SECTIONS.map((section) => {
+          {FOLDER_SECTIONS
+            .filter((section) =>
+              node.role === "data_engineer"
+                ? DATA_ENGINEER_SECTIONS.has(section.key)
+                : true,
+            )
+            .map((section) => {
             const sectionPath = `${folderBasePath}${section.href}`;
             const isSectionActive =
               pathname === sectionPath || pathname.startsWith(sectionPath + "/");

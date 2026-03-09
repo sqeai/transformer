@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // Roles
 // ---------------------------------------------------------------------------
 
-export type FolderRole = "viewer" | "editor" | "admin" | "owner";
+export type FolderRole = "viewer" | "editor" | "admin" | "owner" | "data_engineer";
 
 // ---------------------------------------------------------------------------
 // Permissions
@@ -14,12 +14,14 @@ export type Permission =
   | "view_context"
   | "view_data_sources"
   | "view_datasets"
+  | "view_schemas"
   | "view_panels"
   | "view_alerts"
   | "use_chat"
   | "edit_context"
   | "edit_data_sources"
   | "edit_datasets"
+  | "edit_schemas"
   | "edit_panels"
   | "edit_alerts"
   | "manage_users"
@@ -27,10 +29,17 @@ export type Permission =
   | "delete_folder";
 
 const ROLE_PERMISSIONS: Record<FolderRole, Permission[]> = {
+  data_engineer: [
+    "view_datasets",
+    "view_schemas",
+    "edit_datasets",
+    "edit_schemas",
+  ],
   viewer: [
     "view_context",
     "view_data_sources",
     "view_datasets",
+    "view_schemas",
     "view_panels",
     "view_alerts",
     "use_chat",
@@ -39,12 +48,14 @@ const ROLE_PERMISSIONS: Record<FolderRole, Permission[]> = {
     "view_context",
     "view_data_sources",
     "view_datasets",
+    "view_schemas",
     "view_panels",
     "view_alerts",
     "use_chat",
     "edit_context",
     "edit_data_sources",
     "edit_datasets",
+    "edit_schemas",
     "edit_panels",
     "edit_alerts",
   ],
@@ -52,12 +63,14 @@ const ROLE_PERMISSIONS: Record<FolderRole, Permission[]> = {
     "view_context",
     "view_data_sources",
     "view_datasets",
+    "view_schemas",
     "view_panels",
     "view_alerts",
     "use_chat",
     "edit_context",
     "edit_data_sources",
     "edit_datasets",
+    "edit_schemas",
     "edit_panels",
     "edit_alerts",
     "manage_users",
@@ -67,12 +80,14 @@ const ROLE_PERMISSIONS: Record<FolderRole, Permission[]> = {
     "view_context",
     "view_data_sources",
     "view_datasets",
+    "view_schemas",
     "view_panels",
     "view_alerts",
     "use_chat",
     "edit_context",
     "edit_data_sources",
     "edit_datasets",
+    "edit_schemas",
     "edit_panels",
     "edit_alerts",
     "manage_users",
@@ -366,6 +381,39 @@ export const PermissionsService = {
 
     if (error || !data) return false;
     return data.length > 0;
+  },
+
+  /**
+   * Resolve sidebar-level visibility flags for a user across all folders.
+   * - canChat: true if the user holds viewer, editor, admin, or owner on any folder (or is superadmin)
+   * - canManageUsers: true if admin/owner on any folder (or is superadmin)
+   */
+  async getSidebarAccess(userId: string): Promise<{
+    canChat: boolean;
+    canManageUsers: boolean;
+  }> {
+    if (await fetchIsSuperadmin(userId)) {
+      return { canChat: true, canManageUsers: true };
+    }
+
+    const supabase = createAdminClient();
+    const { data, error } = await supabase
+      .from("folder_members")
+      .select("role")
+      .eq("user_id", userId);
+
+    if (error || !data || data.length === 0) {
+      return { canChat: false, canManageUsers: false };
+    }
+
+    const roles = new Set(data.map((r) => r.role as FolderRole));
+    const chatRoles: FolderRole[] = ["viewer", "editor", "admin", "owner"];
+    const manageRoles: FolderRole[] = ["admin", "owner"];
+
+    return {
+      canChat: chatRoles.some((r) => roles.has(r)),
+      canManageUsers: manageRoles.some((r) => roles.has(r)),
+    };
   },
 
   /**

@@ -50,6 +50,7 @@ import type {
   ChartType,
   PredefinedQuestion,
 } from "@/components/dashboard/types";
+import { FolderPageGuard } from "@/components/auth/FolderPageGuard";
 
 const PANEL_REGEX = /<!-- DASHBOARD_PANEL:(.*?) -->/g;
 const DEFAULT_COL_SPAN = 4;
@@ -726,13 +727,16 @@ export default function FolderDashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
+      <FolderPageGuard folderId={folderId} requiredPermission="view_panels">
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </FolderPageGuard>
     );
   }
 
   return (
+    <FolderPageGuard folderId={folderId} requiredPermission="view_panels">
     <div className="flex h-[calc(100vh-3rem)] -m-6 overflow-hidden flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border bg-card/80 backdrop-blur-sm px-6 py-3">
@@ -910,5 +914,6 @@ export default function FolderDashboardPage() {
         dashboardId={dashboardId}
       />
     </div>
+    </FolderPageGuard>
   );
 }

@@ -59,7 +59,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: "folderId is required" }, { status: 400 });
   }
 
-  const validRoles = ["viewer", "editor", "admin", "owner"];
+  const validRoles = ["data_engineer", "viewer", "editor", "admin", "owner"];
   if (!validRoles.includes(role)) {
     return NextResponse.json(
       { error: `role must be one of: ${validRoles.join(", ")}` },

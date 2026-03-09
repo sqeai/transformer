@@ -40,6 +40,7 @@ interface ManageAccessDialogProps {
 }
 
 const ROLES = [
+  { value: "data_engineer", label: "Data Engineer" },
   { value: "viewer", label: "Viewer" },
   { value: "editor", label: "Editor" },
   { value: "admin", label: "Admin" },

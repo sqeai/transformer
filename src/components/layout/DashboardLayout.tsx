@@ -65,11 +65,11 @@ interface ChatHistoryItem {
 }
 
 function buildTree(
-  flat: { id: string; name: string; parent_id: string | null; logo_url?: string | null }[],
+  flat: { id: string; name: string; parent_id: string | null; logo_url?: string | null; role?: string | null }[],
 ): FolderNode[] {
   const map = new Map<string, FolderNode>();
   for (const f of flat) {
-    map.set(f.id, { id: f.id, name: f.name, parentId: f.parent_id, logoUrl: f.logo_url ?? null, children: [] });
+    map.set(f.id, { id: f.id, name: f.name, parentId: f.parent_id, logoUrl: f.logo_url ?? null, role: f.role ?? null, children: [] });
   }
   const roots: FolderNode[] = [];
   for (const node of map.values()) {
@@ -93,6 +93,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const [folders, setFolders] = useState<FolderNode[]>([]);
   const [foldersLoading, setFoldersLoading] = useState(true);
   const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
+  const [canChat, setCanChat] = useState(false);
   const [canManageUsers, setCanManageUsers] = useState(false);
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -148,10 +149,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     fetchFolders();
     loadChatHistory();
-    fetch("/api/users/me/can-manage")
+    fetch("/api/users/me/sidebar-access")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data) setCanManageUsers(data.canManageUsers);
+        if (data) {
+          setCanChat(data.canChat);
+          setCanManageUsers(data.canManageUsers);
+        }
       })
       .catch(() => {});
   }, [fetchFolders, loadChatHistory]);
@@ -381,9 +385,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 )}
               </div>
 
-              {!collapsed && <Separator className="mx-2" />}
+              {canChat && !collapsed && <Separator className="mx-2" />}
 
-              {/* New Chat link + Chat history */}
+              {canChat && (
               <div className={cn(
                 "p-2 space-y-1 flex flex-col",
                 foldersCollapsed ? "flex-1 min-h-0" : "min-h-[300px] shrink-0",
@@ -494,6 +498,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 )}
 
               </div>
+              )}
             </div>
 
             {/* Sticky bottom: Settings + Profile */}

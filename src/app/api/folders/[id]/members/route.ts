@@ -39,7 +39,7 @@ export async function POST(
     return NextResponse.json({ error: "email is required" }, { status: 400 });
   }
 
-  const validRoles = ["viewer", "editor", "admin", "owner"];
+  const validRoles = ["data_engineer", "viewer", "editor", "admin", "owner"];
   if (!validRoles.includes(role)) {
     return NextResponse.json(
       { error: `role must be one of: ${validRoles.join(", ")}` },
@@ -104,7 +104,7 @@ export async function PATCH(
     );
   }
 
-  const validRoles = ["viewer", "editor", "admin", "owner"];
+  const validRoles = ["data_engineer", "viewer", "editor", "admin", "owner"];
   if (!validRoles.includes(role)) {
     return NextResponse.json(
       { error: `role must be one of: ${validRoles.join(", ")}` },

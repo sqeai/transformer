@@ -23,6 +23,7 @@ import {
 import { Bell, ArrowLeft, Plus, Trash2, Loader2, Pause, Play } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { FolderPageGuard } from "@/components/auth/FolderPageGuard";
 
 interface Alert {
   id: string;
@@ -141,6 +142,7 @@ export default function FolderAlertsPage() {
   };
 
   return (
+    <FolderPageGuard folderId={folderId} requiredPermission="view_alerts">
     <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -313,5 +315,6 @@ export default function FolderAlertsPage() {
           </div>
         )}
       </div>
+    </FolderPageGuard>
   );
 }

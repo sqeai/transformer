@@ -2,6 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { FolderPageGuard } from "@/components/auth/FolderPageGuard";
 
 export default function DashboardDetailRedirect() {
   const params = useParams();
@@ -12,5 +13,9 @@ export default function DashboardDetailRedirect() {
     router.replace(`/folders/${folderId}`);
   }, [folderId, router]);
 
-  return null;
+  return (
+    <FolderPageGuard folderId={folderId} requiredPermission="view_panels">
+      {null}
+    </FolderPageGuard>
+  );
 }
