@@ -4,6 +4,34 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createConnector } from "@/lib/connectors";
 import type { DataSourceType } from "@/lib/connectors";
 
+type QuoteFn = (name: string) => string;
+
+function getDialectHelpers(type: DataSourceType) {
+  const backtickQuote: QuoteFn = (name) => `\`${name.replace(/`/g, "\\`")}\``;
+  const doubleQuote: QuoteFn = (name) => `"${name.replace(/"/g, '""')}"`;
+
+  switch (type) {
+    case "bigquery":
+      return {
+        quoteId: backtickQuote,
+        tableRef: (schema: string, table: string) =>
+          `\`${schema}.${table}\``,
+      };
+    case "mysql":
+      return {
+        quoteId: backtickQuote,
+        tableRef: (schema: string, table: string) =>
+          `${backtickQuote(schema)}.${backtickQuote(table)}`,
+      };
+    default:
+      return {
+        quoteId: doubleQuote,
+        tableRef: (schema: string, table: string) =>
+          `${doubleQuote(schema)}.${doubleQuote(table)}`,
+      };
+  }
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string; schema: string; table: string }> },
@@ -51,10 +79,12 @@ export async function POST(
     );
   }
 
+  const dsType = dsData.type as DataSourceType;
   const connector = createConnector(
-    dsData.type as DataSourceType,
+    dsType,
     dsData.config as Record<string, unknown>,
   );
+  const { quoteId, tableRef: buildTableRef } = getDialectHelpers(dsType);
 
   try {
     const columns = await connector.getColumns(schemaName, tableName);
@@ -73,8 +103,8 @@ export async function POST(
         column: col.name,
         type: col.type ?? "unknown",
       };
-      const colRef = quoteIdentifier(col.name);
-      const tableRef = `${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}`;
+      const colRef = quoteId(col.name);
+      const tableRef = buildTableRef(schemaName, tableName);
 
       try {
         const countResult = await connector.query(
@@ -86,8 +116,8 @@ export async function POST(
           dim.nullPercentage =
             total > 0 ? ((total - nonNull) / total) * 100 : 0;
         }
-      } catch {
-        /* skip null analysis for this column */
+      } catch (err) {
+        console.warn(`[dimensions] null-analysis failed for ${schemaName}.${tableName}.${col.name}:`, err instanceof Error ? err.message : err);
       }
 
       const important = isDimensionColumn(col.type ?? "unknown", col.name);
@@ -106,8 +136,8 @@ export async function POST(
           dim.uniqueValues = values;
         }
         dim.sampleValues = values.slice(0, 5);
-      } catch {
-        /* skip distinct analysis for this column */
+      } catch (err) {
+        console.warn(`[dimensions] distinct-values failed for ${schemaName}.${tableName}.${col.name}:`, err instanceof Error ? err.message : err);
       }
 
       dimensions.push(dim);
@@ -136,8 +166,10 @@ export async function POST(
 
     return NextResponse.json({ dimensions, lastRefreshedAt: new Date().toISOString() });
   } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[dimensions] Failed to refresh dimensions for ${schemaName}.${tableName}:`, err);
     return NextResponse.json(
-      { error: (err as Error).message },
+      { error: message },
       { status: 500 },
     );
   } finally {
@@ -145,14 +177,12 @@ export async function POST(
   }
 }
 
-function quoteIdentifier(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
-}
-
 const DIMENSION_TYPE_PATTERNS = /^(varchar|character varying|text|char|nvarchar|nchar|enum|boolean|bool|bit|smallint|tinyint|user-defined|citext)/i;
 const SKIP_NAME_PATTERNS = /^(id|uuid|guid|created|updated|modified|deleted|_at$|_id$|password|hash|token|secret|salt)/i;
+const IMPORTANT_NAME_PATTERNS = /(?:^|_)(class|category|categories|type|types|status|state|group|segment|tier|level|region|country|currency|channel|source|tag|tags|label|labels|key_metric|metric|department|division|role|priority|severity|phase|stage|kind|mode|plan|grade|rank|bucket|cohort|vertical|industry|sector|flag)(?:$|_|s$)/i;
 
 function isDimensionColumn(type: string, name: string): boolean {
+  if (IMPORTANT_NAME_PATTERNS.test(name)) return true;
   if (SKIP_NAME_PATTERNS.test(name)) return false;
   return DIMENSION_TYPE_PATTERNS.test(type);
 }
