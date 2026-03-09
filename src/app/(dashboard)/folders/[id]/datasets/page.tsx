@@ -153,6 +153,7 @@ export default function FolderDatasetsPage() {
       <UploadDatasetDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
+        folderId={folderId}
         onUpload={handleUploadFromDialog}
       />
     </>

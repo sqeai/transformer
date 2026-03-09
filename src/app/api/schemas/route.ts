@@ -4,6 +4,32 @@ import type { SchemaFieldRow } from "@/lib/schema-db";
 import { getAuth } from "@/lib/api-auth";
 import type { SchemaField } from "@/lib/types";
 
+async function getFolderAndDescendantIds(
+  supabase: Awaited<ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>>,
+  folderId: string,
+): Promise<string[]> {
+  const { data: folders, error } = await supabase
+    .from("folders")
+    .select("id, parent_id");
+  if (error || !folders) return [folderId];
+  const byParent = new Map<string | null, string[]>();
+  for (const f of folders) {
+    const list = byParent.get(f.parent_id) ?? [];
+    list.push(f.id);
+    byParent.set(f.parent_id, list);
+  }
+  const ids: string[] = [folderId];
+  const queue = [folderId];
+  while (queue.length) {
+    const pid = queue.shift()!;
+    for (const childId of byParent.get(pid) ?? []) {
+      ids.push(childId);
+      queue.push(childId);
+    }
+  }
+  return ids;
+}
+
 export async function GET(request: NextRequest) {
   const auth = await getAuth();
   if (auth.response) return auth.response;
@@ -17,7 +43,8 @@ export async function GET(request: NextRequest) {
     .select("id, name, created_at, updated_at, user_id, folder_id");
 
   if (folderId) {
-    query = query.eq("folder_id", folderId);
+    const folderIds = await getFolderAndDescendantIds(supabase!, folderId);
+    query = query.in("folder_id", folderIds);
   }
 
   const { data: schemaRows, error: schemaError } = await query;

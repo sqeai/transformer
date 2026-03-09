@@ -22,6 +22,7 @@ import {
   isUnstructuredExtension,
   getUnstructuredFileType,
 } from "@/lib/schema-store";
+import type { FinalSchema } from "@/lib/types";
 import { FileSpreadsheet, FileText, Image, FileType, Loader2, Upload, X } from "lucide-react";
 import { getExcelSheetNames } from "@/lib/parse-excel-preview";
 
@@ -34,6 +35,8 @@ export interface UploadDatasetDialogProps {
   initialSchemaId?: string;
   /** Optional dataset name for "Add to dataset" title */
   datasetName?: string;
+  /** When set, only schemas belonging to this folder (and its subfolders) are shown */
+  folderId?: string;
   onUpload: (schemaId: string, files: UploadedFileEntry[]) => void;
 }
 
@@ -43,9 +46,26 @@ export function UploadDatasetDialog({
   defaultSchemaId,
   initialSchemaId,
   datasetName,
+  folderId,
   onUpload,
 }: UploadDatasetDialogProps) {
-  const { schemas, schemasLoading } = useSchemaStore();
+  const { schemas: globalSchemas, schemasLoading: globalSchemasLoading } = useSchemaStore();
+  const [folderSchemas, setFolderSchemas] = useState<FinalSchema[]>([]);
+  const [folderSchemasLoading, setFolderSchemasLoading] = useState(false);
+
+  useEffect(() => {
+    if (!folderId || !open) return;
+    setFolderSchemasLoading(true);
+    fetch(`/api/schemas?folderId=${folderId}`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : { schemas: [] }))
+      .then((data) => setFolderSchemas(Array.isArray(data?.schemas) ? data.schemas : []))
+      .catch(() => setFolderSchemas([]))
+      .finally(() => setFolderSchemasLoading(false));
+  }, [folderId, open]);
+
+  const schemas = folderId ? folderSchemas : globalSchemas;
+  const schemasLoading = folderId ? folderSchemasLoading : globalSchemasLoading;
+
   const [selectedSchemaId, setSelectedSchemaId] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFileEntry[]>([]);
   const [dragging, setDragging] = useState(false);
