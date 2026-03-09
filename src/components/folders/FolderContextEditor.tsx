@@ -17,6 +17,7 @@ import {
   Check,
   ImagePlus,
   Trash2,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -135,6 +136,8 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
   const [editingTables, setEditingTables] = useState(false);
   const [loadingAllTables, setLoadingAllTables] = useState(false);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+
+  const [refreshingAllDimensions, setRefreshingAllDimensions] = useState(false);
 
   const [hasLogo, setHasLogo] = useState(false);
   const [logoVersion, setLogoVersion] = useState(0);
@@ -317,6 +320,27 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
     } finally {
       setSavingTables(false);
     }
+  };
+
+  const refreshAllDimensions = async () => {
+    if (contextTables.length === 0) return;
+    setRefreshingAllDimensions(true);
+    const results = await Promise.allSettled(
+      contextTables.map(async (t) => {
+        const res = await fetch(
+          `/api/data-sources/${t.dataSourceId}/tables/${t.schemaName}/${t.tableName}/dimensions`,
+          { method: "POST" },
+        );
+        if (!res.ok) throw new Error(t.tableName);
+      }),
+    );
+    const failed = results.filter((r) => r.status === "rejected").length;
+    if (failed === 0) {
+      toast.success("All dimensions refreshed");
+    } else {
+      toast.warning(`Refreshed with ${failed} failure${failed > 1 ? "s" : ""}`);
+    }
+    setRefreshingAllDimensions(false);
   };
 
   const toggleTable = (
@@ -524,14 +548,31 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold">Related Tables</h3>
           {!editingTables ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleEditTables}
-            >
-              <Edit3 className="mr-1.5 h-3.5 w-3.5" />
-              Edit
-            </Button>
+            <div className="flex items-center gap-2">
+              {contextTables.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={refreshAllDimensions}
+                  disabled={refreshingAllDimensions}
+                >
+                  {refreshingAllDimensions ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  Refresh All Dimensions
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleEditTables}
+              >
+                <Edit3 className="mr-1.5 h-3.5 w-3.5" />
+                Edit
+              </Button>
+            </div>
           ) : (
             <div className="flex items-center gap-2">
               <Button
@@ -590,6 +631,37 @@ function SelectedTableTree({
   toggleNode: (key: string) => void;
   removeTable: (dsId: string, schema: string, table: string) => void;
 }) {
+  const [refreshingKeys, setRefreshingKeys] = useState<Set<string>>(new Set());
+
+  const refreshDimensions = async (
+    dataSourceId: string,
+    schemaName: string,
+    tableName: string,
+  ) => {
+    const key = `${dataSourceId}::${schemaName}::${tableName}`;
+    setRefreshingKeys((prev) => new Set(prev).add(key));
+    try {
+      const res = await fetch(
+        `/api/data-sources/${dataSourceId}/tables/${schemaName}/${tableName}/dimensions`,
+        { method: "POST" },
+      );
+      if (res.ok) {
+        toast.success(`Dimensions refreshed for ${tableName}`);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error ?? "Failed to refresh dimensions");
+      }
+    } catch {
+      toast.error("Failed to refresh dimensions");
+    } finally {
+      setRefreshingKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
   if (tree.length === 0) {
     return (
       <p className="text-sm text-muted-foreground italic">
@@ -645,27 +717,51 @@ function SelectedTableTree({
                         </button>
                         {schemaExpanded && (
                           <div className="ml-4 overflow-y-auto">
-                            {schema.tables.map((t) => (
-                              <div
-                                key={t.tableName}
-                                className="flex items-center gap-1.5 rounded px-2 py-1 text-sm group hover:bg-muted/60 transition-colors"
-                              >
-                                <Table2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                                <span className="truncate">{t.tableName}</span>
-                                <button
-                                  onClick={() =>
-                                    removeTable(
-                                      ds.dataSourceId,
-                                      schema.schemaName,
-                                      t.tableName,
-                                    )
-                                  }
-                                  className="ml-auto p-0.5 rounded hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                            {schema.tables.map((t) => {
+                              const refreshKey = `${ds.dataSourceId}::${schema.schemaName}::${t.tableName}`;
+                              const isRefreshing = refreshingKeys.has(refreshKey);
+                              return (
+                                <div
+                                  key={t.tableName}
+                                  className="flex items-center gap-1.5 rounded px-2 py-1 text-sm group hover:bg-muted/60 transition-colors"
                                 >
-                                  <X className="h-3.5 w-3.5 text-destructive" />
-                                </button>
-                              </div>
-                            ))}
+                                  <Table2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                  <span className="truncate">{t.tableName}</span>
+                                  <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                      onClick={() =>
+                                        refreshDimensions(
+                                          ds.dataSourceId,
+                                          schema.schemaName,
+                                          t.tableName,
+                                        )
+                                      }
+                                      disabled={isRefreshing}
+                                      className="p-0.5 rounded hover:bg-muted transition-colors"
+                                      title="Refresh dimensions"
+                                    >
+                                      {isRefreshing ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                                      ) : (
+                                        <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+                                      )}
+                                    </button>
+                                    <button
+                                      onClick={() =>
+                                        removeTable(
+                                          ds.dataSourceId,
+                                          schema.schemaName,
+                                          t.tableName,
+                                        )
+                                      }
+                                      className="p-0.5 rounded hover:bg-destructive/10"
+                                    >
+                                      <X className="h-3.5 w-3.5 text-destructive" />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
