@@ -2,7 +2,6 @@
 
 import { Suspense, useCallback, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -217,7 +216,7 @@ function NewDataSourceContent() {
   const typeColor = meta.color;
 
   return (
-    <DashboardLayout>
+    <>
       <div className="mx-auto max-w-2xl space-y-6 animate-fade-in">
         <Button
           variant="ghost"
@@ -502,7 +501,7 @@ function NewDataSourceContent() {
           </Button>
         </div>
       </div>
-    </DashboardLayout>
+    </>
   );
 }
 

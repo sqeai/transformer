@@ -2,7 +2,6 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import {
@@ -725,12 +724,12 @@ function NewDatasetPageContent() {
 
   if (!schemaId || !schema) {
     return (
-      <DashboardLayout>
+      <>
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <p className="text-muted-foreground text-lg">No schema selected.</p>
           <Button className="mt-4" onClick={() => router.push(datasetsListUrl)}>Back to Datasets</Button>
         </div>
-      </DashboardLayout>
+      </>
     );
   }
 
@@ -740,7 +739,7 @@ function NewDatasetPageContent() {
   const exportableResults = jobResults.filter((r) => r.status === "completed" && r.result);
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-4 animate-fade-in">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={handleHeaderBack}>
@@ -827,18 +826,18 @@ function NewDatasetPageContent() {
           />
         )}
       </div>
-    </DashboardLayout>
+    </>
   );
 }
 
 export default function NewDatasetPage() {
   return (
     <Suspense fallback={
-      <DashboardLayout>
+      <>
         <div className="flex items-center justify-center py-20">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
-      </DashboardLayout>
+      </>
     }>
       <NewDatasetPageContent />
     </Suspense>

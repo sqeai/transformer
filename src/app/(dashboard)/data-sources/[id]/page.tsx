@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
-import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -397,22 +396,22 @@ export default function DataSourceDetailPage({
 
   if (loading) {
     return (
-      <DashboardLayout>
+      <>
         <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin" />
           Loading...
         </div>
-      </DashboardLayout>
+      </>
     );
   }
 
   if (!ds) {
     return (
-      <DashboardLayout>
+      <>
         <div className="text-center py-20 text-muted-foreground">
           Data source not found.
         </div>
-      </DashboardLayout>
+      </>
     );
   }
 
@@ -429,7 +428,7 @@ export default function DataSourceDetailPage({
   const typeBg = typeMeta.bg;
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-6 animate-fade-in">
         <Button
           variant="ghost"
@@ -837,6 +836,6 @@ export default function DataSourceDetailPage({
           </Card>
         </div>
       </div>
-    </DashboardLayout>
+    </>
   );
 }

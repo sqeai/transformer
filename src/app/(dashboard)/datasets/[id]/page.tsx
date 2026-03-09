@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -551,20 +550,20 @@ export default function DatasetPage() {
 
   if (loading) {
     return (
-      <DashboardLayout>
+      <>
         <Card><CardContent className="py-8 text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Loading dataset...</CardContent></Card>
-      </DashboardLayout>
+      </>
     );
   }
 
   if (!dataset) {
     return (
-      <DashboardLayout>
+      <>
         <Card>
           <CardHeader><CardTitle>Dataset not found</CardTitle></CardHeader>
           <CardContent><Button onClick={() => router.push("/")}>Back to Home</Button></CardContent>
         </Card>
-      </DashboardLayout>
+      </>
     );
   }
 
@@ -572,7 +571,7 @@ export default function DatasetPage() {
   const isReadOnlyApprover = isApprover && !myApproverEntry?.decidedAt && dataset.state === "pending_approval";
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-6 animate-fade-in">
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -877,6 +876,6 @@ export default function DatasetPage() {
         exportingToDb={exportingToDb}
         onExport={exportToDatabase}
       />
-    </DashboardLayout>
+    </>
   );
 }

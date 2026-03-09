@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -151,18 +150,18 @@ export default function SchemaDetailPage() {
 
   if (schemasLoading) {
     return (
-      <DashboardLayout>
+      <>
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <Loader2 className="h-10 w-10 text-muted-foreground animate-spin mb-4" />
           <p className="text-muted-foreground text-lg">Loading schema...</p>
         </div>
-      </DashboardLayout>
+      </>
     );
   }
 
   if (!schema) {
     return (
-      <DashboardLayout>
+      <>
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <FileStack className="h-12 w-12 text-muted-foreground/30 mb-4" />
           <p className="text-muted-foreground text-lg">Schema not found.</p>
@@ -170,7 +169,7 @@ export default function SchemaDetailPage() {
             Back to Home
           </Button>
         </div>
-      </DashboardLayout>
+      </>
     );
   }
 
@@ -258,7 +257,7 @@ export default function SchemaDetailPage() {
   };
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-6 animate-fade-in">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -498,6 +497,6 @@ export default function SchemaDetailPage() {
         defaultSchemaId={id}
         onUpload={handleUploadFromDialog}
       />
-    </DashboardLayout>
+    </>
   );
 }

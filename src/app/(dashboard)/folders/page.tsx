@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -52,7 +51,7 @@ export default function FoldersPage() {
   }, [fetchFolders]);
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
@@ -136,6 +135,6 @@ export default function FoldersPage() {
         parentId={null}
         onCreated={fetchFolders}
       />
-    </DashboardLayout>
+    </>
   );
 }
