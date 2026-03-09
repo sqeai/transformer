@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,8 @@ import {
   Table2,
   FolderOpen,
   Check,
+  ImagePlus,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -134,6 +136,12 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
   const [loadingAllTables, setLoadingAllTables] = useState(false);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
 
+  const [hasLogo, setHasLogo] = useState(false);
+  const [logoVersion, setLogoVersion] = useState(0);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [removingLogo, setRemovingLogo] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+
   const fetchContext = useCallback(async () => {
     setLoading(true);
     try {
@@ -162,10 +170,80 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
     }
   }, [folderId]);
 
+  const fetchFolderLogo = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/folder-logos/${folderId}`, { method: "HEAD" });
+      setHasLogo(res.ok);
+    } catch {
+      setHasLogo(false);
+    }
+  }, [folderId]);
+
   useEffect(() => {
     fetchContext();
     fetchDataSources();
-  }, [fetchContext, fetchDataSources]);
+    fetchFolderLogo();
+  }, [fetchContext, fetchDataSources, fetchFolderLogo]);
+
+  const handleLogoUpload = useCallback(async (file: File) => {
+    const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      toast.error("Only image files are allowed (PNG, JPEG, GIF, WebP, SVG)");
+      return;
+    }
+
+    setUploadingLogo(true);
+    try {
+      const presignRes = await fetch(`/api/folders/${folderId}/logo`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contentType: file.type, fileName: file.name }),
+      });
+
+      if (!presignRes.ok) {
+        const err = await presignRes.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to get upload URL");
+      }
+
+      const { uploadUrl } = await presignRes.json();
+
+      const uploadRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+
+      if (!uploadRes.ok) {
+        throw new Error("Failed to upload logo");
+      }
+
+      setHasLogo(true);
+      setLogoVersion((v) => v + 1);
+      toast.success("Logo uploaded");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to upload logo");
+    } finally {
+      setUploadingLogo(false);
+    }
+  }, [folderId]);
+
+  const handleRemoveLogo = useCallback(async () => {
+    setRemovingLogo(true);
+    try {
+      const res = await fetch(`/api/folders/${folderId}/logo`, { method: "DELETE" });
+      if (res.ok) {
+        setHasLogo(false);
+        setLogoVersion((v) => v + 1);
+        toast.success("Logo removed");
+      } else {
+        toast.error("Failed to remove logo");
+      }
+    } catch {
+      toast.error("Failed to remove logo");
+    } finally {
+      setRemovingLogo(false);
+    }
+  }, [folderId]);
 
   const fetchAllTables = useCallback(async () => {
     if (dataSources.length === 0) return;
@@ -328,6 +406,67 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
         </div>
       </div>
 
+      {/* Logo */}
+      <div className="space-y-2">
+        <h3 className="text-sm font-semibold">Logo</h3>
+        <div className="flex items-center gap-4">
+          {hasLogo ? (
+            <div className="relative group">
+              <img
+                src={`/api/folder-logos/${folderId}?v=${logoVersion}`}
+                alt="Folder logo"
+                className="h-14 w-14 rounded-lg border border-border object-cover bg-muted"
+              />
+              <button
+                onClick={handleRemoveLogo}
+                disabled={removingLogo}
+                className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                title="Remove logo"
+              >
+                {removingLogo ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Trash2 className="h-3 w-3" />
+                )}
+              </button>
+            </div>
+          ) : (
+            <div className="flex h-14 w-14 items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30">
+              <FolderOpen className="h-6 w-6 text-muted-foreground/50" />
+            </div>
+          )}
+          <div className="flex flex-col gap-1.5">
+            <input
+              ref={logoInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleLogoUpload(file);
+                e.target.value = "";
+              }}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => logoInputRef.current?.click()}
+              disabled={uploadingLogo}
+            >
+              {uploadingLogo ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ImagePlus className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {hasLogo ? "Change Logo" : "Upload Logo"}
+            </Button>
+            <p className="text-[11px] text-muted-foreground">
+              Replaces the folder icon in the sidebar and context panel
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Markdown Editor / Preview */}
       {previewMode ? (
         <div className="rounded-lg border bg-muted/30 p-4 min-h-[300px] overflow-auto prose prose-sm dark:prose-invert max-w-none">
@@ -434,7 +573,7 @@ function SelectedTableTree({
                 </span>
               </button>
               {dsExpanded && (
-                <div className="ml-4">
+                <div className="ml-4 overflow-y-auto">
                   {ds.schemas.map((schema) => {
                     const schemaKey = `selected-schema-${ds.dataSourceId}-${schema.schemaName}`;
                     const schemaExpanded = expandedNodes.has(schemaKey);
@@ -456,7 +595,7 @@ function SelectedTableTree({
                           </span>
                         </button>
                         {schemaExpanded && (
-                          <div className="ml-4">
+                          <div className="ml-4 overflow-y-auto">
                             {schema.tables.map((t) => (
                               <div
                                 key={t.tableName}
@@ -577,7 +716,7 @@ function EditableTableTree({
                 )}
               </button>
               {dsExpanded && (
-                <div className="ml-4">
+                <div className="ml-4 overflow-y-auto">
                   {ds.schemas.map((schema) => {
                     const schemaKey = `edit-schema-${ds.dataSourceId}-${schema.schemaName}`;
                     const schemaExpanded = expandedNodes.has(schemaKey);
@@ -604,7 +743,7 @@ function EditableTableTree({
                           )}
                         </button>
                         {schemaExpanded && (
-                          <div className="ml-4">
+                          <div className="ml-4 overflow-y-auto">
                             {schema.tables.map((t) => (
                               <button
                                 key={t.tableName}

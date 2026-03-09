@@ -34,6 +34,7 @@ export interface FolderNode {
   id: string;
   name: string;
   parentId: string | null;
+  logoUrl: string | null;
   children: FolderNode[];
 }
 
@@ -121,7 +122,13 @@ function FolderNodeItem({
           href={folderBasePath}
           className="flex items-center gap-2 min-w-0 flex-1"
         >
-          {expanded ? (
+          {node.logoUrl ? (
+            <img
+              src={`/api/folder-logos/${node.id}`}
+              alt=""
+              className="h-4 w-4 shrink-0 rounded object-cover"
+            />
+          ) : expanded ? (
             <FolderOpen className={cn("h-4 w-4 shrink-0", isActive ? "text-primary" : "text-amber-500")} />
           ) : (
             <Folder className={cn("h-4 w-4 shrink-0", isActive ? "text-primary" : "text-amber-500")} />

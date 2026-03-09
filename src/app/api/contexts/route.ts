@@ -4,9 +4,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { PermissionsService } from "@/lib/permissions";
 
 /**
- * GET /api/contexts?folderIds=id1,id2
+ * GET /api/contexts?folderIds=id1,id2&lightweight=true
  * Returns folder contexts with their related tables, columns, and dimensions.
  * If folderIds is omitted, returns all accessible folder contexts.
+ * If lightweight=true, skips the expensive dimension/column lookup (useful for
+ * quickly showing selected context chips before the full data is ready).
  */
 export async function GET(request: NextRequest) {
   const result = await requireAuth();
@@ -16,6 +18,7 @@ export async function GET(request: NextRequest) {
   const userId = result.user.id;
 
   const folderIdsParam = request.nextUrl.searchParams.get("folderIds");
+  const lightweight = request.nextUrl.searchParams.get("lightweight") === "true";
   let folderIds: string[];
 
   if (folderIdsParam) {
@@ -30,10 +33,10 @@ export async function GET(request: NextRequest) {
 
   const { data: folders } = await supabase
     .from("folders")
-    .select("id, name")
+    .select("id, name, logo_url")
     .in("id", folderIds);
 
-  const folderMap = new Map((folders ?? []).map((f) => [f.id, f.name]));
+  const folderMap = new Map((folders ?? []).map((f) => [f.id, { name: f.name, logoUrl: f.logo_url as string | null }]));
 
   const { data: contexts } = await supabase
     .from("folder_contexts")
@@ -65,12 +68,6 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const tableKeys = (contextTables ?? []).map((t) => ({
-    data_source_id: t.data_source_id,
-    schema_name: t.schema_name,
-    table_name: t.table_name,
-  }));
-
   let dimensionsMap = new Map<
     string,
     Record<
@@ -84,30 +81,38 @@ export async function GET(request: NextRequest) {
     >
   >();
 
-  if (tableKeys.length > 0) {
-    const { data: dims } = await supabase
-      .from("table_dimensions")
-      .select("data_source_id, schema_name, table_name, dimensions")
-      .in(
-        "data_source_id",
-        tableKeys.map((t) => t.data_source_id),
-      );
+  if (!lightweight) {
+    const tableKeys = (contextTables ?? []).map((t) => ({
+      data_source_id: t.data_source_id,
+      schema_name: t.schema_name,
+      table_name: t.table_name,
+    }));
 
-    if (dims) {
-      for (const d of dims) {
-        const key = `${d.data_source_id}:${d.schema_name}.${d.table_name}`;
-        dimensionsMap.set(
-          key,
-          d.dimensions as Record<
-            string,
-            {
-              type: string;
-              uniqueValues?: string[];
-              sampleValues?: string[];
-              nullPercentage?: number;
-            }
-          >,
+    if (tableKeys.length > 0) {
+      const { data: dims } = await supabase
+        .from("table_dimensions")
+        .select("data_source_id, schema_name, table_name, dimensions")
+        .in(
+          "data_source_id",
+          tableKeys.map((t) => t.data_source_id),
         );
+
+      if (dims) {
+        for (const d of dims) {
+          const key = `${d.data_source_id}:${d.schema_name}.${d.table_name}`;
+          dimensionsMap.set(
+            key,
+            d.dimensions as Record<
+              string,
+              {
+                type: string;
+                uniqueValues?: string[];
+                sampleValues?: string[];
+                nullPercentage?: number;
+              }
+            >,
+          );
+        }
       }
     }
   }
@@ -117,7 +122,7 @@ export async function GET(request: NextRequest) {
       .filter((t) => t.folder_context_id === ctx.id)
       .map((t) => {
         const dimKey = `${t.data_source_id}:${t.schema_name}.${t.table_name}`;
-        const dimensions = dimensionsMap.get(dimKey) ?? null;
+        const dimensions = lightweight ? null : (dimensionsMap.get(dimKey) ?? null);
         const ds = dsMap.get(t.data_source_id);
 
         const columns: { name: string; type: string }[] = [];
@@ -138,9 +143,11 @@ export async function GET(request: NextRequest) {
         };
       });
 
+    const folderInfo = folderMap.get(ctx.folder_id);
     return {
       folderId: ctx.folder_id,
-      folderName: folderMap.get(ctx.folder_id) ?? "",
+      folderName: folderInfo?.name ?? "",
+      logoUrl: folderInfo?.logoUrl ?? null,
       content: ctx.content,
       tables,
     };

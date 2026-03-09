@@ -14,7 +14,7 @@ export async function GET(
 
   const { data: folder, error } = await supabase
     .from("folders")
-    .select("id, name, parent_id, created_by, created_at, updated_at")
+    .select("id, name, parent_id, logo_url, created_by, created_at, updated_at")
     .eq("id", id)
     .maybeSingle();
 

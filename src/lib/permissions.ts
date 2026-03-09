@@ -274,7 +274,7 @@ export const PermissionsService = {
   async getAccessibleFolders(
     userId: string,
   ): Promise<
-    { id: string; name: string; parent_id: string | null; created_by: string; created_at: string; updated_at: string }[]
+    { id: string; name: string; parent_id: string | null; logo_url: string | null; created_by: string; created_at: string; updated_at: string }[]
   > {
     const supabase = createAdminClient();
     const isSuperadmin = await fetchIsSuperadmin(userId);
@@ -282,7 +282,7 @@ export const PermissionsService = {
     if (isSuperadmin) {
       const { data, error } = await supabase
         .from("folders")
-        .select("id, name, parent_id, created_by, created_at, updated_at")
+        .select("id, name, parent_id, logo_url, created_by, created_at, updated_at")
         .order("name");
       if (error) return [];
       return data ?? [];
@@ -293,7 +293,7 @@ export const PermissionsService = {
 
     const { data: accessibleFolders, error } = await supabase
       .from("folders")
-      .select("id, name, parent_id, created_by, created_at, updated_at")
+      .select("id, name, parent_id, logo_url, created_by, created_at, updated_at")
       .in("id", accessibleIds)
       .order("name");
 
@@ -328,7 +328,7 @@ export const PermissionsService = {
     if (ancestorIds.size > 0) {
       const { data: ancestors } = await supabase
         .from("folders")
-        .select("id, name, parent_id, created_by, created_at, updated_at")
+        .select("id, name, parent_id, logo_url, created_by, created_at, updated_at")
         .in("id", Array.from(ancestorIds));
       ancestorFolders = ancestors ?? [];
     }

@@ -64,11 +64,11 @@ interface ChatHistoryItem {
 }
 
 function buildTree(
-  flat: { id: string; name: string; parent_id: string | null }[],
+  flat: { id: string; name: string; parent_id: string | null; logo_url?: string | null }[],
 ): FolderNode[] {
   const map = new Map<string, FolderNode>();
   for (const f of flat) {
-    map.set(f.id, { id: f.id, name: f.name, parentId: f.parent_id, children: [] });
+    map.set(f.id, { id: f.id, name: f.name, parentId: f.parent_id, logoUrl: f.logo_url ?? null, children: [] });
   }
   const roots: FolderNode[] = [];
   for (const node of map.values()) {

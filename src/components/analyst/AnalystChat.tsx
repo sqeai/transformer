@@ -1118,7 +1118,15 @@ export function AnalystChat() {
                     className="inline-flex items-center gap-1 rounded-md bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium truncate max-w-[80px]"
                     title={ctx.folderName}
                   >
-                    <BookOpen className="h-2.5 w-2.5 flex-shrink-0" />
+                    {ctx.logoUrl ? (
+                      <img
+                        src={`/api/folder-logos/${ctx.folderId}`}
+                        alt=""
+                        className="h-2.5 w-2.5 flex-shrink-0 rounded object-cover"
+                      />
+                    ) : (
+                      <BookOpen className="h-2.5 w-2.5 flex-shrink-0" />
+                    )}
                     <span className="truncate">{ctx.folderName}</span>
                   </span>
                 ))}
@@ -1388,12 +1396,10 @@ export function AnalystChat() {
         </form>
       </div>
 
-      {/* Right panel - Contexts */}
-      {panelOpen && (
-        <div className="w-72 flex-shrink-0">
-          <ContextSelector onSelectionChange={setContextSelection} />
-        </div>
-      )}
+      {/* Right panel - Contexts (always mounted so selection loads on page load) */}
+      <div className={cn("flex-shrink-0", panelOpen ? "w-72" : "hidden")}>
+        <ContextSelector onSelectionChange={setContextSelection} />
+      </div>
     </div>
   );
 }

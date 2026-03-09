@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import {
   BookOpen,
   ChevronRight,
@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 
 export interface ContextTableInfo {
   dataSourceId: string;
@@ -39,6 +40,7 @@ export interface ContextTableInfo {
 export interface FolderContext {
   folderId: string;
   folderName: string;
+  logoUrl: string | null;
   content: string;
   tables: ContextTableInfo[];
 }
@@ -147,6 +149,7 @@ function buildSelection(
 export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEXT_STORAGE_KEY }: ContextSelectorProps) {
   const [allContexts, setAllContexts] = useState<FolderContext[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fullLoading, setFullLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(loadSavedContextIds(storageKey)));
   const [expandedContexts, setExpandedContexts] = useState<Set<string>>(
     new Set(),
@@ -156,8 +159,8 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
   const onSelectionChangeRef = useRef(onSelectionChange);
   onSelectionChangeRef.current = onSelectionChange;
 
-  const fetchContexts = useCallback(async () => {
-    setLoading(true);
+  const fetchAllContexts = useCallback(async () => {
+    setFullLoading(true);
     try {
       const res = await fetch("/api/contexts");
       if (res.ok) {
@@ -167,6 +170,7 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
     } catch {
       // ignore
     } finally {
+      setFullLoading(false);
       setLoading(false);
     }
   }, []);
@@ -174,8 +178,30 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
   useEffect(() => {
     if (initialFetchDone.current) return;
     initialFetchDone.current = true;
-    fetchContexts();
-  }, [fetchContexts]);
+
+    const savedIds = loadSavedContextIds(storageKey);
+    if (savedIds.length > 0) {
+      setLoading(true);
+      const params = new URLSearchParams({
+        folderIds: savedIds.join(","),
+        lightweight: "true",
+      });
+      fetch(`/api/contexts?${params}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.contexts?.length) {
+            setAllContexts(data.contexts);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          fetchAllContexts();
+        });
+    } else {
+      setLoading(true);
+      fetchAllContexts();
+    }
+  }, [fetchAllContexts, storageKey]);
 
   useEffect(() => {
     saveContextIds(storageKey, selectedIds);
@@ -217,6 +243,151 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
     .filter((c) => selectedIds.has(c.folderId))
     .reduce((sum, c) => sum + c.tables.length, 0);
 
+  const isRefreshing = loading || fullLoading;
+
+  const { selectedContexts, unselectedContexts } = useMemo(() => {
+    const selected: FolderContext[] = [];
+    const unselected: FolderContext[] = [];
+    for (const ctx of allContexts) {
+      if (selectedIds.has(ctx.folderId)) {
+        selected.push(ctx);
+      } else {
+        unselected.push(ctx);
+      }
+    }
+    return { selectedContexts: selected, unselectedContexts: unselected };
+  }, [allContexts, selectedIds]);
+
+  const renderContextItem = useCallback((ctx: FolderContext) => {
+    const isSelected = selectedIds.has(ctx.folderId);
+    const isExpanded = expandedContexts.has(ctx.folderId);
+
+    return (
+      <div
+        key={ctx.folderId}
+        className={cn(
+          "rounded-lg border",
+          isSelected
+            ? "border-primary/40 bg-primary/5"
+            : "border-border/50",
+        )}
+      >
+        <div className="flex items-center gap-1 px-2 py-1.5">
+          <button
+            onClick={() => toggleContext(ctx.folderId)}
+            className="flex-shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+            title={isSelected ? "Deselect context" : "Select context"}
+          >
+            {isSelected ? (
+              <CheckSquare className="h-4 w-4 text-primary" />
+            ) : (
+              <Square className="h-4 w-4" />
+            )}
+          </button>
+          <button
+            onClick={() => toggleExpand(ctx.folderId)}
+            className="flex flex-1 items-center gap-1.5 text-left min-w-0"
+          >
+            {isExpanded ? (
+              <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+            )}
+            {ctx.logoUrl ? (
+              <img
+                src={`/api/folder-logos/${ctx.folderId}`}
+                alt=""
+                className="h-3.5 w-3.5 flex-shrink-0 rounded object-cover"
+              />
+            ) : (
+              <BookOpen className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
+            )}
+            <span className="text-xs font-medium truncate">
+              {ctx.folderName}
+            </span>
+            {ctx.tables.length > 0 && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1 py-0 ml-auto flex-shrink-0"
+              >
+                {ctx.tables.length} table
+                {ctx.tables.length > 1 ? "s" : ""}
+              </Badge>
+            )}
+          </button>
+        </div>
+
+        {isExpanded && (
+          <div className="border-t border-border/30 px-2 py-1">
+            {ctx.content.trim() && (
+              <div className="px-2 py-1.5 mb-1 rounded bg-muted/30 border border-dashed border-border/50">
+                <p className="text-[10px] font-medium text-muted-foreground mb-0.5">
+                  Context
+                </p>
+                <p className="text-[11px] text-muted-foreground line-clamp-3">
+                  {ctx.content.slice(0, 200)}
+                  {ctx.content.length > 200 ? "..." : ""}
+                </p>
+              </div>
+            )}
+
+            {ctx.tables.length === 0 && (
+              <div className="py-2 px-2 text-xs text-muted-foreground">
+                No tables linked
+              </div>
+            )}
+
+            {ctx.tables.map((table) => {
+              const tKey = `${ctx.folderId}:${table.dataSourceId}:${table.schemaName}.${table.tableName}`;
+              const tExpanded = expandedTables.has(tKey);
+
+              return (
+                <div key={tKey}>
+                  <button
+                    onClick={() => toggleTableExpand(tKey)}
+                    className="flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 transition-colors"
+                  >
+                    {tExpanded ? (
+                      <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                    )}
+                    <Table2 className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                    <span className="text-[11px] truncate text-left">
+                      {table.schemaName}.{table.tableName}
+                    </span>
+                    <Database className="h-2.5 w-2.5 flex-shrink-0 text-muted-foreground/50 ml-auto" />
+                    <span className="text-[9px] text-muted-foreground/50 flex-shrink-0">
+                      {table.dataSourceName}
+                    </span>
+                  </button>
+                  {tExpanded && table.columns.length > 0 && (
+                    <div className="ml-8 space-y-0.5 py-0.5">
+                      {table.columns.map((col) => (
+                        <div
+                          key={col.name}
+                          className="flex items-center gap-1.5 px-2 py-0.5"
+                        >
+                          <Columns3 className="h-2.5 w-2.5 flex-shrink-0 text-muted-foreground/60" />
+                          <span className="text-[10px] text-muted-foreground truncate">
+                            {col.name}
+                          </span>
+                          <span className="text-[9px] text-muted-foreground/50 ml-auto flex-shrink-0">
+                            {col.type}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }, [selectedIds, expandedContexts, expandedTables, toggleContext, toggleExpand, toggleTableExpand]);
+
   return (
     <div className="flex h-full flex-col border-l border-border bg-card/50">
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -238,25 +409,25 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
           variant="ghost"
           size="icon"
           className="h-7 w-7"
-          onClick={fetchContexts}
+          onClick={fetchAllContexts}
           title="Refresh contexts"
         >
           <RefreshCw
-            className={cn("h-3.5 w-3.5", loading && "animate-spin")}
+            className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")}
           />
         </Button>
       </div>
 
       <ScrollArea className="flex-1">
         <div className="p-2 space-y-1">
-          {loading && allContexts.length === 0 && (
+          {isRefreshing && allContexts.length === 0 && (
             <div className="flex items-center justify-center py-8 text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
               <span className="text-sm">Loading...</span>
             </div>
           )}
 
-          {!loading && allContexts.length === 0 && (
+          {!isRefreshing && allContexts.length === 0 && (
             <div className="py-8 text-center text-sm text-muted-foreground">
               No contexts found.
               <br />
@@ -266,127 +437,26 @@ export function ContextSelector({ onSelectionChange, storageKey = ANALYST_CONTEX
             </div>
           )}
 
-          {allContexts.map((ctx) => {
-            const isSelected = selectedIds.has(ctx.folderId);
-            const isExpanded = expandedContexts.has(ctx.folderId);
+          {selectedContexts.map(renderContextItem)}
 
-            return (
-              <div
-                key={ctx.folderId}
-                className={cn(
-                  "rounded-lg border",
-                  isSelected
-                    ? "border-primary/40 bg-primary/5"
-                    : "border-border/50",
-                )}
-              >
-                <div className="flex items-center gap-1 px-2 py-1.5">
-                  <button
-                    onClick={() => toggleContext(ctx.folderId)}
-                    className="flex-shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                    title={isSelected ? "Deselect context" : "Select context"}
-                  >
-                    {isSelected ? (
-                      <CheckSquare className="h-4 w-4 text-primary" />
-                    ) : (
-                      <Square className="h-4 w-4" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => toggleExpand(ctx.folderId)}
-                    className="flex flex-1 items-center gap-1.5 text-left min-w-0"
-                  >
-                    {isExpanded ? (
-                      <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-                    )}
-                    <BookOpen className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
-                    <span className="text-xs font-medium truncate">
-                      {ctx.folderName}
-                    </span>
-                    {ctx.tables.length > 0 && (
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] px-1 py-0 ml-auto flex-shrink-0"
-                      >
-                        {ctx.tables.length} table
-                        {ctx.tables.length > 1 ? "s" : ""}
-                      </Badge>
-                    )}
-                  </button>
-                </div>
+          {selectedContexts.length > 0 && unselectedContexts.length > 0 && (
+            <div className="flex items-center gap-2 py-1.5 px-1">
+              <Separator className="flex-1" />
+              <span className="text-[10px] font-medium text-muted-foreground whitespace-nowrap">
+                Available
+              </span>
+              <Separator className="flex-1" />
+            </div>
+          )}
 
-                {isExpanded && (
-                  <div className="border-t border-border/30 px-2 py-1">
-                    {ctx.content.trim() && (
-                      <div className="px-2 py-1.5 mb-1 rounded bg-muted/30 border border-dashed border-border/50">
-                        <p className="text-[10px] font-medium text-muted-foreground mb-0.5">
-                          Context
-                        </p>
-                        <p className="text-[11px] text-muted-foreground line-clamp-3">
-                          {ctx.content.slice(0, 200)}
-                          {ctx.content.length > 200 ? "..." : ""}
-                        </p>
-                      </div>
-                    )}
+          {unselectedContexts.map(renderContextItem)}
 
-                    {ctx.tables.length === 0 && (
-                      <div className="py-2 px-2 text-xs text-muted-foreground">
-                        No tables linked
-                      </div>
-                    )}
-
-                    {ctx.tables.map((table) => {
-                      const tKey = `${ctx.folderId}:${table.dataSourceId}:${table.schemaName}.${table.tableName}`;
-                      const tExpanded = expandedTables.has(tKey);
-
-                      return (
-                        <div key={tKey}>
-                          <button
-                            onClick={() => toggleTableExpand(tKey)}
-                            className="flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 transition-colors"
-                          >
-                            {tExpanded ? (
-                              <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-                            ) : (
-                              <ChevronRight className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-                            )}
-                            <Table2 className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-                            <span className="text-[11px] truncate text-left">
-                              {table.schemaName}.{table.tableName}
-                            </span>
-                            <Database className="h-2.5 w-2.5 flex-shrink-0 text-muted-foreground/50 ml-auto" />
-                            <span className="text-[9px] text-muted-foreground/50 flex-shrink-0">
-                              {table.dataSourceName}
-                            </span>
-                          </button>
-                          {tExpanded && table.columns.length > 0 && (
-                            <div className="ml-8 space-y-0.5 py-0.5">
-                              {table.columns.map((col) => (
-                                <div
-                                  key={col.name}
-                                  className="flex items-center gap-1.5 px-2 py-0.5"
-                                >
-                                  <Columns3 className="h-2.5 w-2.5 flex-shrink-0 text-muted-foreground/60" />
-                                  <span className="text-[10px] text-muted-foreground truncate">
-                                    {col.name}
-                                  </span>
-                                  <span className="text-[9px] text-muted-foreground/50 ml-auto flex-shrink-0">
-                                    {col.type}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {fullLoading && allContexts.length > 0 && unselectedContexts.length === 0 && (
+            <div className="flex items-center justify-center py-4 text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+              <span className="text-xs">Loading more contexts...</span>
+            </div>
+          )}
         </div>
       </ScrollArea>
     </div>
