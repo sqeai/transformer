@@ -13,6 +13,7 @@ import { ApproverDialog } from "@/components/datasets/ApproverDialog";
 import { DecisionDialog } from "@/components/datasets/DecisionDialog";
 import { AiCleanserDialog } from "@/components/datasets/AiCleanserDialog";
 import { ExportToDbDialog } from "@/components/datasets/ExportToDbDialog";
+import { DataQualityBanner } from "@/components/datasets/DataQualityBanner";
 import { UploadDatasetDialog } from "@/components/UploadDatasetDialog";
 import type { DatasetRecord, DatasetState, AppUser, SchemaField } from "@/lib/types";
 import {
@@ -775,7 +776,12 @@ export default function DatasetPage() {
                 </div>
               )}
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              <DataQualityBanner
+                datasetId={dataset.id}
+                columns={columns}
+                rows={dataset.rows}
+              />
               <div ref={scrollAreaRef}>
                 <DataTable
                   columns={columns}
