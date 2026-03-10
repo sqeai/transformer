@@ -165,8 +165,8 @@ export default function SchemaDetailPage() {
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <FileStack className="h-12 w-12 text-muted-foreground/30 mb-4" />
           <p className="text-muted-foreground text-lg">Schema not found.</p>
-          <Button variant="outline" className="mt-4" onClick={() => router.push("/")}>
-            Back to Home
+          <Button variant="outline" className="mt-4" onClick={() => router.back()}>
+            Go Back
           </Button>
         </div>
       </>

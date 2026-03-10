@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { FileStack, Plus, Loader2, ArrowLeft } from "lucide-react";
+import { FileStack, Plus, Loader2 } from "lucide-react";
 import { useSchemaStore } from "@/lib/schema-store";
 import { AddSchemaDialog } from "@/components/schemas/AddSchemaDialog";
 import { SheetPickerDialog } from "@/components/schemas/SheetPickerDialog";
@@ -153,20 +153,11 @@ export default function FolderSchemasPage() {
     <>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => router.push(`/folders/${folderId}`)}
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight">Schemas</h1>
-              <p className="text-sm text-muted-foreground">
-                Data schemas in this folder
-              </p>
-            </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Schemas</h1>
+            <p className="text-sm text-muted-foreground">
+              Data schemas in this folder
+            </p>
           </div>
           <div className="flex gap-2">
             <input

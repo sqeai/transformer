@@ -561,7 +561,7 @@ export default function DatasetPage() {
       <>
         <Card>
           <CardHeader><CardTitle>Dataset not found</CardTitle></CardHeader>
-          <CardContent><Button onClick={() => router.push("/")}>Back to Home</Button></CardContent>
+          <CardContent><Button onClick={() => router.back()}>Go Back</Button></CardContent>
         </Card>
       </>
     );
