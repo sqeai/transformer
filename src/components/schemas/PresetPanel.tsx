@@ -41,7 +41,7 @@ export function PresetPanel({
       </DialogHeader>
 
       <div className="flex flex-1 min-h-0 gap-4">
-        <div className="w-[260px] shrink-0 space-y-2">
+        <div className="w-[260px] shrink-0 space-y-2 overflow-y-auto">
           {SCHEMA_PRESETS.map((preset) => (
             <button
               key={preset.id}

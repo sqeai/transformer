@@ -106,6 +106,29 @@ const repoShareFields: SchemaField[] = [
   makeField("bond_nominal", 37, "NUMERIC"),
 ];
 
+const genericFinancialStatementFields: SchemaField[] = [
+  makeField("class", 1),
+  makeField("category", 2),
+  makeField("amount", 3, "NUMERIC"),
+  makeField("year", 4, "INTEGER"),
+  makeField("month", 5, "INTEGER"),
+  makeField("key_metrics_level_1", 6),
+  makeField("key_metrics_level_2", 7),
+  makeField("key_metrics_level_3", 8),
+  makeField("business_unit", 9),
+];
+
+const kpiFields: SchemaField[] = [
+  makeField("kpi_name", 1),
+  makeField("department", 2),
+  makeField("target_value", 3, "NUMERIC"),
+  makeField("actual_value", 4, "NUMERIC"),
+  makeField("unit", 5),
+  makeField("period_start_date", 6, "DATE"),
+  makeField("period_end_date", 7, "DATE"),
+  makeField("status", 8),
+];
+
 export const SCHEMA_PRESETS: SchemaPreset[] = [
   {
     id: "financial_statement",
@@ -131,5 +154,19 @@ export const SCHEMA_PRESETS: SchemaPreset[] = [
     name: "Unstructured Data",
     description: "Flexible schema for unstructured data with tags, naming, file references, and raw context.",
     fields: unstructuredDataFields,
+  },
+  {
+    id: "generic_financial_statement",
+    name: "Generic Financial Statement",
+    description:
+      "Simplified financial statement with class, category, amount, time period, key metrics hierarchy, and business unit.",
+    fields: genericFinancialStatementFields,
+  },
+  {
+    id: "kpi",
+    name: "KPI",
+    description:
+      "Key Performance Indicator tracking with targets, actuals, units, date ranges, and status by department.",
+    fields: kpiFields,
   },
 ];
