@@ -123,16 +123,12 @@ export function extractPptxText(buffer: Buffer): string {
 }
 
 /**
- * Extract text from a PDF buffer using pdf-parse.
+ * Extract text from a PDF buffer using unpdf (server-compatible, no DOMMatrix needed).
  */
 export async function extractPdfText(buffer: Buffer): Promise<string> {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { PDFParse } = require("pdf-parse") as typeof import("pdf-parse");
-  const parser = new PDFParse({ data: new Uint8Array(buffer) });
-  const result = await parser.getText();
-  await parser.destroy();
-  const text = result.text ?? "";
-  return text.replace(/\n+-- \d+ of \d+ --\n+/g, "\n").trim();
+  const { extractText } = await import("unpdf");
+  const result = await extractText(new Uint8Array(buffer), { mergePages: true });
+  return (result.text ?? "").trim();
 }
 
 /**
