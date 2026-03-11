@@ -148,6 +148,22 @@ export default function SchemaDetailPage() {
     return () => document.removeEventListener("click", handleDocumentClick, true);
   }, [hasUnsavedChanges, requestLeave, router]);
 
+  const handleUploadFromDialog = useCallback(
+    (schemaId: string, files: UploadedFileEntry[]) => {
+      resetDatasetWorkflow();
+      setDatasetWorkflow({
+        schemaId,
+        step: "upload",
+        files,
+        selectedFiles: [],
+      });
+      const params = new URLSearchParams({ schemaId });
+      if (schema?.folderId) params.set("folderId", schema.folderId);
+      router.push(`/datasets/new?${params.toString()}`);
+    },
+    [resetDatasetWorkflow, setDatasetWorkflow, router, schema],
+  );
+
   if (schemasLoading) {
     return (
       <>
@@ -196,22 +212,6 @@ export default function SchemaDetailPage() {
   const handleUseSchema = () => {
     setShowUploadDialog(true);
   };
-
-  const handleUploadFromDialog = useCallback(
-    (schemaId: string, files: UploadedFileEntry[]) => {
-      resetDatasetWorkflow();
-      setDatasetWorkflow({
-        schemaId,
-        step: "upload",
-        files,
-        selectedFiles: [],
-      });
-      const params = new URLSearchParams({ schemaId });
-      if (schema?.folderId) params.set("folderId", schema.folderId);
-      router.push(`/datasets/new?${params.toString()}`);
-    },
-    [resetDatasetWorkflow, setDatasetWorkflow, router, schema],
-  );
 
   const handleGrant = async () => {
     const email = grantEmail.trim();
