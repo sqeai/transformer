@@ -628,6 +628,24 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                   </Button>
                 )}
               </div>
+
+              <div className={cn(
+                "border-t border-sidebar-border px-2 py-2 flex items-center gap-2",
+                collapsed ? "justify-center" : "justify-start",
+              )}>
+                <Image
+                  src="/sqe-logo-placeholder.png"
+                  alt="S-Quantum Engine"
+                  width={36}
+                  height={36}
+                  className="h-9 w-9 shrink-0 object-contain"
+                />
+                {!collapsed && (
+                  <span className="text-[10px] text-muted-foreground leading-tight">
+                    Powered by S-Quantum Engine
+                  </span>
+                )}
+              </div>
             </div>
           </aside>
         </TooltipProvider>
