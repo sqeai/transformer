@@ -218,6 +218,7 @@ export async function POST(request: NextRequest) {
     schema: {
       id: schema.id,
       name: schema.name,
+      folderId: folderId ?? null,
       createdAt: schema.created_at ?? new Date().toISOString(),
       creator,
       fields,
