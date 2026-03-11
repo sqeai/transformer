@@ -135,7 +135,9 @@ export async function structureTextWithAnthropic(
 }
 
 /**
- * Full extraction: tries local extraction first, falls back to Anthropic for images.
+ * Full extraction: local text extraction for documents, Files API for images.
+ * - PDF/TXT/DOCX/PPTX: extract text locally → send plain text to LLM
+ * - Images: upload via Files API → reference in LLM call → delete after
  */
 export async function extractWithAnthropic(input: OcrInput): Promise<OcrResult> {
   const docBuffer = Buffer.from(input.base64, "base64");
@@ -147,40 +149,39 @@ export async function extractWithAnthropic(input: OcrInput): Promise<OcrResult> 
     }
   }
 
+  const isImage = SUPPORTED_IMAGE_TYPES.includes(input.mimeType);
+  if (!isImage) {
+    const { extractDocumentText } = await import("./doc-extract");
+    const extracted = extractDocumentText(docBuffer, input.mimeType);
+    if (extracted && extracted.trim().length > 0) {
+      return structureTextWithAnthropic(extracted, input.fileName, input.targetPaths);
+    }
+    throw new Error(`Unable to extract text from ${input.mimeType} file: ${input.fileName}`);
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
 
   const client = new Anthropic({ apiKey });
   const prompt = buildExtractionPrompt(input.fileName, input.targetPaths);
-  const isImage = SUPPORTED_IMAGE_TYPES.includes(input.mimeType);
-
-  const contentBlocks: Anthropic.ContentBlockParam[] = [];
-
-  if (isImage) {
-    contentBlocks.push({
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: input.mimeType as AnthropicMediaType,
-        data: input.base64,
-      },
-    });
-  } else {
-    const { extractDocumentText } = await import("./doc-extract");
-    const extracted = extractDocumentText(docBuffer, input.mimeType);
-    const textContent = extracted ?? `[Unable to extract text from ${input.mimeType} file: ${input.fileName}]`;
-    contentBlocks.push({
-      type: "text",
-      text: `--- DOCUMENT CONTENT ---\n${textContent}`,
-    });
-  }
-
-  contentBlocks.push({ type: "text", text: prompt });
 
   const response = await client.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 8192,
-    messages: [{ role: "user", content: contentBlocks }],
+    messages: [{
+      role: "user",
+      content: [
+        {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: input.mimeType as AnthropicMediaType,
+            data: input.base64,
+          },
+        },
+        { type: "text", text: prompt },
+      ],
+    }],
   });
 
   const responseText = response.content
@@ -193,7 +194,7 @@ export async function extractWithAnthropic(input: OcrInput): Promise<OcrResult> 
 
 /**
  * Server-side: reads a file from S3 and extracts content.
- * Uses local extraction for PDF/DOCX/PPTX/TXT, Anthropic OCR only for images.
+ * Uses local extraction for PDF/DOCX/PPTX/TXT, Files API only for images.
  */
 export async function extractFileFromS3(
   filePath: string,

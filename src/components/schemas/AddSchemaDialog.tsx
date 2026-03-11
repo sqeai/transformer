@@ -32,8 +32,10 @@ import {
   type ColumnEntry,
 } from "./DataSourcePanel";
 import { ManualSchemaPanel } from "./ManualSchemaPanel";
+import { UploadSchemaPanel } from "./UploadSchemaPanel";
+import { getExcelSheetNames, extractExcelGrid } from "@/lib/parse-excel-preview";
 
-type DialogMode = "initial" | "preset" | "datasource" | "manual";
+type DialogMode = "initial" | "upload" | "preset" | "datasource" | "manual";
 
 function toSnakeCase(value: string): string {
   return value
@@ -47,16 +49,12 @@ function toSnakeCase(value: string): string {
 interface AddSchemaDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  uploading: boolean;
-  onUploadClick: () => void;
   folderId?: string;
 }
 
 export function AddSchemaDialog({
   open,
   onOpenChange,
-  uploading,
-  onUploadClick,
   folderId,
 }: AddSchemaDialogProps) {
   const router = useRouter();
@@ -83,6 +81,24 @@ export function AddSchemaDialog({
   const [columnsLoading, setColumnsLoading] = useState(false);
   const [creatingFromDataSource, setCreatingFromDataSource] = useState(false);
 
+  // Upload mode state
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadBuffer, setUploadBuffer] = useState<ArrayBuffer | null>(null);
+  const [sheetNames, setSheetNames] = useState<string[]>([]);
+  const [activeSheetIndex, setActiveSheetIndex] = useState(0);
+  const [sheetPreview, setSheetPreview] = useState<string[][]>([]);
+  const [sheetPreviewLoading, setSheetPreviewLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const resetUploadState = () => {
+    setUploadFile(null);
+    setUploadBuffer(null);
+    setSheetNames([]);
+    setActiveSheetIndex(0);
+    setSheetPreview([]);
+    setSheetPreviewLoading(false);
+  };
+
   const resetDialogMode = () => {
     setDialogMode("initial");
     setInitialSelection(null);
@@ -92,6 +108,7 @@ export function AddSchemaDialog({
     setTables([]);
     setSelectedTable(null);
     setColumns([]);
+    resetUploadState();
   };
 
   const handleDialogOpenChange = (nextOpen: boolean) => {
@@ -118,8 +135,7 @@ export function AddSchemaDialog({
   const handleConfirmSelection = () => {
     switch (initialSelection) {
       case "upload":
-        onOpenChange(false);
-        onUploadClick();
+        setDialogMode("upload");
         break;
       case "manual":
         setDialogMode("manual");
@@ -132,6 +148,84 @@ export function AddSchemaDialog({
         break;
     }
   };
+
+  const loadSheetPreview = useCallback(async (buffer: ArrayBuffer, index: number) => {
+    setSheetPreviewLoading(true);
+    try {
+      const { grid } = await extractExcelGrid(buffer, 6, undefined, index);
+      setSheetPreview(grid);
+    } catch {
+      setSheetPreview([]);
+    } finally {
+      setSheetPreviewLoading(false);
+    }
+  }, []);
+
+  const handleFileSelect = useCallback(async (file: File) => {
+    resetUploadState();
+    setUploadFile(file);
+
+    const ext = file.name.toLowerCase().split(".").pop() ?? "";
+    const isExcel = ext === "xlsx" || ext === "xls";
+
+    if (isExcel) {
+      try {
+        const buffer = await file.arrayBuffer();
+        setUploadBuffer(buffer);
+        const names = await getExcelSheetNames(buffer);
+        if (names && names.length > 1) {
+          setSheetNames(names);
+          setActiveSheetIndex(0);
+          await loadSheetPreview(buffer, 0);
+        }
+      } catch {
+        // single sheet or failed to parse - will proceed without sheet picker
+      }
+    }
+  }, [loadSheetPreview]);
+
+  const handleRemoveFile = useCallback(() => {
+    resetUploadState();
+  }, []);
+
+  const handleSelectSheet = useCallback(async (index: number) => {
+    if (!uploadBuffer) return;
+    setActiveSheetIndex(index);
+    await loadSheetPreview(uploadBuffer, index);
+  }, [uploadBuffer, loadSheetPreview]);
+
+  const handleCreateSchemaFromUpload = useCallback(async () => {
+    if (!uploadFile) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.set("file", uploadFile);
+      formData.set("sheetIndex", String(activeSheetIndex));
+      const res = await fetch("/api/parse-schema", { method: "POST", body: formData });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Upload failed");
+      }
+      const { fields } = await res.json();
+      const schema: FinalSchema = {
+        id: crypto.randomUUID(),
+        name: uploadFile.name.replace(/\.(xlsx?|csv|pdf|png|jpe?g|gif|webp|txt|docx|pptx)$/i, "") || "New Schema",
+        fields: fields.map((f: { id: string; name: string; path: string; level: number; order: number }) => ({
+          ...f,
+          children: [],
+        })),
+        createdAt: new Date().toISOString(),
+      };
+      const created = await addSchema(schema, folderId);
+      onOpenChange(false);
+      resetDialogMode();
+      router.push(`/schemas/${created.id}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }, [uploadFile, activeSheetIndex, addSchema, folderId, onOpenChange, router]);
 
   const handleAddFieldsManually = async () => {
     if (!manualPrompt.trim()) return;
@@ -262,6 +356,7 @@ export function AddSchemaDialog({
   };
 
   const isExpanded =
+    dialogMode === "upload" ||
     dialogMode === "preset" ||
     dialogMode === "datasource" ||
     dialogMode === "manual";
@@ -292,22 +387,17 @@ export function AddSchemaDialog({
                     : "border-transparent hover:bg-muted/50",
                 )}
                 onClick={() => setInitialSelection("upload")}
-                disabled={uploading}
               >
                 <span className="flex w-full items-center gap-2 font-medium text-sm">
-                  {uploading ? (
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                  ) : (
-                    <FileSpreadsheet className="h-4 w-4 shrink-0" />
-                  )}
+                  <FileSpreadsheet className="h-4 w-4 shrink-0" />
                   <span className="min-w-0 break-words">
                     Upload from existing file
                   </span>
                   <Sparkles className="h-3.5 w-3.5 ml-auto shrink-0 text-violet-500" />
                 </span>
                 <span className="w-full text-left text-muted-foreground text-sm font-normal break-words mt-1.5 block">
-                  Parse a header row from an Excel or CSV file into a schema you
-                  can configure.
+                  Parse headers from Excel, CSV, PDF, images, Word, or
+                  PowerPoint files into a schema you can configure.
                 </span>
               </button>
               <button
@@ -378,11 +468,9 @@ export function AddSchemaDialog({
             <div className="flex justify-end pt-1">
               <Button
                 onClick={handleConfirmSelection}
-                disabled={
-                  !initialSelection || uploading || creatingFromManual
-                }
+                disabled={!initialSelection || creatingFromManual}
               >
-                {(uploading || creatingFromManual) && (
+                {creatingFromManual && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 )}
                 Confirm
@@ -403,6 +491,20 @@ export function AddSchemaDialog({
               </Button>
             </div>
             <div className="flex-1 min-h-0 flex flex-col">
+              {dialogMode === "upload" && (
+                <UploadSchemaPanel
+                  file={uploadFile}
+                  onFileSelect={handleFileSelect}
+                  onRemoveFile={handleRemoveFile}
+                  sheetNames={sheetNames}
+                  activeSheetIndex={activeSheetIndex}
+                  onSelectSheet={handleSelectSheet}
+                  sheetPreview={sheetPreview}
+                  sheetPreviewLoading={sheetPreviewLoading}
+                  uploading={uploading}
+                  onCreateSchema={handleCreateSchemaFromUpload}
+                />
+              )}
               {dialogMode === "preset" && (
                 <PresetPanel
                   selectedPreset={selectedPreset}

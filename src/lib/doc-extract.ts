@@ -126,11 +126,13 @@ export function extractPptxText(buffer: Buffer): string {
  * Extract text from a PDF buffer using pdf-parse.
  */
 export async function extractPdfText(buffer: Buffer): Promise<string> {
-  const { PDFParse } = await import("pdf-parse");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { PDFParse } = require("pdf-parse") as typeof import("pdf-parse");
   const parser = new PDFParse({ data: new Uint8Array(buffer) });
   const result = await parser.getText();
   await parser.destroy();
-  return result.text;
+  const text = result.text ?? "";
+  return text.replace(/\n+-- \d+ of \d+ --\n+/g, "\n").trim();
 }
 
 /**
