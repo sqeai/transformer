@@ -36,6 +36,10 @@ import {
   Search,
   BookOpen,
   ArrowDown,
+  PieChart as PieChartIcon,
+  Waves,
+  ScatterChart as ScatterIcon,
+  BarChart2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -669,11 +673,21 @@ function exportChatAsMarkdown(messages: { role: string; parts?: { type: string; 
   return lines.join("\n");
 }
 
+const CHART_TYPES = [
+  { type: "bar", label: "Bar", icon: BarChart3 },
+  { type: "line", label: "Line", icon: TrendingUp },
+  { type: "pie", label: "Pie", icon: PieChartIcon },
+  { type: "scatter", label: "Scatter", icon: ScatterIcon },
+  { type: "waterfall", label: "Waterfall", icon: Waves },
+] as const;
+
 export function AnalystChat() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [input, setInput] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
+  const [chartPickerOpen, setChartPickerOpen] = useState(false);
+  const chartPickerRef = useRef<HTMLDivElement>(null);
   const [persona, setPersona] = useState<Persona>(() => {
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem(ANALYST_PERSONA_KEY);
@@ -714,6 +728,18 @@ export function AnalystChat() {
       return () => document.removeEventListener("mousedown", handleClickOutside);
     }
   }, [personaDropdownOpen]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (chartPickerRef.current && !chartPickerRef.current.contains(e.target as Node)) {
+        setChartPickerOpen(false);
+      }
+    }
+    if (chartPickerOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [chartPickerOpen]);
 
   const transport = useRef(
     new DefaultChatTransport({ api: "/api/analyst-chat" }),
@@ -1490,6 +1516,45 @@ export function AnalystChat() {
             >
               <Paperclip className="h-4 w-4" />
             </Button>
+            <div className="relative shrink-0" ref={chartPickerRef}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-11 w-11 rounded-xl text-muted-foreground hover:text-foreground"
+                onClick={() => setChartPickerOpen((o) => !o)}
+                title="Create chart"
+              >
+                <BarChart2 className="h-4 w-4" />
+              </Button>
+              {chartPickerOpen && (
+                <div className="absolute bottom-full left-0 mb-2 w-52 rounded-xl border border-border bg-card shadow-lg z-50 overflow-hidden">
+                  <div className="px-3 py-2 border-b border-border/50">
+                    <p className="text-xs font-semibold text-foreground">Create a chart</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Pick a chart type to get started</p>
+                  </div>
+                  {CHART_TYPES.map(({ type, label, icon: Icon }) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => {
+                        setInput((prev) =>
+                          prev.trim()
+                            ? `${prev.trim()} Visualize this as a ${type} chart.`
+                            : `Create a ${type} chart showing `
+                        );
+                        setChartPickerOpen(false);
+                        inputRef.current?.focus();
+                      }}
+                      className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm text-foreground hover:bg-muted transition-colors"
+                    >
+                      <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span>{label} Chart</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <textarea
               ref={inputRef}
               value={input}

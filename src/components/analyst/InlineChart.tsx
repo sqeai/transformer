@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useCallback } from "react";
+import html2canvas from "html2canvas";
 import {
   PieChart,
   Pie,
@@ -30,6 +31,8 @@ import {
   ChevronRight,
   Copy,
   Check,
+  Download,
+  Camera,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { VisualizationPayload } from "@/lib/agents/analyst-agent/tools";
@@ -443,6 +446,56 @@ export function InlineChart({
   className,
 }: InlineChartBaseProps) {
   const [activeView, setActiveView] = useState<ViewType>(chartData.chartType);
+  const chartAreaRef = useRef<HTMLDivElement>(null);
+
+  const exportAsPng = useCallback(async () => {
+    const container = chartAreaRef.current;
+    if (!container) return;
+    const chartEl =
+      (container.querySelector(".recharts-responsive-container") as HTMLElement | null) ??
+      container;
+
+    try {
+      const canvas = await html2canvas(chartEl, {
+        scale: 2,
+        backgroundColor: "#ffffff",
+        useCORS: true,
+        logging: false,
+      });
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = `${chartData.title.replace(/[^a-z0-9]/gi, "-").toLowerCase() || "chart"}.png`;
+        a.click();
+        URL.revokeObjectURL(blobUrl);
+      }, "image/png");
+    } catch (err) {
+      console.error("Failed to export chart:", err);
+    }
+  }, [chartData.title]);
+
+  const exportAsCsv = useCallback(() => {
+    if (!chartData.data.length) return;
+    const headers = Object.keys(chartData.data[0]);
+    const rows = chartData.data.map((row) =>
+      headers.map((h) => {
+        const val = row[h];
+        if (val == null) return "";
+        const s = String(val);
+        return /[,"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      }).join(",")
+    );
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = `${chartData.title.replace(/[^a-z0-9]/gi, "-").toLowerCase() || "chart"}.csv`;
+    a.click();
+    URL.revokeObjectURL(blobUrl);
+  }, [chartData.data, chartData.title]);
 
   if (mode === "clean") {
     return (
@@ -467,9 +520,27 @@ export function InlineChart({
     )}>
       <div className="flex items-center justify-between border-b border-border/50 px-4 py-2.5 shrink-0">
         <h3 className="text-sm font-medium truncate">{chartData.title}</h3>
-        <span className="text-[11px] text-muted-foreground ml-2 shrink-0">
-          {chartData.data.length.toLocaleString("en-US")} rows
-        </span>
+        <div className="flex items-center gap-1 ml-2 shrink-0">
+          <span className="text-[11px] text-muted-foreground">
+            {chartData.data.length.toLocaleString("en-US")} rows
+          </span>
+          {activeView !== "table" && (
+            <button
+              onClick={exportAsPng}
+              className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+              title="Export as PNG"
+            >
+              <Camera className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button
+            onClick={exportAsCsv}
+            className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+            title="Export data as CSV"
+          >
+            <Download className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-0.5 border-b border-border/50 px-3 py-1.5 bg-muted/20 overflow-x-auto shrink-0">
@@ -491,6 +562,7 @@ export function InlineChart({
       </div>
 
       <div
+        ref={chartAreaRef}
         className={cn(
           "p-3",
           fillHeight ? "flex-1 min-h-0" : (activeView === "table" ? "h-[320px]" : "h-[300px]"),
