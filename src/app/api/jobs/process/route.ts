@@ -44,6 +44,7 @@ async function processJobs() {
             originalFilePath?: string;
             modifiedFilePath?: string;
             unstructuredMimeType?: string;
+            lookupTables?: Array<{ name: string; dimensions: string[]; values: string[]; rows: Record<string, string>[] }>;
           };
 
           if (typeof payload?.filePath !== "string" || !Array.isArray(payload?.targetPaths)) {
@@ -59,6 +60,7 @@ async function processJobs() {
             modifiedFilePath: payload.modifiedFilePath,
             fileId: job.file_id ?? undefined,
             unstructuredMimeType: payload.unstructuredMimeType,
+            lookupTables: payload.lookupTables,
           });
 
           if (typeof job.file_id === "string" && job.file_id) {

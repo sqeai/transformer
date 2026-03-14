@@ -114,6 +114,32 @@ export async function GET(request: NextRequest) {
     s.fields = rowsToFields(bySchema.get(s.id) ?? []);
   }
 
+  const { data: lookupRows } = await supabase!
+    .from("schema_lookup_tables")
+    .select("*")
+    .in("schema_id", ids)
+    .order("created_at", { ascending: true });
+
+  const lookupsBySchema = new Map<string, Array<{ id: string; schemaId: string; name: string; dimensions: string[]; values: string[]; rows: Record<string, string>[]; createdAt: string }>>();
+  for (const r of (lookupRows ?? []) as Array<Record<string, unknown>>) {
+    const schemaIdVal = r.schema_id as string;
+    const list = lookupsBySchema.get(schemaIdVal) ?? [];
+    list.push({
+      id: r.id as string,
+      schemaId: schemaIdVal,
+      name: r.name as string,
+      dimensions: (r.dimensions ?? []) as string[],
+      values: (r.values ?? []) as string[],
+      rows: (r.rows ?? []) as Record<string, string>[],
+      createdAt: r.created_at as string,
+    });
+    lookupsBySchema.set(schemaIdVal, list);
+  }
+
+  for (const s of schemas) {
+    (s as Record<string, unknown>).lookupTables = lookupsBySchema.get(s.id) ?? [];
+  }
+
   const { data: datasetRows } = await supabase!
     .from("datasets")
     .select("id, schema_id, name, row_count, created_at, updated_at")
@@ -222,6 +248,7 @@ export async function POST(request: NextRequest) {
       createdAt: schema.created_at ?? new Date().toISOString(),
       creator,
       fields,
+      lookupTables: [],
     },
   });
 }

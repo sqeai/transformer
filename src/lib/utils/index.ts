@@ -17,5 +17,6 @@ export {
   applyReduce,
   applyBalanceSheet,
   applyUnstructured,
+  applySchemaLookup,
 } from "./transformations";
 export type { TransformationStep } from "./transformations";

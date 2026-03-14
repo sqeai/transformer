@@ -112,6 +112,7 @@ export interface PipelineNode {
     | "aggregate"
     | "mapRows"
     | "reduce"
+    | "schemaLookup"
     | "map"
     | "target";
   label: string;
@@ -232,17 +233,20 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateSchema = useCallback(async (id: string, updates: Partial<FinalSchema>) => {
-    const res = await api(`/api/schemas/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...(updates.name !== undefined && { name: updates.name }),
-        ...(updates.fields !== undefined && { fields: updates.fields }),
-      }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error ?? "Failed to update schema");
+    const hasApiFields = updates.name !== undefined || updates.fields !== undefined;
+    if (hasApiFields) {
+      const res = await api(`/api/schemas/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(updates.name !== undefined && { name: updates.name }),
+          ...(updates.fields !== undefined && { fields: updates.fields }),
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to update schema");
+      }
     }
     setSchemas((prev) =>
       prev.map((s) => (s.id === id ? { ...s, ...updates } : s)),

@@ -23,11 +23,25 @@ export interface SchemaField {
   children?: SchemaField[];
 }
 
+export interface LookupTable {
+  id: string;
+  schemaId: string;
+  name: string;
+  /** Dimension column names (keys to match on) */
+  dimensions: string[];
+  /** Value column names (outputs from the lookup) */
+  values: string[];
+  /** Rows of data: each row has keys for every dimension and value column */
+  rows: Record<string, string>[];
+  createdAt?: string;
+}
+
 export interface FinalSchema {
   id: string;
   name: string;
   folderId?: string | null;
   fields: SchemaField[];
+  lookupTables?: LookupTable[];
   createdAt: string;
   updatedAt?: string;
   lastActivityAt?: string;

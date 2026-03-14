@@ -64,6 +64,22 @@ export async function GET(
 
   const fields = rowsToFields((fieldRows ?? []) as SchemaFieldRow[]);
 
+  const { data: lookupRows } = await supabase!
+    .from("schema_lookup_tables")
+    .select("*")
+    .eq("schema_id", id)
+    .order("created_at", { ascending: true });
+
+  const lookupTables = (lookupRows ?? []).map((r: Record<string, unknown>) => ({
+    id: r.id,
+    schemaId: r.schema_id,
+    name: r.name,
+    dimensions: r.dimensions ?? [],
+    values: r.values ?? [],
+    rows: r.rows ?? [],
+    createdAt: r.created_at,
+  }));
+
   return NextResponse.json({
     schema: {
       id: schema.id,
@@ -73,6 +89,7 @@ export async function GET(
       updatedAt: schema.updated_at ?? schema.created_at ?? new Date().toISOString(),
       creator,
       fields,
+      lookupTables,
     },
   });
 }

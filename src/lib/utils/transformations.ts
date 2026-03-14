@@ -442,6 +442,66 @@ export function applyUnstructured(data: FileData, params: Record<string, unknown
 }
 
 // ---------------------------------------------------------------------------
+// schemaLookup — apply lookup tables defined in the schema
+// ---------------------------------------------------------------------------
+
+interface SchemaLookupTableDef {
+  name: string;
+  dimensions: string[];
+  values: string[];
+  rows: Record<string, string>[];
+}
+
+interface SchemaLookupMapping {
+  lookupTableName: string;
+  dimensionMappings: Array<{ sourceColumn: string; dimension: string }>;
+  valueMappings: Array<{ valueColumn: string; targetColumn: string }>;
+}
+
+export function applySchemaLookup(data: FileData, params: Record<string, unknown>): FileData {
+  const lookupTables = (params.lookupTables ?? []) as SchemaLookupTableDef[];
+  const mappings = (params.mappings ?? []) as SchemaLookupMapping[];
+
+  if (mappings.length === 0 || lookupTables.length === 0) return data;
+
+  const tableByName = new Map<string, SchemaLookupTableDef>();
+  for (const t of lookupTables) tableByName.set(t.name, t);
+
+  const newColumns = new Set(data.columns);
+  for (const m of mappings) {
+    for (const vm of m.valueMappings) newColumns.add(vm.targetColumn);
+  }
+
+  const columns = [...newColumns];
+  const rows = data.rows.map((row) => {
+    const out = { ...row };
+
+    for (const mapping of mappings) {
+      const table = tableByName.get(mapping.lookupTableName);
+      if (!table) continue;
+
+      const matchingRow = table.rows.find((lkRow) =>
+        mapping.dimensionMappings.every((dm) => {
+          const sourceVal = String(row[dm.sourceColumn] ?? "").trim().toLowerCase();
+          const dimVal = String(lkRow[dm.dimension] ?? "").trim().toLowerCase();
+          return sourceVal === dimVal;
+        }),
+      );
+
+      if (matchingRow) {
+        for (const vm of mapping.valueMappings) {
+          out[vm.targetColumn] = matchingRow[vm.valueColumn] ?? "";
+        }
+      }
+    }
+
+    return out;
+  });
+
+  return { columns, rows };
+}
+
+// ---------------------------------------------------------------------------
 // Dispatcher
 // ---------------------------------------------------------------------------
 
@@ -460,6 +520,7 @@ export function executeTransformation(data: FileData, step: TransformationStep, 
     case "handleBalanceSheet": return applyBalanceSheet(data, step.params);
     case "handleUnstructuredData": return applyUnstructured(data, step.params);
     case "handleStructuredData": return data;
+    case "schemaLookup": return applySchemaLookup(data, step.params);
     default: return data;
   }
 }

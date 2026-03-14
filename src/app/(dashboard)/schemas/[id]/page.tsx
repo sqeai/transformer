@@ -37,8 +37,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import FinalSchemaTable from "@/components/FinalSchemaTable";
+import LookupTablesEditor from "@/components/LookupTablesEditor";
 import { UploadDatasetDialog } from "@/components/UploadDatasetDialog";
-import type { FinalSchema } from "@/lib/types";
+import type { FinalSchema, LookupTable } from "@/lib/types";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function SchemaDetailPage() {
@@ -200,6 +201,12 @@ export default function SchemaDetailPage() {
   const handleUpdateSchema = (schemaId: string, updates: Partial<FinalSchema>) => {
     updateSchema(schemaId, updates);
   };
+
+  const handleLookupTablesChange = useCallback((tables: LookupTable[]) => {
+    // Lookup tables are already persisted by LookupTablesEditor via its own API.
+    // We only need to refresh local schema state so the UI stays in sync.
+    updateSchema(id, { lookupTables: tables });
+  }, [id, updateSchema]);
 
   const handleSaveName = () => {
     if (name.trim() && name !== schema.name) {
@@ -437,6 +444,14 @@ export default function SchemaDetailPage() {
           columnMappings={[]}
           readOnly={false}
           onDirtyChange={setTableHasUnsavedChanges}
+        />
+
+        {/* Lookup Tables */}
+        <LookupTablesEditor
+          schemaId={id}
+          lookupTables={schema.lookupTables ?? []}
+          onLookupTablesChange={handleLookupTablesChange}
+          readOnly={false}
         />
       </div>
 

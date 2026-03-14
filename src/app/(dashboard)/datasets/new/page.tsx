@@ -452,11 +452,18 @@ function NewDatasetPageContent() {
         const fileDirective = aiInstructions[fileKey]?.trim() || "";
         const globalDirective = globalAiInstructions.trim();
         const combinedDirective = [globalDirective, fileDirective].filter(Boolean).join("\n") || undefined;
+        const lookupTables = (schema?.lookupTables ?? []).map((lt) => ({
+          name: lt.name,
+          dimensions: lt.dimensions,
+          values: lt.values,
+          rows: lt.rows,
+        }));
         const jobPayload: Record<string, unknown> = {
           filePath: uploaded.filePath,
           targetPaths,
           fileName: selection.worksheetName,
           userDirective: combinedDirective,
+          lookupTables: lookupTables.length > 0 ? lookupTables : undefined,
         };
         if (unstructuredMimeType) {
           jobPayload.unstructuredMimeType = unstructuredMimeType;
@@ -479,7 +486,7 @@ function NewDatasetPageContent() {
     setJobResults(results);
     fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
     startPolling(results);
-  }, [schemaId, selectedFiles, files, targetPaths, aiInstructions, globalAiInstructions, uploadFileCsv, startPolling]);
+  }, [schemaId, schema, selectedFiles, files, targetPaths, aiInstructions, globalAiInstructions, uploadFileCsv, startPolling]);
 
   useEffect(() => { return () => { if (pollingRef.current) clearInterval(pollingRef.current); }; }, []);
 
@@ -603,7 +610,17 @@ function NewDatasetPageContent() {
         body: JSON.stringify({
           type: "data_cleanse",
           fileId: originalRef?.fileId,
-          payload: { filePath: uploadedModified.filePath, targetPaths, fileName: fileResult.file.worksheetName, userDirective: modifyPrompt.trim(), originalFilePath: originalRef?.filePath, modifiedFilePath: uploadedModified.filePath },
+          payload: {
+            filePath: uploadedModified.filePath,
+            targetPaths,
+            fileName: fileResult.file.worksheetName,
+            userDirective: modifyPrompt.trim(),
+            originalFilePath: originalRef?.filePath,
+            modifiedFilePath: uploadedModified.filePath,
+            lookupTables: (schema?.lookupTables ?? []).length > 0
+              ? (schema!.lookupTables!).map((lt) => ({ name: lt.name, dimensions: lt.dimensions, values: lt.values, rows: lt.rows }))
+              : undefined,
+          },
         }),
       });
       const data = await res.json();
@@ -626,7 +643,7 @@ function NewDatasetPageContent() {
       setModifySubmittingSheetKey(null);
       alert(err instanceof Error ? err.message : "Failed to modify");
     }
-  }, [modifyPrompt, schemaId, targetPaths, startModifyPolling, uploadedFileRefs, uploadFileCsv]);
+  }, [modifyPrompt, schemaId, schema, targetPaths, startModifyPolling, uploadedFileRefs, uploadFileCsv]);
 
   // --- Export ---
 

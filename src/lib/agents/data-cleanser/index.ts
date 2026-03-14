@@ -27,6 +27,13 @@ const SAMPLE_ROWS_FOR_JUDGE = 10;
 // Types
 // ---------------------------------------------------------------------------
 
+export interface LookupTableDef {
+  name: string;
+  dimensions: string[];
+  values: string[];
+  rows: Record<string, string>[];
+}
+
 export interface DataCleanserInput {
   filePath: string;
   targetPaths: string[];
@@ -37,6 +44,8 @@ export interface DataCleanserInput {
   fileId?: string;
   /** When set, the file is unstructured and needs OCR before processing */
   unstructuredMimeType?: string;
+  /** Schema-defined lookup tables for value mapping */
+  lookupTables?: LookupTableDef[];
 }
 
 const SNAPSHOT_SAMPLE_ROWS = 20;
@@ -107,7 +116,12 @@ You must generate the plan by calling **emitPlan** with the full ordered list of
     Examples:
       - Sum revenue by region: { keyColumns: ["region"], aggregations: [{ sourceColumn: "revenue", function: "sum", outputColumn: "total_revenue" }] }
       - Combine metrics by product: { keyColumns: ["product_id"], aggregations: [{ sourceColumn: "quantity", function: "sum", outputColumn: "total_qty" }, { sourceColumn: "price", function: "max", outputColumn: "max_price" }], includeCount: true }
-12. **map** — map columns to target schema paths (MUST be the final transformation). Params: { mappings: Array<{ sourceColumn: string, targetPath: string, defaultValue?: string }>, defaults?: Array<{ targetPath: string, value: string }> }
+12. **schemaLookup** — apply lookup tables defined in the schema to map source column values to new columns. This uses pre-defined lookup tables (provided below) to match dimension values and produce output values. Params: { mappings: Array<{ lookupTableName: string, dimensionMappings: Array<{ sourceColumn: string, dimension: string }>, valueMappings: Array<{ valueColumn: string, targetColumn: string }> }> }
+    The lookupTables data will be injected automatically — you only need to specify the mappings.
+    Examples:
+      - Map country codes using a lookup table named "Country Codes" with dimension "code" and value "country_name": { mappings: [{ lookupTableName: "Country Codes", dimensionMappings: [{ sourceColumn: "country_code", dimension: "code" }], valueMappings: [{ valueColumn: "country_name", targetColumn: "country_name" }] }] }
+      - Map product categories with multiple dimensions: { mappings: [{ lookupTableName: "Product Categories", dimensionMappings: [{ sourceColumn: "dept", dimension: "department" }, { sourceColumn: "sub_dept", dimension: "sub_department" }], valueMappings: [{ valueColumn: "category", targetColumn: "product_category" }, { valueColumn: "sub_category", targetColumn: "product_sub_category" }] }] }
+13. **map** — map columns to target schema paths (MUST be the final transformation). Params: { mappings: Array<{ sourceColumn: string, targetPath: string, defaultValue?: string }>, defaults?: Array<{ targetPath: string, value: string }> }
 
 ### When to use filterRows vs filter
 - Use **filter** for generic noise removal (empty rows, duplicates, keyword-based removal).
@@ -126,17 +140,19 @@ Priority order within this phase:
 2. **filterRows** — if the user directive asks to remove or keep specific rows based on column values, apply this step. This is the PRIMARY tool for user-requested row removal/filtering.
 3. **padColumns** — forward-fill empty cells. Check ALL columns for empty cells. ANY column with >0% empty cells that follows a group/category pattern MUST be padded. Include ALL such columns.
 4. **mapRows** — derive new columns or fill existing columns based on conditional logic or lookups. Use this when the user wants to set a column's value based on another column's value (e.g., "set X to TRUE if Y is Z"), or to map values through a lookup table. This is safe — it only adds/modifies columns, never removes rows.
-5. **unpivot** — if wide columns represent repeating categories or time periods, melt them into rows. This ADDS rows and is safe.
-6. **expand** / **handleBalanceSheet** — flatten hierarchies. This restructures but preserves data.
+5. **schemaLookup** — if lookup tables are available in the schema, use them to enrich the data. Match source column values against the lookup table dimensions and produce new columns from the lookup values. ALWAYS use this when schema lookup tables are provided and a source column matches a dimension. This is safe — it only adds/modifies columns.
+6. **unpivot** — if wide columns represent repeating categories or time periods, melt them into rows. This ADDS rows and is safe.
+7. **expand** / **handleBalanceSheet** — flatten hierarchies. This restructures but preserves data.
 
 ### PHASE 2: Transformation (reshaping and finalizing)
 Goal: Reshape the cleansed data into the target schema.
 1. **filterRows** — can also be used here if filtering depends on columns created during cleansing.
 2. **mapRows** — can also be used here for post-cleansing conditional transformations or lookups.
-3. **trimColumns** — drop columns no longer needed (only AFTER cleansing is complete).
-4. **aggregate** — group and aggregate if needed.
-5. **reduce** — aggregate columns by key with explicit output column naming. Use when you need more control over output column names than aggregate provides, or when combining multiple metrics.
-6. **map** — map to final schema (MUST be the last step).
+3. **schemaLookup** — can also be used here if lookup depends on columns created during cleansing.
+4. **trimColumns** — drop columns no longer needed (only AFTER cleansing is complete).
+5. **aggregate** — group and aggregate if needed.
+6. **reduce** — aggregate columns by key with explicit output column naming. Use when you need more control over output column names than aggregate provides, or when combining multiple metrics.
+7. **map** — map to final schema (MUST be the last step).
 
 ## CRITICAL Rules
 
@@ -197,6 +213,7 @@ async function generatePlan(
   userDirective?: string,
   judgeDirective?: string,
   runId?: string,
+  lookupTables?: LookupTableDef[],
 ): Promise<PlannerResult> {
   const llm = new ChatAnthropic({
     model: "claude-sonnet-4-6",
@@ -213,6 +230,27 @@ async function generatePlan(
     `Current file state:`,
     fileSummaryText,
   ];
+
+  if (lookupTables && lookupTables.length > 0) {
+    lines.push("", "## Schema Lookup Tables (use schemaLookup tool to apply these)");
+    for (const lt of lookupTables) {
+      lines.push(`\nLookup Table: "${lt.name}"`);
+      lines.push(`  Dimensions (match keys): ${lt.dimensions.map((d) => `"${d}"`).join(", ")}`);
+      lines.push(`  Values (outputs): ${lt.values.map((v) => `"${v}"`).join(", ")}`);
+      lines.push(`  Sample rows (first 5):`);
+      const sampleRows = lt.rows.slice(0, 5);
+      for (const row of sampleRows) {
+        const entries = [...lt.dimensions, ...lt.values]
+          .map((col) => `${col}: "${row[col] ?? ""}"`)
+          .join(", ");
+        lines.push(`    { ${entries} }`);
+      }
+      if (lt.rows.length > 5) {
+        lines.push(`    ... and ${lt.rows.length - 5} more rows`);
+      }
+    }
+    lines.push("", "IMPORTANT: When source data columns contain values that match a lookup table dimension, you MUST use the schemaLookup tool to map them. The schemaLookup tool will automatically get the full lookup table data injected.");
+  }
 
   if (userDirective) {
     lines.push("", `User directive (HIGHEST PRIORITY): ${userDirective}`);
@@ -581,7 +619,17 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
       input.userDirective,
       judgeDirective,
       runId,
+      input.lookupTables,
     );
+
+    // Inject lookup table data into schemaLookup steps
+    if (input.lookupTables && input.lookupTables.length > 0) {
+      for (const step of plan.steps) {
+        if (step.tool === "schemaLookup") {
+          step.params.lookupTables = input.lookupTables;
+        }
+      }
+    }
 
     if (plan.steps.length === 0) {
       throw new Error("Planner generated an empty plan");
