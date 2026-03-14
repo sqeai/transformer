@@ -430,7 +430,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               {canChat && !collapsed && (
               <div className={cn(
                 "p-2 space-y-1 flex flex-col",
-                foldersCollapsed ? "flex-1 min-h-0" : "h-[300px] overflow-y-auto shrink-0",
+                foldersCollapsed ? "flex-1 min-h-0" : "h-[200px] overflow-y-auto shrink-0",
               )}>
                 {(() => {
                   const isNewChatActive = isAssistantActive && !activeChatId;
