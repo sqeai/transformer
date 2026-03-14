@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PermissionsService } from "@/lib/permissions";
+import {
+  DEFAULT_BIGQUERY_ID,
+  DEFAULT_BIGQUERY_NAME,
+  isDefaultBigQueryConfigured,
+} from "@/lib/connectors/default-bigquery";
 
 /**
  * GET /api/contexts?folderIds=id1,id2&lightweight=true
@@ -58,14 +63,18 @@ export async function GET(request: NextRequest) {
   ];
 
   let dsMap = new Map<string, { name: string; type: string }>();
-  if (dsIds.length > 0) {
+  if (isDefaultBigQueryConfigured()) {
+    dsMap.set(DEFAULT_BIGQUERY_ID, { name: DEFAULT_BIGQUERY_NAME, type: "bigquery" });
+  }
+  const dbDsIds = dsIds.filter((id) => id !== DEFAULT_BIGQUERY_ID);
+  if (dbDsIds.length > 0) {
     const { data: dsSources } = await supabase
       .from("data_sources")
       .select("id, name, type")
-      .in("id", dsIds);
-    dsMap = new Map(
-      (dsSources ?? []).map((d) => [d.id, { name: d.name, type: d.type }]),
-    );
+      .in("id", dbDsIds);
+    for (const d of dsSources ?? []) {
+      dsMap.set(d.id, { name: d.name, type: d.type });
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

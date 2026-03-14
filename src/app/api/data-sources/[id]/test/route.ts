@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createConnector } from "@/lib/connectors";
 import type { DataSourceType } from "@/lib/connectors";
+import {
+  DEFAULT_BIGQUERY_ID,
+  isDefaultBigQueryConfigured,
+  createDefaultBigQueryConnector,
+} from "@/lib/connectors/default-bigquery";
 
 export async function POST(
   _request: NextRequest,
@@ -11,6 +16,19 @@ export async function POST(
   if (auth.response) return auth.response;
   const { supabase } = auth;
   const { id } = await params;
+
+  if (id === DEFAULT_BIGQUERY_ID) {
+    if (!isDefaultBigQueryConfigured()) {
+      return NextResponse.json({ error: "Default BigQuery is not configured" }, { status: 404 });
+    }
+    const connector = createDefaultBigQueryConnector();
+    try {
+      const result = await connector.testConnection();
+      return NextResponse.json(result);
+    } finally {
+      await connector.close();
+    }
+  }
 
   const { data, error } = await supabase!
     .from("data_sources")

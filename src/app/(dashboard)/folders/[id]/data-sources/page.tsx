@@ -21,6 +21,8 @@ import { Badge } from "@/components/ui/badge";
 import { Cable, Plus, Loader2, ArrowLeft, Database, Server, Container, Warehouse, FolderOpen } from "lucide-react";
 import { FolderPageGuard } from "@/components/auth/FolderPageGuard";
 
+const DEFAULT_BIGQUERY_ID = "__default_bigquery__";
+
 interface DataSource {
   id: string;
   name: string;
@@ -28,6 +30,7 @@ interface DataSource {
   createdAt: string;
   folderId?: string;
   folderName?: string | null;
+  isDefault?: boolean;
 }
 
 export default function FolderDataSourcesPage() {
@@ -61,11 +64,12 @@ export default function FolderDataSourcesPage() {
     router.push(`/data-sources/new?type=${type}&folderId=${folderId}`);
   };
 
+  const defaultDs = dataSources.find((ds) => ds.id === DEFAULT_BIGQUERY_ID);
   const ownDataSources = dataSources.filter(
-    (ds) => !ds.folderId || ds.folderId === folderId,
+    (ds) => ds.id !== DEFAULT_BIGQUERY_ID && (!ds.folderId || ds.folderId === folderId),
   );
   const subfolderDataSources = dataSources.filter(
-    (ds) => ds.folderId && ds.folderId !== folderId,
+    (ds) => ds.id !== DEFAULT_BIGQUERY_ID && ds.folderId && ds.folderId !== folderId,
   );
 
   const subfolderGroups = subfolderDataSources.reduce<
@@ -117,7 +121,7 @@ export default function FolderDataSourcesPage() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
-        ) : dataSources.length === 0 ? (
+        ) : !defaultDs && dataSources.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="flex flex-col items-center justify-center py-12 text-center">
               <Cable className="h-12 w-12 text-muted-foreground/50 mb-4" />
@@ -133,6 +137,25 @@ export default function FolderDataSourcesPage() {
           </Card>
         ) : (
           <div className="space-y-6">
+            {defaultDs && (
+              <div className="space-y-3">
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  <Card className="border-primary/30 bg-primary/5 opacity-80">
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-base">{defaultDs.name}</CardTitle>
+                        <Badge variant="secondary" className="text-xs">
+                          {defaultDs.type}
+                        </Badge>
+                      </div>
+                      <CardDescription className="text-xs">
+                        System default &middot; Read-only
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+                </div>
+              </div>
+            )}
             {ownDataSources.length > 0 && (
               <div className="space-y-3">
                 {hasSubfolders && (

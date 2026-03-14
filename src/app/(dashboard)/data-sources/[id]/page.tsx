@@ -80,6 +80,8 @@ interface TreeNodeState {
   showPreview?: boolean;
 }
 
+const DEFAULT_BIGQUERY_ID = "__default_bigquery__";
+
 export default function DataSourceDetailPage({
   params,
 }: {
@@ -126,7 +128,14 @@ export default function DataSourceDetailPage({
   const [treeState, setTreeState] = useState<Record<string, TreeNodeState>>({});
   const [schemaExpanded, setSchemaExpanded] = useState<Record<string, boolean>>({});
 
+  useEffect(() => {
+    if (id === DEFAULT_BIGQUERY_ID) {
+      router.replace("/");
+    }
+  }, [id, router]);
+
   const fetchDataSource = useCallback(async () => {
+    if (id === DEFAULT_BIGQUERY_ID) return;
     setLoading(true);
     try {
       const res = await fetch(`/api/data-sources/${id}`);

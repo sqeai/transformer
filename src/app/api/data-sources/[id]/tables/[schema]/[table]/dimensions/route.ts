@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createConnector } from "@/lib/connectors";
-import type { DataSourceType } from "@/lib/connectors";
+import type { DataSourceType, Connector } from "@/lib/connectors";
+import {
+  DEFAULT_BIGQUERY_ID,
+  isDefaultBigQueryConfigured,
+  createDefaultBigQueryConnector,
+} from "@/lib/connectors/default-bigquery";
 
 type QuoteFn = (name: string) => string;
 
@@ -66,24 +71,35 @@ export async function POST(
   const { id, schema: schemaName, table: tableName } = await params;
   const supabase = createAdminClient();
 
-  const { data: dsData, error: dsError } = await supabase
-    .from("data_sources")
-    .select("type, config")
-    .eq("id", id)
-    .single();
+  let dsType: DataSourceType;
+  let connector: Connector;
 
-  if (dsError || !dsData) {
-    return NextResponse.json(
-      { error: "Data source not found" },
-      { status: 404 },
+  if (id === DEFAULT_BIGQUERY_ID) {
+    if (!isDefaultBigQueryConfigured()) {
+      return NextResponse.json({ error: "Default BigQuery is not configured" }, { status: 404 });
+    }
+    dsType = "bigquery";
+    connector = createDefaultBigQueryConnector();
+  } else {
+    const { data: dsData, error: dsError } = await supabase
+      .from("data_sources")
+      .select("type, config")
+      .eq("id", id)
+      .single();
+
+    if (dsError || !dsData) {
+      return NextResponse.json(
+        { error: "Data source not found" },
+        { status: 404 },
+      );
+    }
+
+    dsType = dsData.type as DataSourceType;
+    connector = createConnector(
+      dsType,
+      dsData.config as Record<string, unknown>,
     );
   }
-
-  const dsType = dsData.type as DataSourceType;
-  const connector = createConnector(
-    dsType,
-    dsData.config as Record<string, unknown>,
-  );
   const { quoteId, tableRef: buildTableRef } = getDialectHelpers(dsType);
 
   try {

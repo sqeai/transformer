@@ -6,6 +6,11 @@ import { requireAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createConnector } from "@/lib/connectors";
 import type { DataSourceType } from "@/lib/connectors";
+import {
+  DEFAULT_BIGQUERY_ID,
+  isDefaultBigQueryConfigured,
+  createDefaultBigQueryConnector,
+} from "@/lib/connectors/default-bigquery";
 import { type BaseMessage } from "@langchain/core/messages";
 import { toUIMessageStream, toBaseMessages } from "@ai-sdk/langchain";
 import { createUIMessageStreamResponse, type UIMessage } from "ai";
@@ -72,6 +77,29 @@ export async function POST(req: NextRequest) {
       rowCount: number;
       error?: string;
     }> => {
+      if (!selectedDataSourceIds.includes(dataSourceId)) {
+        return {
+          rows: [],
+          rowCount: 0,
+          error: "This data source is not selected",
+        };
+      }
+
+      if (dataSourceId === DEFAULT_BIGQUERY_ID) {
+        if (!isDefaultBigQueryConfigured()) {
+          return { rows: [], rowCount: 0, error: "Default BigQuery is not configured" };
+        }
+        const connector = createDefaultBigQueryConnector();
+        try {
+          const rows = await connector.query(sql);
+          return { rows, rowCount: rows.length };
+        } catch (err: unknown) {
+          return { rows: [], rowCount: 0, error: (err as Error).message };
+        } finally {
+          await connector.close();
+        }
+      }
+
       const { data, error } = await supabase
         .from("data_sources")
         .select("type, config")
@@ -80,14 +108,6 @@ export async function POST(req: NextRequest) {
 
       if (error || !data) {
         return { rows: [], rowCount: 0, error: "Data source not found" };
-      }
-
-      if (!selectedDataSourceIds.includes(dataSourceId)) {
-        return {
-          rows: [],
-          rowCount: 0,
-          error: "This data source is not selected",
-        };
       }
 
       const connector = createConnector(

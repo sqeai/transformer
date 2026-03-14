@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
+import {
+  DEFAULT_BIGQUERY_ID,
+  isDefaultBigQueryConfigured,
+  getDefaultBigQueryVirtualSource,
+} from "@/lib/connectors/default-bigquery";
 
 function redactSensitiveConfig(config: unknown) {
   if (!config || typeof config !== "object" || Array.isArray(config)) return config;
@@ -23,6 +28,13 @@ export async function GET(
   if (auth.response) return auth.response;
   const { supabase } = auth;
   const { id } = await params;
+
+  if (id === DEFAULT_BIGQUERY_ID) {
+    if (!isDefaultBigQueryConfigured()) {
+      return NextResponse.json({ error: "Default BigQuery is not configured" }, { status: 404 });
+    }
+    return NextResponse.json({ dataSource: getDefaultBigQueryVirtualSource() });
+  }
 
   const { data, error } = await supabase!
     .from("data_sources")
@@ -55,6 +67,10 @@ export async function PATCH(
   if (auth.response) return auth.response;
   const { supabase } = auth;
   const { id } = await params;
+
+  if (id === DEFAULT_BIGQUERY_ID) {
+    return NextResponse.json({ error: "Default BigQuery cannot be modified" }, { status: 403 });
+  }
 
   let body: { name?: string; config?: Record<string, unknown> };
   try {
@@ -108,6 +124,10 @@ export async function DELETE(
   if (auth.response) return auth.response;
   const { supabase } = auth;
   const { id } = await params;
+
+  if (id === DEFAULT_BIGQUERY_ID) {
+    return NextResponse.json({ error: "Default BigQuery cannot be deleted" }, { status: 403 });
+  }
 
   const { error } = await supabase!.from("data_sources").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

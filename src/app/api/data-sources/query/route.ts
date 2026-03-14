@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createConnector } from "@/lib/connectors";
-import type { DataSourceType } from "@/lib/connectors";
+import type { DataSourceType, Connector } from "@/lib/connectors";
+import {
+  DEFAULT_BIGQUERY_ID,
+  isDefaultBigQueryConfigured,
+  createDefaultBigQueryConnector,
+} from "@/lib/connectors/default-bigquery";
 
 const MAX_ROWS = 500;
 
@@ -39,23 +44,35 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { data, error } = await supabase!
-    .from("data_sources")
-    .select("type, config")
-    .eq("id", dataSourceId)
-    .single();
+  let connector: Connector;
 
-  if (error || !data) {
-    return NextResponse.json(
-      { error: "Data source not found" },
-      { status: 404 },
+  if (dataSourceId === DEFAULT_BIGQUERY_ID) {
+    if (!isDefaultBigQueryConfigured()) {
+      return NextResponse.json(
+        { error: "Default BigQuery is not configured" },
+        { status: 404 },
+      );
+    }
+    connector = createDefaultBigQueryConnector();
+  } else {
+    const { data, error } = await supabase!
+      .from("data_sources")
+      .select("type, config")
+      .eq("id", dataSourceId)
+      .single();
+
+    if (error || !data) {
+      return NextResponse.json(
+        { error: "Data source not found" },
+        { status: 404 },
+      );
+    }
+
+    connector = createConnector(
+      data.type as DataSourceType,
+      data.config as Record<string, unknown>,
     );
   }
-
-  const connector = createConnector(
-    data.type as DataSourceType,
-    data.config as Record<string, unknown>,
-  );
 
   try {
     const rows = await connector.query(sql);

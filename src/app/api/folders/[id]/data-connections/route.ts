@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireFolderAccess } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  DEFAULT_BIGQUERY_ID,
+  DEFAULT_BIGQUERY_NAME,
+  isDefaultBigQueryConfigured,
+} from "@/lib/connectors/default-bigquery";
 
 export async function GET(
   _request: NextRequest,
@@ -21,19 +26,30 @@ export async function GET(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const dataSources = (connections ?? []).map((c) => {
+  const dataSources: { id: string; name: string; type: string; connectionId?: string; isDefault?: boolean }[] = [];
+
+  if (isDefaultBigQueryConfigured()) {
+    dataSources.push({
+      id: DEFAULT_BIGQUERY_ID,
+      name: DEFAULT_BIGQUERY_NAME,
+      type: "bigquery",
+      isDefault: true,
+    });
+  }
+
+  for (const c of connections ?? []) {
     const ds = c.data_sources as unknown as {
       id: string;
       name: string;
       type: string;
     };
-    return {
+    dataSources.push({
       id: ds?.id ?? c.data_source_id,
       name: ds?.name ?? "",
       type: ds?.type ?? "",
       connectionId: c.id,
-    };
-  });
+    });
+  }
 
   return NextResponse.json({ dataSources });
 }

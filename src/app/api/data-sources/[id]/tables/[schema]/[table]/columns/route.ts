@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createConnector } from "@/lib/connectors";
 import type { DataSourceType } from "@/lib/connectors";
+import {
+  DEFAULT_BIGQUERY_ID,
+  isDefaultBigQueryConfigured,
+  createDefaultBigQueryConnector,
+} from "@/lib/connectors/default-bigquery";
 
 export async function GET(
   _request: NextRequest,
@@ -11,6 +16,24 @@ export async function GET(
   if (auth.response) return auth.response;
   const { supabase } = auth;
   const { id, schema, table } = await params;
+
+  if (id === DEFAULT_BIGQUERY_ID) {
+    if (!isDefaultBigQueryConfigured()) {
+      return NextResponse.json({ error: "Default BigQuery is not configured" }, { status: 404 });
+    }
+    const connector = createDefaultBigQueryConnector();
+    try {
+      const columns = await connector.getColumns(
+        decodeURIComponent(schema),
+        decodeURIComponent(table),
+      );
+      return NextResponse.json({ columns });
+    } catch (err: unknown) {
+      return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    } finally {
+      await connector.close();
+    }
+  }
 
   const { data, error } = await supabase!
     .from("data_sources")

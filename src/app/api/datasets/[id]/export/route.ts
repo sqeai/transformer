@@ -8,6 +8,12 @@ import {
   normalizeRowsForStorage,
   normalizeSqlType,
 } from "@/lib/dataset-type-normalizer";
+import {
+  DEFAULT_BIGQUERY_ID,
+  isDefaultBigQueryConfigured,
+  getDefaultBigQueryConfig,
+  getDefaultBigQuerySchemaName,
+} from "@/lib/connectors/default-bigquery";
 
 type BigQueryConfigShape = {
   projectId?: string;
@@ -118,19 +124,31 @@ export async function POST(
     }
   }
 
-  const { data: dataSource, error: srcError } = await supabase!
-    .from("data_sources")
-    .select("id, type, config")
-    .eq("id", dataSourceId)
-    .single();
+  let dsType: DataSourceType;
+  let dsConfig: Record<string, unknown>;
 
-  if (srcError || !dataSource) {
-    return NextResponse.json({ error: "Data source not found" }, { status: 404 });
+  if (dataSourceId === DEFAULT_BIGQUERY_ID) {
+    if (!isDefaultBigQueryConfigured()) {
+      return NextResponse.json({ error: "Default BigQuery is not configured" }, { status: 404 });
+    }
+    dsType = "bigquery";
+    dsConfig = getDefaultBigQueryConfig() as unknown as Record<string, unknown>;
+  } else {
+    const { data: dataSource, error: srcError } = await supabase!
+      .from("data_sources")
+      .select("id, type, config")
+      .eq("id", dataSourceId)
+      .single();
+
+    if (srcError || !dataSource) {
+      return NextResponse.json({ error: "Data source not found" }, { status: 404 });
+    }
+
+    const src = dataSource as Record<string, unknown>;
+    dsType = src.type as DataSourceType;
+    dsConfig = src.config as Record<string, unknown>;
   }
 
-  const src = dataSource as Record<string, unknown>;
-  const dsType = src.type as DataSourceType;
-  const dsConfig = src.config as Record<string, unknown>;
   const rows = Array.isArray(ds.rows) ? (ds.rows as Record<string, unknown>[]) : [];
 
   if (rows.length === 0) {
@@ -138,7 +156,7 @@ export async function POST(
   }
 
   const columns = Object.keys(rows[0]);
-  const schemaName = targetSchema || "public";
+  const schemaName = targetSchema || (dataSourceId === DEFAULT_BIGQUERY_ID ? getDefaultBigQuerySchemaName() : "public");
   const { data: schemaFieldRows, error: schemaFieldError } = await supabase!
     .from("schema_fields")
     .select("path, data_type")

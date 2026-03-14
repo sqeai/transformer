@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireFolderAccess } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  DEFAULT_BIGQUERY_ID,
+  DEFAULT_BIGQUERY_NAME,
+} from "@/lib/connectors/default-bigquery";
 
 export async function GET(
   _request: NextRequest,
@@ -27,12 +31,13 @@ export async function GET(
 
     if (contextTables && contextTables.length > 0) {
       const dsIds = [...new Set(contextTables.map((t) => t.data_source_id))];
-      const { data: dsSources } = await supabase
-        .from("data_sources")
-        .select("id, name")
-        .in("id", dsIds);
+      const dbDsIds = dsIds.filter((dsId) => dsId !== DEFAULT_BIGQUERY_ID);
+      const { data: dsSources } = dbDsIds.length > 0
+        ? await supabase.from("data_sources").select("id, name").in("id", dbDsIds)
+        : { data: [] };
 
       const dsMap = new Map((dsSources ?? []).map((d) => [d.id, d.name]));
+      dsMap.set(DEFAULT_BIGQUERY_ID, DEFAULT_BIGQUERY_NAME);
 
       tables = contextTables.map((t) => ({
         dataSourceId: t.data_source_id,

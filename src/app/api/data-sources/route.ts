@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth, requireFolderAccess } from "@/lib/api-auth";
+import {
+  isDefaultBigQueryConfigured,
+  getDefaultBigQueryVirtualSource,
+} from "@/lib/connectors/default-bigquery";
 
 function toThreeLinePreview(value: unknown): string {
   if (value == null) return "***";
@@ -101,18 +105,27 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({
-    dataSources: (data ?? []).map((d) => ({
-      id: d.id,
-      name: d.name,
-      type: d.type,
-      config: redactSensitiveConfig(d.config),
-      createdAt: d.created_at,
-      updatedAt: d.updated_at,
-      folderId: d.folder_id,
-      folderName: d.folder_id ? folderNames.get(d.folder_id) ?? null : null,
-    })),
-  });
+  const dataSources = (data ?? []).map((d) => ({
+    id: d.id,
+    name: d.name,
+    type: d.type,
+    config: redactSensitiveConfig(d.config),
+    createdAt: d.created_at,
+    updatedAt: d.updated_at,
+    folderId: d.folder_id,
+    folderName: d.folder_id ? folderNames.get(d.folder_id) ?? null : null,
+  }));
+
+  if (isDefaultBigQueryConfigured()) {
+    const defaultDs = getDefaultBigQueryVirtualSource();
+    dataSources.unshift({
+      ...defaultDs,
+      folderId: undefined as unknown as typeof dataSources[number]["folderId"],
+      folderName: null,
+    });
+  }
+
+  return NextResponse.json({ dataSources });
 }
 
 export async function POST(request: NextRequest) {

@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { buildFieldTypeMap, normalizeRowsForStorage } from "@/lib/dataset-type-normalizer";
+import { buildFieldTypeMap, normalizeRowsForStorage, normalizeSqlType } from "@/lib/dataset-type-normalizer";
+import {
+  isDefaultBigQueryConfigured,
+  getDefaultBigQueryConfig,
+  getDefaultBigQuerySchemaName,
+  datasetTempTableName,
+} from "@/lib/connectors/default-bigquery";
 
 export async function GET(
   _request: NextRequest,
@@ -207,6 +213,24 @@ export async function PATCH(
 
   await supabase!.from("schemas").update({ updated_at: new Date().toISOString() }).eq("id", existing.schema_id);
 
+  if ((hasReplaceRows || hasAppendRows) && isDefaultBigQueryConfigured()) {
+    const finalRows = (updates.rows as Record<string, unknown>[]) ?? [];
+    if (finalRows.length > 0) {
+      const { data: schemaFieldRows2 } = await supabase!
+        .from("schema_fields")
+        .select("path, data_type")
+        .eq("schema_id", existing.schema_id);
+      const ftm = buildFieldTypeMap(
+        ((schemaFieldRows2 ?? []) as Array<{ path: string; data_type: string | null }>)
+      );
+      try {
+        await syncDatasetToDefaultBigQuery(id, finalRows, ftm);
+      } catch (err) {
+        console.error("Failed to sync dataset to default BigQuery:", err);
+      }
+    }
+  }
+
   return NextResponse.json({ ok: true });
 }
 
@@ -233,5 +257,81 @@ export async function DELETE(
 
   await supabase!.from("schemas").update({ updated_at: new Date().toISOString() }).eq("id", existing.schema_id);
 
+  if (isDefaultBigQueryConfigured()) {
+    try {
+      await dropDefaultBigQueryTempTable(id);
+    } catch (err) {
+      console.error("Failed to drop temp BigQuery table:", err);
+    }
+  }
+
   return NextResponse.json({ ok: true });
+}
+
+async function syncDatasetToDefaultBigQuery(
+  datasetId: string,
+  rows: Record<string, unknown>[],
+  fieldTypeMap: Record<string, string>,
+) {
+  const { BigQuery } = await import("@google-cloud/bigquery");
+  const bqConfig = getDefaultBigQueryConfig();
+  const client = new BigQuery({
+    projectId: bqConfig.projectId,
+    ...(bqConfig.credentials ? { credentials: bqConfig.credentials } : {}),
+  });
+
+  const schemaName = getDefaultBigQuerySchemaName();
+  const tableName = datasetTempTableName(datasetId);
+  const columns = Object.keys(rows[0]);
+
+  const datasetRef = client.dataset(schemaName);
+  const [datasetExists] = await datasetRef.exists();
+  if (!datasetExists) {
+    await client.createDataset(schemaName);
+  }
+
+  const tableRef = datasetRef.table(tableName);
+  const [tableExists] = await tableRef.exists();
+  if (tableExists) {
+    await tableRef.delete();
+  }
+
+  const bqSchema = columns.map((col) => ({
+    name: col.replace(/[^a-zA-Z0-9_]/g, "_"),
+    type: normalizeSqlType(fieldTypeMap[col]),
+    mode: "NULLABLE" as const,
+  }));
+
+  await datasetRef.createTable(tableName, { schema: bqSchema });
+
+  const sanitizedRows = rows.map((row) => {
+    const clean: Record<string, unknown> = {};
+    for (const col of columns) {
+      clean[col.replace(/[^a-zA-Z0-9_]/g, "_")] = row[col] ?? null;
+    }
+    return clean;
+  });
+
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < sanitizedRows.length; i += BATCH_SIZE) {
+    const batch = sanitizedRows.slice(i, i + BATCH_SIZE);
+    await datasetRef.table(tableName).insert(batch);
+  }
+}
+
+async function dropDefaultBigQueryTempTable(datasetId: string) {
+  const { BigQuery } = await import("@google-cloud/bigquery");
+  const bqConfig = getDefaultBigQueryConfig();
+  const client = new BigQuery({
+    projectId: bqConfig.projectId,
+    ...(bqConfig.credentials ? { credentials: bqConfig.credentials } : {}),
+  });
+
+  const schemaName = getDefaultBigQuerySchemaName();
+  const tableName = datasetTempTableName(datasetId);
+  const tableRef = client.dataset(schemaName).table(tableName);
+  const [exists] = await tableRef.exists();
+  if (exists) {
+    await tableRef.delete();
+  }
 }

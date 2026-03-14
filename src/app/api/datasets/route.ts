@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { buildFieldTypeMap, normalizeRowsForStorage } from "@/lib/dataset-type-normalizer";
+import { buildFieldTypeMap, normalizeRowsForStorage, normalizeSqlType } from "@/lib/dataset-type-normalizer";
+import {
+  isDefaultBigQueryConfigured,
+  getDefaultBigQueryConfig,
+  getDefaultBigQuerySchemaName,
+  datasetTempTableName,
+} from "@/lib/connectors/default-bigquery";
 
 export async function GET(request: NextRequest) {
   const auth = await getAuth();
@@ -169,6 +175,14 @@ export async function POST(request: NextRequest) {
 
   await supabase!.from("schemas").update({ updated_at: new Date().toISOString() }).eq("id", schemaId);
 
+  if (isDefaultBigQueryConfigured() && normalizedRows.length > 0) {
+    try {
+      await syncDatasetToDefaultBigQuery(data.id as string, normalizedRows, fieldTypeMap);
+    } catch (err) {
+      console.error("Failed to sync dataset to default BigQuery:", err);
+    }
+  }
+
   return NextResponse.json({
     dataset: {
       id: data.id,
@@ -180,4 +194,55 @@ export async function POST(request: NextRequest) {
       updatedAt: data.updated_at,
     },
   });
+}
+
+async function syncDatasetToDefaultBigQuery(
+  datasetId: string,
+  rows: Record<string, unknown>[],
+  fieldTypeMap: Record<string, string>,
+) {
+  const { BigQuery } = await import("@google-cloud/bigquery");
+  const bqConfig = getDefaultBigQueryConfig();
+  const client = new BigQuery({
+    projectId: bqConfig.projectId,
+    ...(bqConfig.credentials ? { credentials: bqConfig.credentials } : {}),
+  });
+
+  const schemaName = getDefaultBigQuerySchemaName();
+  const tableName = datasetTempTableName(datasetId);
+  const columns = Object.keys(rows[0]);
+
+  const datasetRef = client.dataset(schemaName);
+  const [datasetExists] = await datasetRef.exists();
+  if (!datasetExists) {
+    await client.createDataset(schemaName);
+  }
+
+  const tableRef = datasetRef.table(tableName);
+  const [tableExists] = await tableRef.exists();
+  if (tableExists) {
+    await tableRef.delete();
+  }
+
+  const bqSchema = columns.map((col) => ({
+    name: col.replace(/[^a-zA-Z0-9_]/g, "_"),
+    type: normalizeSqlType(fieldTypeMap[col]),
+    mode: "NULLABLE" as const,
+  }));
+
+  await datasetRef.createTable(tableName, { schema: bqSchema });
+
+  const sanitizedRows = rows.map((row) => {
+    const clean: Record<string, unknown> = {};
+    for (const col of columns) {
+      clean[col.replace(/[^a-zA-Z0-9_]/g, "_")] = row[col] ?? null;
+    }
+    return clean;
+  });
+
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < sanitizedRows.length; i += BATCH_SIZE) {
+    const batch = sanitizedRows.slice(i, i + BATCH_SIZE);
+    await datasetRef.table(tableName).insert(batch);
+  }
 }
