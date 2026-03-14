@@ -30,8 +30,6 @@ import {
   Loader2,
   Database,
   RefreshCw,
-  ArrowDownToLine,
-  ArrowUpFromLine,
   Unlink,
   Search,
   Plus,
@@ -76,7 +74,6 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
   const [defaultBqAvailable, setDefaultBqAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
   const [unlinking, setUnlinking] = useState(false);
 
@@ -93,6 +90,7 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
 
   // Preview
   const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([]);
+  const [previewColumns, setPreviewColumns] = useState<string[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [filterCol, setFilterCol] = useState("");
   const [filterVal, setFilterVal] = useState("");
@@ -139,8 +137,11 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
       params.set("filterValue", filterVal);
     }
     fetch(`/api/schemas/${schemaId}/data-source/preview?${params}`, { credentials: "include" })
-      .then((res) => (res.ok ? res.json() : { rows: [] }))
-      .then((data) => setPreviewRows(data.rows ?? []))
+      .then((res) => (res.ok ? res.json() : { rows: [], columns: [] }))
+      .then((data) => {
+        setPreviewRows(data.rows ?? []);
+        if (data.columns?.length) setPreviewColumns(data.columns);
+      })
       .finally(() => setPreviewLoading(false));
   }, [schemaId, linked, filterCol, filterVal]);
 
@@ -236,36 +237,13 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
       }
       setLinked(null);
       setPreviewRows([]);
+      setPreviewColumns([]);
       setShowUnlinkConfirm(false);
       onDataSourceChange?.(false);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to unlink");
     } finally {
       setUnlinking(false);
-    }
-  };
-
-  const handleSync = async (direction: "push" | "pull") => {
-    if (syncing) return;
-    setSyncing(true);
-    try {
-      const res = await fetch(`/api/schemas/${schemaId}/data-source/sync`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ direction }),
-        credentials: "include",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Sync failed");
-      if (direction === "pull") {
-        window.location.reload();
-      } else {
-        loadPreview();
-      }
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Sync failed");
-    } finally {
-      setSyncing(false);
     }
   };
 
@@ -278,7 +256,9 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
   }
 
   if (linked) {
-    const previewCols = previewRows.length > 0 ? Object.keys(previewRows[0]) : [];
+    const previewCols = previewRows.length > 0
+      ? Object.keys(previewRows[0])
+      : previewColumns;
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
@@ -290,37 +270,15 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
           </div>
           <div className="flex items-center gap-2">
             {isOwner && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleSync("pull")}
-                  disabled={syncing}
-                  title="Pull columns from database into schema fields"
-                >
-                  {syncing ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <ArrowDownToLine className="h-4 w-4 mr-1.5" />}
-                  Pull from DB
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleSync("push")}
-                  disabled={syncing}
-                  title="Push schema fields to database as columns"
-                >
-                  {syncing ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <ArrowUpFromLine className="h-4 w-4 mr-1.5" />}
-                  Push to DB
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-destructive border-destructive/30 hover:bg-destructive/10"
-                  onClick={() => setShowUnlinkConfirm(true)}
-                >
-                  <Unlink className="h-4 w-4 mr-1.5" />
-                  Unlink
-                </Button>
-              </>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive border-destructive/30 hover:bg-destructive/10"
+                onClick={() => setShowUnlinkConfirm(true)}
+              >
+                <Unlink className="h-4 w-4 mr-1.5" />
+                Unlink
+              </Button>
             )}
           </div>
         </div>
@@ -383,8 +341,8 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
-            ) : previewRows.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">No rows found.</p>
+            ) : previewCols.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">No columns found.</p>
             ) : (
               <div className="rounded-md border overflow-auto max-h-[400px]">
                 <Table>
@@ -398,15 +356,26 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {previewRows.map((row, i) => (
-                      <TableRow key={i}>
-                        {previewCols.map((col) => (
-                          <TableCell key={col} className="text-xs whitespace-nowrap max-w-[200px] truncate">
-                            {row[col] == null ? "" : String(row[col])}
-                          </TableCell>
-                        ))}
+                    {previewRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={previewCols.length}
+                          className="text-sm text-muted-foreground text-center py-6"
+                        >
+                          Table is empty — no rows yet.
+                        </TableCell>
                       </TableRow>
-                    ))}
+                    ) : (
+                      previewRows.map((row, i) => (
+                        <TableRow key={i}>
+                          {previewCols.map((col) => (
+                            <TableCell key={col} className="text-xs whitespace-nowrap max-w-[200px] truncate">
+                              {row[col] == null ? "" : String(row[col])}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))
+                    )}
                   </TableBody>
                 </Table>
               </div>

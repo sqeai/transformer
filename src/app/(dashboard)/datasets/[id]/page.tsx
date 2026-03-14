@@ -13,6 +13,7 @@ import { ApproverDialog } from "@/components/datasets/ApproverDialog";
 import { DecisionDialog } from "@/components/datasets/DecisionDialog";
 import { AiCleanserDialog } from "@/components/datasets/AiCleanserDialog";
 import { ExportToDbDialog } from "@/components/datasets/ExportToDbDialog";
+import { MergeDialog } from "@/components/datasets/MergeDialog";
 import { UploadDatasetDialog } from "@/components/UploadDatasetDialog";
 import type { DatasetRecord, DatasetState, AppUser, SchemaField } from "@/lib/types";
 import {
@@ -22,6 +23,7 @@ import {
   Database,
   Download,
   ExternalLink,
+  GitMerge,
   Layers,
   Loader2,
   Plus,
@@ -103,6 +105,8 @@ export default function DatasetPage() {
   const [approverDialogOpen, setApproverDialogOpen] = useState(false);
   const [allUsers, setAllUsers] = useState<AppUser[]>([]);
   const [selectedApproverIds, setSelectedApproverIds] = useState<string[]>([]);
+  const [mandatoryApproverIds, setMandatoryApproverIds] = useState<string[]>([]);
+  const [loadingApproverCandidates, setLoadingApproverCandidates] = useState(false);
   const [addingApprovers, setAddingApprovers] = useState(false);
   const [changingState, setChangingState] = useState(false);
 
@@ -131,6 +135,14 @@ export default function DatasetPage() {
   const [aiCleanserDialogOpen, setAiCleanserDialogOpen] = useState(false);
   const [aiCleanserInstructions, setAiCleanserInstructions] = useState("");
   const [aiCleanserRunning, setAiCleanserRunning] = useState(false);
+
+  // Merge state
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [merging, setMerging] = useState(false);
+  const [schemaDataSource, setSchemaDataSource] = useState<{
+    tableSchema: string;
+    tableName: string;
+  } | null>(null);
 
   const { setDatasetWorkflow, resetDatasetWorkflow } = useSchemaStore();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -219,13 +231,66 @@ export default function DatasetPage() {
     return () => { cancelled = true; };
   }, [fetchDataset]);
 
-  const fetchUsers = useCallback(async () => {
+  const fetchApproverCandidates = useCallback(async () => {
+    if (!dataset) return;
+    setLoadingApproverCandidates(true);
     try {
-      const res = await fetch("/api/users");
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) setAllUsers(data.users ?? []);
+      const [membersRes, mandatoryRes] = await Promise.all([
+        dataset.folderId
+          ? fetch(`/api/folders/${dataset.folderId}/members`, { credentials: "include" })
+          : Promise.resolve(null),
+        fetch(`/api/schemas/${dataset.schemaId}/mandatory-approvers`, { credentials: "include" }),
+      ]);
+
+      let folderMembers: AppUser[] = [];
+      if (membersRes?.ok) {
+        const membersData = await membersRes.json().catch(() => ({}));
+        const members = (membersData.members ?? []) as { userId: string; email: string; name: string; role: string }[];
+        folderMembers = members.map((m) => ({ id: m.userId, email: m.email, name: m.name }));
+      }
+
+      let mandatoryIds: string[] = [];
+      if (mandatoryRes.ok) {
+        const mandatoryData = await mandatoryRes.json().catch(() => ({}));
+        const approvers = (mandatoryData.approvers ?? []) as { userId: string }[];
+        mandatoryIds = approvers.map((a) => a.userId);
+      }
+
+      setAllUsers(folderMembers);
+      setMandatoryApproverIds(mandatoryIds);
+      setSelectedApproverIds((prev) => {
+        const memberIdSet = new Set(folderMembers.map((m) => m.id));
+        const existing = prev.filter((id) => memberIdSet.has(id));
+        const merged = new Set([...existing, ...mandatoryIds.filter((id) => memberIdSet.has(id))]);
+        return [...merged];
+      });
     } catch { /* ignore */ }
+    finally { setLoadingApproverCandidates(false); }
+  }, [dataset]);
+
+  const fetchSchemaDataSource = useCallback(async (schemaId: string) => {
+    try {
+      const res = await fetch(`/api/schemas/${schemaId}/data-source`, {
+        credentials: "include",
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.dataSource) {
+        setSchemaDataSource({
+          tableSchema: data.dataSource.tableSchema,
+          tableName: data.dataSource.tableName,
+        });
+      }
+    } catch {
+      /* ignore */
+    }
   }, []);
+
+  useEffect(() => {
+    if (dataset?.schemaId) {
+      fetchSchemaDataSource(dataset.schemaId);
+    }
+  }, [dataset?.schemaId, fetchSchemaDataSource]);
 
   const normalizeColumnKey = useCallback((value: string) => {
     return value.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
@@ -355,7 +420,7 @@ export default function DatasetPage() {
     try {
       const res = await fetch(`/api/datasets/${dataset.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error();
-      router.push(dataset.folderId ? `/folders/${dataset.folderId}/datasets` : "/");
+      router.push(dataset.folderId ? `/folders/${dataset.folderId}/` : "/");
     } finally { setDeleting(false); }
   };
 
@@ -546,6 +611,37 @@ export default function DatasetPage() {
     } finally { setAiCleanserRunning(false); }
   };
 
+  // --- Merge ---
+
+  const canMerge = useMemo(() => {
+    if (!dataset || !schemaDataSource) return false;
+    return dataset.state === "approved" && allApproved;
+  }, [dataset, schemaDataSource, allApproved]);
+
+  const mergeToSchema = async () => {
+    if (!dataset) return;
+    setMerging(true);
+    try {
+      const res = await fetch(`/api/datasets/${dataset.id}/merge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error ?? "Merge failed");
+        return;
+      }
+      toast.success(`Merged ${data.merged} rows into ${data.target}`);
+      setMergeDialogOpen(false);
+      await fetchDataset();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Merge failed");
+    } finally {
+      setMerging(false);
+    }
+  };
+
   // --- Render ---
 
   if (loading) {
@@ -589,7 +685,7 @@ export default function DatasetPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             {dataset.state === "draft" && (
-              <Button onClick={() => { fetchUsers(); setApproverDialogOpen(true); }} disabled={changingState}>
+              <Button onClick={() => { setApproverDialogOpen(true); fetchApproverCandidates(); }} disabled={changingState}>
                 {changingState ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                 Submit for Approval
               </Button>
@@ -612,12 +708,21 @@ export default function DatasetPage() {
                 Submit Approval
               </Button>
             )}
+            {canMerge && (
+              <Button
+                onClick={() => setMergeDialogOpen(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <GitMerge className="mr-2 h-4 w-4" />
+                Merge to Schema
+              </Button>
+            )}
             {!isReadOnlyApprover && (
               <>
-                <Button onClick={() => setAddDialogOpen(true)}>
+                {/* <Button onClick={() => setAddDialogOpen(true)}>
                   <Plus className="mr-2 h-4 w-4" />
                   Add To This Dataset
-                </Button>
+                </Button> */}
                 <Button variant="destructive" onClick={deleteDataset} disabled={deleting}>
                   <Trash2 className="mr-2 h-4 w-4" />
                   Delete
@@ -829,6 +934,7 @@ export default function DatasetPage() {
         onOpenChange={setApproverDialogOpen}
         allUsers={allUsers}
         selectedApproverIds={selectedApproverIds}
+        mandatoryApproverIds={mandatoryApproverIds}
         onToggleApprover={(userId) =>
           setSelectedApproverIds((prev) =>
             prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId],
@@ -837,6 +943,7 @@ export default function DatasetPage() {
         onSubmit={submitForApproval}
         submitting={addingApprovers}
         onCancel={() => { setApproverDialogOpen(false); setSelectedApproverIds([]); }}
+        loading={loadingApproverCandidates}
       />
 
       <DecisionDialog
@@ -876,6 +983,17 @@ export default function DatasetPage() {
         exportingToDb={exportingToDb}
         onExport={exportToDatabase}
       />
+
+      {schemaDataSource && (
+        <MergeDialog
+          open={mergeDialogOpen}
+          onOpenChange={setMergeDialogOpen}
+          rowCount={dataset.rowCount}
+          targetTable={`${schemaDataSource.tableSchema}.${schemaDataSource.tableName}`}
+          onMerge={mergeToSchema}
+          merging={merging}
+        />
+      )}
     </>
   );
 }

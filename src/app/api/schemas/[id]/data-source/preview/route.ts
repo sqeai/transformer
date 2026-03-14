@@ -76,7 +76,10 @@ export async function GET(
       rows = await connector.previewData(tSchema, tName, limit);
     }
 
-    return NextResponse.json({ rows });
+    const columns = await connector.getColumns(tSchema, tName);
+    const columnNames = columns.map((c) => c.name);
+
+    return NextResponse.json({ rows, columns: columnNames });
   } catch (err: unknown) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   } finally {
