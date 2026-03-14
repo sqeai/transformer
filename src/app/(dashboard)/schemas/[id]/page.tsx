@@ -15,7 +15,6 @@ import { Separator } from "@/components/ui/separator";
 import { useSchemaStore, flattenFields, type UploadedFileEntry } from "@/lib/schema-store";
 import {
   ArrowLeft,
-  Save,
   FileStack,
   Layers,
   CalendarDays,
@@ -25,6 +24,8 @@ import {
   Loader2,
   X,
   Trash2,
+  Pencil,
+  Check,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -49,7 +50,8 @@ export default function SchemaDetailPage() {
   const { getSchema, updateSchema, deleteSchema, schemasLoading, setDatasetWorkflow, resetDatasetWorkflow } = useSchemaStore();
   const schema = getSchema(id);
   const [name, setName] = useState(schema?.name ?? "");
-  const [saved, setSaved] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const [grants, setGrants] = useState<{ id: string; grantedToUserId: string; grantedAt: string; user: { id: string; email: string; name: string } }[]>([]);
   const [grantsLoading, setGrantsLoading] = useState(false);
   const [grantEmail, setGrantEmail] = useState("");
@@ -204,9 +206,18 @@ export default function SchemaDetailPage() {
   const handleSaveName = () => {
     if (name.trim() && name !== schema.name) {
       updateSchema(id, { name: name.trim() });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
     }
+    setIsEditingName(false);
+  };
+
+  const handleCancelRename = () => {
+    setName(schema?.name ?? "");
+    setIsEditingName(false);
+  };
+
+  const startEditing = () => {
+    setIsEditingName(true);
+    setTimeout(() => nameInputRef.current?.focus(), 0);
   };
 
   const handleUseSchema = () => {
@@ -266,7 +277,34 @@ export default function SchemaDetailPage() {
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div>
-              <h1 className="text-3xl font-bold tracking-tight">{schema.name}</h1>
+              <div className="flex items-center gap-2">
+                {isEditingName ? (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      ref={nameInputRef}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleSaveName();
+                        if (e.key === "Escape") handleCancelRename();
+                      }}
+                      onBlur={handleSaveName}
+                      className="text-3xl font-bold tracking-tight h-auto py-0.5 px-1.5 max-w-md"
+                      placeholder="Schema name"
+                    />
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onMouseDown={(e) => { e.preventDefault(); handleSaveName(); }}>
+                      <Check className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <h1 className="text-3xl font-bold tracking-tight">{schema.name}</h1>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={startEditing}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </>
+                )}
+              </div>
               <p className="text-muted-foreground">
                 Configure fields, descriptions, ordering, and default values.
               </p>
@@ -341,28 +379,6 @@ export default function SchemaDetailPage() {
             </CardContent>
           </Card>
         </div>
-
-        {/* Schema name editor — owner and grantees can edit */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Schema Name</CardTitle>
-            <CardDescription>The display name for this schema.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-3 max-w-md">
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Customer Export"
-                onKeyDown={(e) => e.key === "Enter" && handleSaveName()}
-              />
-              <Button size="sm" onClick={handleSaveName} disabled={!name.trim() || name === schema.name}>
-                <Save className="mr-1.5 h-3.5 w-3.5" />
-                {saved ? "Saved!" : "Save"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
 
         {isOwner && (
           <Card>
