@@ -4,25 +4,12 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import { useSchemaStore, flattenFields, type UploadedFileEntry } from "@/lib/schema-store";
+import { useSchemaStore, type UploadedFileEntry } from "@/lib/schema-store";
 import {
   ArrowLeft,
   FileStack,
-  Layers,
-  CalendarDays,
   ArrowRight,
-  User,
-  UserPlus,
   Loader2,
-  X,
   Trash2,
   Pencil,
   Check,
@@ -37,10 +24,25 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import FinalSchemaTable from "@/components/FinalSchemaTable";
 import { UploadDatasetDialog } from "@/components/UploadDatasetDialog";
 import type { FinalSchema } from "@/lib/types";
 import { useAuth } from "@/hooks/useAuth";
+import { OverviewTab } from "@/components/schemas/OverviewTab";
+import { ContextTab } from "@/components/schemas/ContextTab";
+import { MandatoryApproversTab } from "@/components/schemas/MandatoryApproversTab";
+import { DataSourceTab } from "@/components/schemas/DataSourceTab";
+import { DatasetsTab } from "@/components/schemas/DatasetsTab";
+import { cn } from "@/lib/utils";
+
+type TabId = "overview" | "context" | "approvers" | "data-source" | "datasets";
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "context", label: "Context" },
+  { id: "approvers", label: "Mandatory Approvers" },
+  { id: "data-source", label: "Data Source" },
+  { id: "datasets", label: "Datasets" },
+];
 
 export default function SchemaDetailPage() {
   const params = useParams();
@@ -52,17 +54,14 @@ export default function SchemaDetailPage() {
   const [name, setName] = useState(schema?.name ?? "");
   const [isEditingName, setIsEditingName] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
-  const [grants, setGrants] = useState<{ id: string; grantedToUserId: string; grantedAt: string; user: { id: string; email: string; name: string } }[]>([]);
-  const [grantsLoading, setGrantsLoading] = useState(false);
-  const [grantEmail, setGrantEmail] = useState("");
-  const [granting, setGranting] = useState(false);
-  const [revokingId, setRevokingId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [tableHasUnsavedChanges, setTableHasUnsavedChanges] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const pendingLeaveActionRef = useRef<null | (() => void)>(null);
+  const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [hasDataSource, setHasDataSource] = useState(false);
 
   const isOwner = !!user && !!schema?.creator && schema.creator.id === user.id;
   const hasUnsavedChanges = useMemo(
@@ -90,19 +89,6 @@ export default function SchemaDetailPage() {
     pendingLeaveActionRef.current = null;
     setShowLeaveConfirm(false);
   }, []);
-
-  const fetchGrants = useCallback(() => {
-    if (!id || !isOwner) return;
-    setGrantsLoading(true);
-    fetch(`/api/schemas/${id}/grants`, { credentials: "include" })
-      .then((res) => (res.ok ? res.json() : { grants: [] }))
-      .then((data) => setGrants(Array.isArray(data?.grants) ? data.grants : []))
-      .finally(() => setGrantsLoading(false));
-  }, [id, isOwner]);
-
-  useEffect(() => {
-    if (isOwner) fetchGrants();
-  }, [isOwner, fetchGrants]);
 
   useEffect(() => {
     setName(schema?.name ?? "");
@@ -150,6 +136,14 @@ export default function SchemaDetailPage() {
     return () => document.removeEventListener("click", handleDocumentClick, true);
   }, [hasUnsavedChanges, requestLeave, router]);
 
+  // Check for data source on mount
+  useEffect(() => {
+    if (!id) return;
+    fetch(`/api/schemas/${id}/data-source`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : { dataSource: null }))
+      .then((data) => setHasDataSource(!!data.dataSource));
+  }, [id]);
+
   const handleUploadFromDialog = useCallback(
     (schemaId: string, files: UploadedFileEntry[]) => {
       resetDatasetWorkflow();
@@ -168,36 +162,24 @@ export default function SchemaDetailPage() {
 
   if (schemasLoading) {
     return (
-      <>
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <Loader2 className="h-10 w-10 text-muted-foreground animate-spin mb-4" />
-          <p className="text-muted-foreground text-lg">Loading schema...</p>
-        </div>
-      </>
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <Loader2 className="h-10 w-10 text-muted-foreground animate-spin mb-4" />
+        <p className="text-muted-foreground text-lg">Loading schema...</p>
+      </div>
     );
   }
 
   if (!schema) {
     return (
-      <>
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <FileStack className="h-12 w-12 text-muted-foreground/30 mb-4" />
-          <p className="text-muted-foreground text-lg">Schema not found.</p>
-          <Button variant="outline" className="mt-4" onClick={() => router.back()}>
-            Go Back
-          </Button>
-        </div>
-      </>
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <FileStack className="h-12 w-12 text-muted-foreground/30 mb-4" />
+        <p className="text-muted-foreground text-lg">Schema not found.</p>
+        <Button variant="outline" className="mt-4" onClick={() => router.back()}>
+          Go Back
+        </Button>
+      </div>
     );
   }
-
-  const leafFields = flattenFields(schema.fields).filter((f) => !f.children?.length);
-  const createdDate = new Date(schema.createdAt).toLocaleDateString(undefined, {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
 
   const handleUpdateSchema = (schemaId: string, updates: Partial<FinalSchema>) => {
     updateSchema(schemaId, updates);
@@ -222,49 +204,6 @@ export default function SchemaDetailPage() {
 
   const handleUseSchema = () => {
     setShowUploadDialog(true);
-  };
-
-  const handleGrant = async () => {
-    const email = grantEmail.trim();
-    if (!email || granting) return;
-    setGranting(true);
-    try {
-      const res = await fetch(`/api/schemas/${id}/grants`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-        credentials: "include",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to grant access");
-      setGrantEmail("");
-      fetchGrants();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to grant access");
-    } finally {
-      setGranting(false);
-    }
-  };
-
-  const handleRevoke = async (grantedToUserId: string) => {
-    const g = grants.find((x) => x.grantedToUserId === grantedToUserId);
-    if (!g || revokingId) return;
-    setRevokingId(g.id);
-    try {
-      const res = await fetch(`/api/schemas/${id}/grants/${grantedToUserId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to revoke");
-      }
-      fetchGrants();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to revoke");
-    } finally {
-      setRevokingId(null);
-    }
   };
 
   return (
@@ -326,134 +265,69 @@ export default function SchemaDetailPage() {
                 Delete this schema
               </Button>
             )}
-            <Button onClick={handleUseSchema}>
+            <Button
+              onClick={handleUseSchema}
+              disabled={!hasDataSource}
+              title={!hasDataSource ? "Configure a data source first" : undefined}
+            >
               Create new dataset using this schema
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </div>
         </div>
 
-        {/* Info + Name section */}
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription className="flex items-center gap-1.5 text-xs">
-                <Layers className="h-3.5 w-3.5" />
-                Total Fields
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{leafFields.length}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                leaf field{leafFields.length !== 1 ? "s" : ""} in schema
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription className="flex items-center gap-1.5 text-xs">
-                <CalendarDays className="h-3.5 w-3.5" />
-                Created
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm font-medium">{createdDate}</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription className="flex items-center gap-1.5 text-xs">
-                <User className="h-3.5 w-3.5" />
-                Creator
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm font-medium">
-                {schema.creator?.name || schema.creator?.email || "—"}
-              </p>
-              {schema.creator?.email && schema.creator?.name && (
-                <p className="text-xs text-muted-foreground">{schema.creator.email}</p>
+        {/* Tab Bar */}
+        <div className="flex gap-1 border-b pb-2">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={cn(
+                "px-4 py-2 text-sm rounded-md transition-colors",
+                activeTab === tab.id
+                  ? "bg-muted font-medium"
+                  : "text-muted-foreground hover:bg-muted/50",
               )}
-            </CardContent>
-          </Card>
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
-        {isOwner && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Shared access</CardTitle>
-              <CardDescription>
-                Grant access so others can see and edit this schema. Only you can delete it or manage access.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="flex-1 min-w-[200px]">
-                  <label className="text-xs text-muted-foreground mb-1 block">Grant access by email</label>
-                  <Input
-                    type="email"
-                    placeholder="colleague@example.com"
-                    value={grantEmail}
-                    onChange={(e) => setGrantEmail(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleGrant())}
-                  />
-                </div>
-                <Button
-                  onClick={handleGrant}
-                  disabled={!grantEmail.trim() || granting}
-                >
-                  {granting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4 mr-1.5" />}
-                  Grant access
-                </Button>
-              </div>
-              {grantsLoading ? (
-                <p className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-                </p>
-              ) : grants.length > 0 ? (
-                <div>
-                  <p className="text-xs text-muted-foreground mb-2">People with access</p>
-                  <ul className="space-y-1.5">
-                    {grants.map((g) => (
-                      <li
-                        key={g.id}
-                        className="flex items-center justify-between gap-2 text-sm py-1.5 px-2 rounded-md bg-muted/50"
-                      >
-                        <span>
-                          {g.user.name || g.user.email || g.grantedToUserId}
-                          {g.user.email && <span className="text-muted-foreground ml-1">({g.user.email})</span>}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive hover:text-destructive h-8 w-8 p-0"
-                          onClick={() => handleRevoke(g.grantedToUserId)}
-                          disabled={revokingId === g.id}
-                        >
-                          {revokingId === g.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
+        {/* Tab Content */}
+        {activeTab === "overview" && (
+          <OverviewTab
+            schema={schema}
+            isOwner={isOwner}
+            schemaId={id}
+            onUpdateSchema={handleUpdateSchema}
+            onDirtyChange={setTableHasUnsavedChanges}
+          />
         )}
-
-        <Separator />
-
-        {/* Fields table — the main content */}
-        <FinalSchemaTable
-          schema={schema}
-          onUpdateSchema={handleUpdateSchema}
-          rawRows={[]}
-          columnMappings={[]}
-          readOnly={false}
-          onDirtyChange={setTableHasUnsavedChanges}
-        />
+        {activeTab === "context" && (
+          <ContextTab
+            schemaId={id}
+            isOwner={isOwner}
+            folderId={schema.folderId}
+          />
+        )}
+        {activeTab === "approvers" && (
+          <MandatoryApproversTab
+            schemaId={id}
+            isOwner={isOwner}
+          />
+        )}
+        {activeTab === "data-source" && (
+          <DataSourceTab
+            schemaId={id}
+            isOwner={isOwner}
+            onDataSourceChange={setHasDataSource}
+          />
+        )}
+        {activeTab === "datasets" && (
+          <DatasetsTab schemaId={id} />
+        )}
       </div>
 
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
