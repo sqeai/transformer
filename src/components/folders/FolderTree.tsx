@@ -9,7 +9,6 @@ import {
   Folder,
   FolderOpen,
   FileText,
-  Database,
   FileStack,
   LayoutDashboard,
   Cable,
@@ -53,13 +52,12 @@ const FOLDER_SECTIONS = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { key: "panels", label: "Panels", icon: LayoutDashboard, href: "/panels" },
   { key: "context", label: "Context", icon: FileText, href: "/context" },
-  { key: "datasets", label: "Datasets", icon: Database, href: "/datasets" },
   { key: "schemas", label: "Schemas", icon: FileStack, href: "/schemas" },
   { key: "data-sources", label: "Data Sources", icon: Cable, href: "/data-sources" },
   { key: "alerts", label: "Alerts", icon: Bell, href: "/alerts" },
 ];
 
-const DATA_ENGINEER_SECTIONS = new Set(["schemas", "datasets"]);
+const DATA_ENGINEER_SECTIONS = new Set(["schemas"]);
 
 function FolderNodeItem({
   node,

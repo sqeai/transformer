@@ -16,12 +16,17 @@ import {
   ChevronRight,
   MoreHorizontal,
   Trash2,
+  Eye,
+  EyeOff,
+  Moon,
+  Sun,
+  Search,
+  Ellipsis,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { Separator } from "@/components/ui/separator";
 import {
   Tooltip,
@@ -48,9 +53,14 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { ImpersonationSelector } from "@/components/layout/ImpersonationSelector";
+import { useTheme } from "next-themes";
+import { useImpersonation } from "@/hooks/useImpersonation";
 import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
 
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
@@ -115,6 +125,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   const [deleteChatDialogOpen, setDeleteChatDialogOpen] = useState(false);
   const [deleteChatId, setDeleteChatId] = useState("");
+
+  const { theme, setTheme } = useTheme();
+  const { impersonating, isSuperadmin: canImpersonate, startImpersonating, stopImpersonating } = useImpersonation();
+  const [impersonateUsers, setImpersonateUsers] = useState<{ id: string; email: string; full_name: string | null }[]>([]);
+  const [impersonateSearch, setImpersonateSearch] = useState("");
+  const [impersonateLoading, setImpersonateLoading] = useState(false);
+  const [impersonateSubOpen, setImpersonateSubOpen] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
@@ -182,6 +199,16 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     window.addEventListener("folder-logo-updated", handler);
     return () => window.removeEventListener("folder-logo-updated", handler);
   }, [fetchFolders]);
+
+  useEffect(() => {
+    if (!impersonateSubOpen || !canImpersonate) return;
+    setImpersonateLoading(true);
+    fetch("/api/impersonate/users")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => setImpersonateUsers(data))
+      .catch(() => setImpersonateUsers([]))
+      .finally(() => setImpersonateLoading(false));
+  }, [impersonateSubOpen, canImpersonate]);
 
   const toggleCollapsed = () => {
     setCollapsed((c) => {
@@ -291,8 +318,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   const isAssistantActive =
     pathname === "/assistant" || pathname.startsWith("/assistant/");
-  const isProfileActive = pathname === "/profile";
-  const isAdminActive = pathname.startsWith("/admin");
+
+  const filteredImpersonateUsers = impersonateSearch
+    ? impersonateUsers.filter(
+        (u) =>
+          u.email.toLowerCase().includes(impersonateSearch.toLowerCase()) ||
+          (u.full_name ?? "").toLowerCase().includes(impersonateSearch.toLowerCase()),
+      )
+    : impersonateUsers;
 
   return (
     <ProtectedRoute>
@@ -531,102 +564,156 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               )}
             </div>
 
-            {/* Sticky bottom: Settings + Profile */}
+            {/* Sticky bottom: Email + settings menu */}
             <div className="shrink-0 border-t border-sidebar-border">
-              <div className="p-2 space-y-1">
-                {isSuperadmin && (
-                  <ImpersonationSelector collapsed={collapsed} />
-                )}
-                {canManageUsers && (() => {
-                  const settingsLink = (
-                    <Link
-                      href="/admin/users"
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                        isAdminActive
-                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                          : "text-sidebar-foreground hover:bg-sidebar-accent/50",
-                        collapsed && "justify-center px-0",
-                      )}
-                    >
-                      <Settings className="h-4 w-4 shrink-0" />
-                      {!collapsed && "Settings"}
-                    </Link>
-                  );
-                  if (collapsed) {
-                    return (
-                      <Tooltip>
-                        <TooltipTrigger asChild>{settingsLink}</TooltipTrigger>
-                        <TooltipContent side="right">Settings</TooltipContent>
-                      </Tooltip>
-                    );
-                  }
-                  return settingsLink;
-                })()}
-                {(() => {
-                  const profileLink = (
-                    <Link
-                      href="/profile"
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                        isProfileActive
-                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                          : "text-sidebar-foreground hover:bg-sidebar-accent/50",
-                        collapsed && "justify-center px-0",
-                      )}
-                    >
-                      <UserCircle className="h-4 w-4 shrink-0" />
-                      {!collapsed && "Profile"}
-                    </Link>
-                  );
-                  if (collapsed) {
-                    return (
-                      <Tooltip>
-                        <TooltipTrigger asChild>{profileLink}</TooltipTrigger>
-                        <TooltipContent side="right">Profile</TooltipContent>
-                      </Tooltip>
-                    );
-                  }
-                  return profileLink;
-                })()}
-              </div>
-
-              {!collapsed && (
-                <div className="px-4 pb-1 flex items-center justify-between text-xs text-muted-foreground">
-                  <span className="truncate">{user?.email}</span>
-                  <ThemeToggle />
-                </div>
+              {/* Impersonation banner (compact) */}
+              {canImpersonate && impersonating && (
+                <button
+                  onClick={stopImpersonating}
+                  className={cn(
+                    "flex items-center gap-2 w-full px-3 py-1.5 text-xs font-medium transition-colors",
+                    "bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25",
+                    collapsed && "justify-center px-2",
+                  )}
+                >
+                  <EyeOff className="h-3.5 w-3.5 shrink-0" />
+                  {!collapsed && (
+                    <span className="truncate">
+                      Stop: {impersonating.fullName || impersonating.email}
+                    </span>
+                  )}
+                </button>
               )}
 
-              <div className="p-2">
-                {collapsed ? (
-                  <div className="flex flex-col items-center gap-2">
-                    <ThemeToggle />
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-sidebar-foreground"
-                          onClick={() => signOut()}
-                        >
-                          <LogOut className="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">Sign Out</TooltipContent>
-                    </Tooltip>
-                  </div>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full justify-start text-sidebar-foreground"
-                    onClick={() => signOut()}
-                  >
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Sign Out
-                  </Button>
+              <div className={cn(
+                "px-3 py-2 flex items-center gap-2",
+                collapsed ? "justify-center px-2" : "",
+              )}>
+                {!collapsed && (
+                  <span className="flex-1 truncate text-xs text-muted-foreground">
+                    {user?.email}
+                  </span>
                 )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    {collapsed ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0 text-sidebar-foreground"
+                          >
+                            <Ellipsis className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="right">Settings</TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0 text-sidebar-foreground"
+                      >
+                        <Ellipsis className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    side={collapsed ? "right" : "top"}
+                    align={collapsed ? "start" : "end"}
+                    className="w-48"
+                  >
+                    {canImpersonate && (
+                      <DropdownMenuSub open={impersonateSubOpen} onOpenChange={(open) => {
+                        setImpersonateSubOpen(open);
+                        if (!open) setImpersonateSearch("");
+                      }}>
+                        <DropdownMenuSubTrigger>
+                          <Eye className="mr-2 h-4 w-4" />
+                          Impersonate
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent className="w-64 p-0">
+                          <div className="p-2 border-b">
+                            <div className="flex items-center gap-2 rounded-md border px-2">
+                              <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              <input
+                                type="text"
+                                placeholder="Search users..."
+                                value={impersonateSearch}
+                                onChange={(e) => setImpersonateSearch(e.target.value)}
+                                className="flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground"
+                                autoFocus
+                              />
+                            </div>
+                          </div>
+                          <div className="max-h-64 overflow-y-auto p-1">
+                            {impersonateLoading ? (
+                              <div className="flex justify-center py-4">
+                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                              </div>
+                            ) : filteredImpersonateUsers.length === 0 ? (
+                              <p className="text-xs text-muted-foreground text-center py-4">
+                                No users found
+                              </p>
+                            ) : (
+                              filteredImpersonateUsers.map((u) => (
+                                <button
+                                  key={u.id}
+                                  onClick={() => {
+                                    startImpersonating({
+                                      id: u.id,
+                                      email: u.email,
+                                      fullName: u.full_name ?? "",
+                                    });
+                                    setImpersonateSubOpen(false);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate font-medium text-xs">
+                                      {u.full_name || u.email.split("@")[0]}
+                                    </p>
+                                    <p className="truncate text-[10px] text-muted-foreground">
+                                      {u.email}
+                                    </p>
+                                  </div>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                    )}
+                    {canManageUsers && (
+                      <DropdownMenuItem asChild>
+                        <Link href="/admin/users">
+                          <Settings className="mr-2 h-4 w-4" />
+                          Settings
+                        </Link>
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem asChild>
+                      <Link href="/profile">
+                        <UserCircle className="mr-2 h-4 w-4" />
+                        Profile
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+                      {theme === "dark" ? (
+                        <Sun className="mr-2 h-4 w-4" />
+                      ) : (
+                        <Moon className="mr-2 h-4 w-4" />
+                      )}
+                      {theme === "dark" ? "Light Mode" : "Dark Mode"}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => signOut()}>
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Sign Out
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
 
               <div className={cn(
