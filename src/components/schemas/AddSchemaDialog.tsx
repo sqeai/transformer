@@ -219,7 +219,7 @@ export function AddSchemaDialog({
       const created = await addSchema(schema, folderId);
       onOpenChange(false);
       resetDialogMode();
-      router.push(`/schemas/${created.id}`);
+      router.push(folderId ? `/folders/${folderId}/schemas/${created.id}` : `/schemas/${created.id}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -253,7 +253,7 @@ export function AddSchemaDialog({
       const created = await addSchema(schema, folderId);
       onOpenChange(false);
       resetDialogMode();
-      router.push(`/schemas/${created.id}`);
+      router.push(folderId ? `/folders/${folderId}/schemas/${created.id}` : `/schemas/${created.id}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to create schema");
     } finally {
@@ -279,7 +279,7 @@ export function AddSchemaDialog({
       const created = await addSchema(schema, folderId);
       onOpenChange(false);
       resetDialogMode();
-      router.push(`/schemas/${created.id}`);
+      router.push(folderId ? `/folders/${folderId}/schemas/${created.id}` : `/schemas/${created.id}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to create schema");
     } finally {
@@ -351,7 +351,7 @@ export function AddSchemaDialog({
       });
       onOpenChange(false);
       resetDialogMode();
-      router.push(`/schemas/${created.id}`);
+      router.push(folderId ? `/folders/${folderId}/schemas/${created.id}` : `/schemas/${created.id}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to create schema");
     } finally {

@@ -13,6 +13,7 @@ import type { DatasetSummary, DatasetState } from "@/lib/types";
 
 interface DatasetsTabProps {
   schemaId: string;
+  folderId?: string;
 }
 
 const STATE_CONFIG: Record<DatasetState, { label: string; className: string }> = {
@@ -23,7 +24,7 @@ const STATE_CONFIG: Record<DatasetState, { label: string; className: string }> =
   completed: { label: "Completed", className: "bg-green-100 text-green-700 border-green-200" },
 };
 
-export function DatasetsTab({ schemaId }: DatasetsTabProps) {
+export function DatasetsTab({ schemaId, folderId }: DatasetsTabProps) {
   const router = useRouter();
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,7 +73,7 @@ export function DatasetsTab({ schemaId }: DatasetsTabProps) {
               <Card
                 key={ds.id}
                 className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => router.push(`/datasets/${ds.id}`)}
+                onClick={() => router.push(folderId ? `/folders/${folderId}/schemas/${schemaId}/datasets/${ds.id}` : `/datasets/${ds.id}`)}
               >
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between gap-2 mb-2">

@@ -84,7 +84,7 @@ export default function FolderSchemasPage() {
               <Card
                 key={schema.id}
                 className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => router.push(`/schemas/${schema.id}`)}
+                onClick={() => router.push(`/folders/${folderId}/schemas/${schema.id}`)}
               >
                 <CardHeader>
                   <CardTitle className="text-base">{schema.name}</CardTitle>
