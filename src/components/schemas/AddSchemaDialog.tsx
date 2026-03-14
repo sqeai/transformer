@@ -344,7 +344,11 @@ export function AddSchemaDialog({
         fields,
         createdAt: new Date().toISOString(),
       };
-      const created = await addSchema(schema, folderId);
+      const created = await addSchema(schema, folderId, {
+        dataSourceId: selectedDataSourceId,
+        tableSchema: selectedTable.schema,
+        tableName: selectedTable.name,
+      });
       onOpenChange(false);
       resetDialogMode();
       router.push(`/schemas/${created.id}`);

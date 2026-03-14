@@ -18,7 +18,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Cable, Plus, Loader2, ArrowLeft, Database, Server, Container, Warehouse, FolderOpen } from "lucide-react";
+import { Cable, Plus, Loader2, ArrowLeft, Database, Server, Container, Warehouse, FolderOpen, Lock } from "lucide-react";
 import { FolderPageGuard } from "@/components/auth/FolderPageGuard";
 
 interface DataSource {
@@ -30,6 +30,12 @@ interface DataSource {
   folderName?: string | null;
 }
 
+interface DefaultBqInfo {
+  available: boolean;
+  name: string;
+  prefix: string | null;
+}
+
 export default function FolderDataSourcesPage() {
   const params = useParams();
   const router = useRouter();
@@ -37,13 +43,21 @@ export default function FolderDataSourcesPage() {
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [defaultBq, setDefaultBq] = useState<DefaultBqInfo | null>(null);
 
   const fetchDataSources = useCallback(async () => {
     try {
-      const res = await fetch(`/api/data-sources?folderId=${folderId}`);
-      if (res.ok) {
-        const data = await res.json();
+      const [dsRes, bqRes] = await Promise.all([
+        fetch(`/api/data-sources?folderId=${folderId}`),
+        fetch("/api/default-bigquery"),
+      ]);
+      if (dsRes.ok) {
+        const data = await dsRes.json();
         setDataSources(data.dataSources ?? data.data_sources ?? []);
+      }
+      if (bqRes.ok) {
+        const bqData = await bqRes.json();
+        setDefaultBq(bqData);
       }
     } catch {
       /* ignore */
@@ -133,9 +147,35 @@ export default function FolderDataSourcesPage() {
           </Card>
         ) : (
           <div className="space-y-6">
+            {defaultBq?.available && (
+              <div className="space-y-3">
+                <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider px-1">
+                  Default
+                </h2>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  <Card className="border-dashed opacity-80 cursor-default select-none">
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Lock className="h-3.5 w-3.5 text-muted-foreground" />
+                          {defaultBq.name}
+                        </CardTitle>
+                        <Badge variant="secondary" className="text-xs">
+                          bigquery
+                        </Badge>
+                      </div>
+                      <CardDescription className="text-xs">
+                        System-managed default connection. Schema prefix: {defaultBq.prefix}
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+                </div>
+              </div>
+            )}
+
             {ownDataSources.length > 0 && (
               <div className="space-y-3">
-                {hasSubfolders && (
+                {(hasSubfolders || defaultBq?.available) && (
                   <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider px-1">
                     This Folder
                   </h2>

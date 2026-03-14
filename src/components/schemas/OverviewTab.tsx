@@ -29,9 +29,10 @@ interface OverviewTabProps {
   schemaId: string;
   onUpdateSchema: (id: string, updates: Partial<FinalSchema>) => void;
   onDirtyChange: (dirty: boolean) => void;
+  hasDataSource?: boolean;
 }
 
-export function OverviewTab({ schema, isOwner, schemaId, onUpdateSchema, onDirtyChange }: OverviewTabProps) {
+export function OverviewTab({ schema, isOwner, schemaId, onUpdateSchema, onDirtyChange, hasDataSource }: OverviewTabProps) {
   const [grants, setGrants] = useState<{ id: string; grantedToUserId: string; grantedAt: string; user: { id: string; email: string; name: string } }[]>([]);
   const [grantsLoading, setGrantsLoading] = useState(false);
   const [grantEmail, setGrantEmail] = useState("");
@@ -159,6 +160,7 @@ export function OverviewTab({ schema, isOwner, schemaId, onUpdateSchema, onDirty
         columnMappings={[]}
         readOnly={false}
         onDirtyChange={onDirtyChange}
+        hasDataSource={hasDataSource}
       />
     </div>
   );

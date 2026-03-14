@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createConnector } from "@/lib/connectors";
-import type { DataSourceType, ColumnInfo } from "@/lib/connectors";
+import type { DataSourceType, ColumnInfo, Connector } from "@/lib/connectors";
 import { rowsToFields } from "@/lib/schema-db";
 import type { SchemaFieldRow } from "@/lib/schema-db";
 import type { SchemaField } from "@/lib/types";
+import { isDefaultBqDataSourceId, createDefaultBigQueryConnector } from "@/lib/connectors/default-bigquery";
 
 function columnsToFields(columns: ColumnInfo[]): SchemaField[] {
   return columns.map((col, i) => ({
@@ -66,19 +67,28 @@ export async function POST(
     .single();
   if (!sds) return NextResponse.json({ error: "No data source linked to this schema" }, { status: 400 });
 
-  const { data: ds } = await supabase!
-    .from("data_sources")
-    .select("type, config")
-    .eq("id", (sds as Record<string, unknown>).data_source_id)
-    .single();
-  if (!ds) return NextResponse.json({ error: "Data source not found" }, { status: 404 });
+  const sdsRec = sds as Record<string, unknown>;
+  let connector: Connector;
 
-  const connector = createConnector(ds.type as DataSourceType, ds.config as Record<string, unknown>);
+  const isDefault = await isDefaultBqDataSourceId(sdsRec.data_source_id as string);
+  if (isDefault) {
+    const defaultConn = createDefaultBigQueryConnector();
+    if (!defaultConn) return NextResponse.json({ error: "Default BigQuery not configured" }, { status: 500 });
+    connector = defaultConn;
+  } else {
+    const { data: ds } = await supabase!
+      .from("data_sources")
+      .select("type, config")
+      .eq("id", sdsRec.data_source_id)
+      .single();
+    if (!ds) return NextResponse.json({ error: "Data source not found" }, { status: 404 });
+    connector = createConnector(ds.type as DataSourceType, ds.config as Record<string, unknown>);
+  }
   try {
     if (body.direction === "pull") {
       const columns = await connector.getColumns(
-        (sds as Record<string, unknown>).table_schema as string,
-        (sds as Record<string, unknown>).table_name as string,
+        sdsRec.table_schema as string,
+        sdsRec.table_name as string,
       );
       const newFields = columnsToFields(columns);
 
@@ -106,12 +116,12 @@ export async function POST(
     const flatFields = flattenForSync(fields);
 
     const existingColumns = await connector.getColumns(
-      (sds as Record<string, unknown>).table_schema as string,
-      (sds as Record<string, unknown>).table_name as string,
+      sdsRec.table_schema as string,
+      sdsRec.table_name as string,
     );
     const existingNames = new Set(existingColumns.map((c) => c.name.toLowerCase()));
 
-    const fqn = `\`${(sds as Record<string, unknown>).table_schema}.${(sds as Record<string, unknown>).table_name}\``;
+    const fqn = `\`${sdsRec.table_schema}.${sdsRec.table_name}\``;
     for (const f of flatFields) {
       const colName = f.name.replace(/[^a-zA-Z0-9_]/g, "_");
       if (!existingNames.has(colName.toLowerCase())) {

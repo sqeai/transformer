@@ -198,5 +198,6 @@ export interface SchemaDataSource {
   tableSchema: string;
   tableName: string;
   isNewTable: boolean;
+  isDefault?: boolean;
   createdAt: string;
 }

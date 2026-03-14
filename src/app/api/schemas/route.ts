@@ -158,7 +158,16 @@ export async function POST(request: NextRequest) {
   if (auth.response) return auth.response;
   const { supabase, userId } = auth;
 
-  let body: { name?: string; fields?: SchemaField[]; folderId?: string };
+  let body: {
+    name?: string;
+    fields?: SchemaField[];
+    folderId?: string;
+    linkDataSource?: {
+      dataSourceId: string;
+      tableSchema: string;
+      tableName: string;
+    };
+  };
   try {
     body = await request.json();
   } catch {
@@ -201,6 +210,25 @@ export async function POST(request: NextRequest) {
         { error: fieldsError.message },
         { status: 500 },
       );
+    }
+  }
+
+  // Auto-link data source if provided (e.g. from "Connect to Data Source" creation flow)
+  if (body.linkDataSource) {
+    const { dataSourceId, tableSchema, tableName } = body.linkDataSource;
+    if (dataSourceId && tableSchema && tableName) {
+      const { error: linkError } = await supabase!
+        .from("schema_data_sources")
+        .insert({
+          schema_id: schema.id,
+          data_source_id: dataSourceId,
+          table_schema: tableSchema,
+          table_name: tableName,
+          is_new_table: false,
+        });
+      if (linkError) {
+        console.error("Failed to auto-link data source:", linkError.message);
+      }
     }
   }
 

@@ -303,6 +303,7 @@ export default function SchemaDetailPage() {
             schemaId={id}
             onUpdateSchema={handleUpdateSchema}
             onDirtyChange={setTableHasUnsavedChanges}
+            hasDataSource={hasDataSource}
           />
         )}
         {activeTab === "context" && (

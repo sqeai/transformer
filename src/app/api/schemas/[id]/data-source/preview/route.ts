@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createConnector } from "@/lib/connectors";
-import type { DataSourceType } from "@/lib/connectors";
+import type { DataSourceType, Connector } from "@/lib/connectors";
+import { isDefaultBqDataSourceId, createDefaultBigQueryConnector } from "@/lib/connectors/default-bigquery";
 
 export async function GET(
   request: NextRequest,
@@ -37,22 +38,32 @@ export async function GET(
     .single();
   if (!sds) return NextResponse.json({ error: "No data source linked" }, { status: 400 });
 
-  const { data: ds } = await supabase!
-    .from("data_sources")
-    .select("type, config")
-    .eq("id", (sds as Record<string, unknown>).data_source_id)
-    .single();
-  if (!ds) return NextResponse.json({ error: "Data source not found" }, { status: 404 });
+  const sdsRec = sds as Record<string, unknown>;
+  let connector: Connector;
+
+  const isDefault = await isDefaultBqDataSourceId(sdsRec.data_source_id as string);
+  if (isDefault) {
+    const defaultConn = createDefaultBigQueryConnector();
+    if (!defaultConn) return NextResponse.json({ error: "Default BigQuery not configured" }, { status: 500 });
+    connector = defaultConn;
+  } else {
+    const { data: ds } = await supabase!
+      .from("data_sources")
+      .select("type, config")
+      .eq("id", sdsRec.data_source_id)
+      .single();
+    if (!ds) return NextResponse.json({ error: "Data source not found" }, { status: 404 });
+    connector = createConnector(ds.type as DataSourceType, ds.config as Record<string, unknown>);
+  }
 
   const searchParams = request.nextUrl.searchParams;
   const limit = Math.min(Number(searchParams.get("limit")) || 50, 200);
   const filterCol = searchParams.get("filterColumn");
   const filterVal = searchParams.get("filterValue");
 
-  const connector = createConnector(ds.type as DataSourceType, ds.config as Record<string, unknown>);
   try {
-    const tSchema = (sds as Record<string, unknown>).table_schema as string;
-    const tName = (sds as Record<string, unknown>).table_name as string;
+    const tSchema = sdsRec.table_schema as string;
+    const tName = sdsRec.table_name as string;
 
     let rows: Record<string, unknown>[];
     if (filterCol && filterVal) {

@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createConnector } from "@/lib/connectors";
 import type { DataSourceType } from "@/lib/connectors";
+import {
+  isDefaultBigQueryAvailable,
+  DEFAULT_BQ_DATA_SOURCE_NAME,
+  createDefaultBigQueryConnector,
+  getDefaultSchemaTableRef,
+  ensureDefaultBqDataSource,
+  isDefaultBqDataSourceId,
+} from "@/lib/connectors/default-bigquery";
 
 export async function GET(
   _request: NextRequest,
@@ -38,22 +46,26 @@ export async function GET(
 
   let linked = null;
   if (sds) {
+    const sdsRec = sds as Record<string, unknown>;
+    const isDefault = await isDefaultBqDataSourceId(sdsRec.data_source_id as string);
+
     const { data: ds } = await supabase!
       .from("data_sources")
       .select("id, name, type")
-      .eq("id", (sds as Record<string, unknown>).data_source_id)
+      .eq("id", sdsRec.data_source_id)
       .single();
 
     linked = {
-      id: (sds as Record<string, unknown>).id,
-      schemaId: (sds as Record<string, unknown>).schema_id,
-      dataSourceId: (sds as Record<string, unknown>).data_source_id,
+      id: sdsRec.id,
+      schemaId: sdsRec.schema_id,
+      dataSourceId: sdsRec.data_source_id,
       dataSourceName: ds?.name ?? null,
       dataSourceType: ds?.type ?? null,
-      tableSchema: (sds as Record<string, unknown>).table_schema,
-      tableName: (sds as Record<string, unknown>).table_name,
-      isNewTable: (sds as Record<string, unknown>).is_new_table,
-      createdAt: (sds as Record<string, unknown>).created_at,
+      tableSchema: sdsRec.table_schema,
+      tableName: sdsRec.table_name,
+      isNewTable: sdsRec.is_new_table,
+      isDefault,
+      createdAt: sdsRec.created_at,
     };
   }
 
@@ -71,7 +83,13 @@ export async function GET(
     }));
   }
 
-  return NextResponse.json({ dataSource: linked, availableDataSources });
+  const defaultBqAvailable = isDefaultBigQueryAvailable();
+
+  return NextResponse.json({
+    dataSource: linked,
+    availableDataSources,
+    defaultBqAvailable,
+  });
 }
 
 export async function PUT(
@@ -98,6 +116,8 @@ export async function PUT(
     tableSchema: string;
     tableName: string;
     isNewTable?: boolean;
+    useDefault?: boolean;
+    linkExisting?: boolean;
   };
   try {
     body = await request.json();
@@ -105,6 +125,112 @@ export async function PUT(
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // Handle "Use Default BigQuery" flow
+  if (body.useDefault) {
+    if (!isDefaultBigQueryAvailable()) {
+      return NextResponse.json({ error: "Default BigQuery is not configured" }, { status: 400 });
+    }
+
+    const defaultDsId = await ensureDefaultBqDataSource(userId!);
+    if (!defaultDsId) {
+      return NextResponse.json({ error: "Failed to provision default BigQuery data source" }, { status: 500 });
+    }
+
+    // If linking to an existing table, skip table creation
+    const linkExisting = !!body.linkExisting;
+    let dataset: string;
+    let table: string;
+
+    if (body.tableSchema && body.tableName) {
+      dataset = body.tableSchema;
+      table = body.tableName;
+    } else {
+      const ref = getDefaultSchemaTableRef(schemaId);
+      dataset = ref.dataset;
+      table = ref.table;
+    }
+
+    if (!linkExisting) {
+      const connector = createDefaultBigQueryConnector();
+      if (!connector) {
+        return NextResponse.json({ error: "Failed to create default BigQuery connector" }, { status: 500 });
+      }
+
+      const { data: fields } = await supabase!
+        .from("schema_fields")
+        .select("name, data_type, path, level")
+        .eq("schema_id", schemaId)
+        .order("order");
+
+      const leafFields = (fields ?? []).filter(
+        (f: Record<string, unknown>) => {
+          const path = f.path as string;
+          return !(fields ?? []).some(
+            (other: Record<string, unknown>) =>
+              (other.path as string).startsWith(path + ".") && other.path !== path,
+          );
+        },
+      );
+
+      try {
+        try {
+          await connector.query(`CREATE SCHEMA IF NOT EXISTS \`${dataset}\``);
+        } catch {
+          // Dataset may already exist
+        }
+
+        const colDefs = leafFields.length > 0
+          ? leafFields
+              .map((f: Record<string, unknown>) => {
+                const colName = (f.name as string).replace(/[^a-zA-Z0-9_]/g, "_");
+                const colType = (f.data_type as string) || "STRING";
+                return `${colName} ${colType}`;
+              })
+              .join(", ")
+          : "_placeholder STRING";
+
+        const fqn = `\`${dataset}.${table}\``;
+        await connector.query(`CREATE TABLE IF NOT EXISTS ${fqn} (${colDefs})`);
+      } catch (err: unknown) {
+        return NextResponse.json({ error: `Failed to create default table: ${(err as Error).message}` }, { status: 500 });
+      } finally {
+        await connector.close();
+      }
+    }
+
+    await supabase!.from("schema_data_sources").delete().eq("schema_id", schemaId);
+
+    const { data: inserted, error } = await supabase!
+      .from("schema_data_sources")
+      .insert({
+        schema_id: schemaId,
+        data_source_id: defaultDsId,
+        table_schema: dataset,
+        table_name: table,
+        is_new_table: !linkExisting,
+      })
+      .select("*")
+      .single();
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    return NextResponse.json({
+      dataSource: {
+        id: inserted.id,
+        schemaId: inserted.schema_id,
+        dataSourceId: inserted.data_source_id,
+        dataSourceName: DEFAULT_BQ_DATA_SOURCE_NAME,
+        dataSourceType: "bigquery",
+        tableSchema: inserted.table_schema,
+        tableName: inserted.table_name,
+        isNewTable: inserted.is_new_table,
+        isDefault: true,
+        createdAt: inserted.created_at,
+      },
+    });
+  }
+
+  // Standard (non-default) flow
   if (!body.dataSourceId || !body.tableSchema || !body.tableName) {
     return NextResponse.json({ error: "dataSourceId, tableSchema, and tableName are required" }, { status: 400 });
   }

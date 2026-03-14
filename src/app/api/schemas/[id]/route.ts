@@ -3,6 +3,10 @@ import { rowsToFields } from "@/lib/schema-db";
 import type { SchemaFieldRow } from "@/lib/schema-db";
 import { getAuth } from "@/lib/api-auth";
 import type { SchemaField } from "@/lib/types";
+import { detectSchemaChanges, generateBigQueryDDL } from "@/lib/schema-changes";
+import { isDefaultBqDataSourceId, createDefaultBigQueryConnector } from "@/lib/connectors/default-bigquery";
+import { createConnector } from "@/lib/connectors";
+import type { DataSourceType, Connector } from "@/lib/connectors";
 
 export async function GET(
   _request: NextRequest,
@@ -128,6 +132,67 @@ export async function PATCH(
   if (Array.isArray(body?.fields)) {
     const { fieldsToRows } = await import("@/lib/schema-db");
     const fields = body.fields;
+
+    // Check if schema has a linked data source and apply DDL changes
+    const { data: sds } = await supabase!
+      .from("schema_data_sources")
+      .select("data_source_id, table_schema, table_name")
+      .eq("schema_id", id)
+      .maybeSingle();
+
+    if (sds) {
+      const sdsRec = sds as Record<string, unknown>;
+
+      // Get current fields before updating
+      const { data: currentFieldRows } = await supabase!
+        .from("schema_fields")
+        .select("*")
+        .eq("schema_id", id)
+        .order("level")
+        .order("order");
+      const currentFields = rowsToFields((currentFieldRows ?? []) as SchemaFieldRow[]);
+
+      const changes = detectSchemaChanges(currentFields, fields);
+      if (changes.length > 0) {
+        const fqn = `\`${sdsRec.table_schema}.${sdsRec.table_name}\``;
+        const ddlStatements = generateBigQueryDDL(fqn, changes);
+
+        let connector: Connector | null = null;
+        try {
+          const isDefault = await isDefaultBqDataSourceId(sdsRec.data_source_id as string);
+          if (isDefault) {
+            connector = createDefaultBigQueryConnector();
+          } else {
+            const { data: ds } = await supabase!
+              .from("data_sources")
+              .select("type, config")
+              .eq("id", sdsRec.data_source_id)
+              .single();
+            if (ds) {
+              connector = createConnector(
+                ds.type as DataSourceType,
+                ds.config as Record<string, unknown>,
+              );
+            }
+          }
+
+          if (connector) {
+            for (const stmt of ddlStatements) {
+              try {
+                await connector.query(stmt);
+              } catch (ddlErr: unknown) {
+                console.error(`DDL failed: ${stmt}`, (ddlErr as Error).message);
+              }
+            }
+          }
+        } catch (err: unknown) {
+          console.error("Schema sync DDL error:", (err as Error).message);
+        } finally {
+          if (connector) await connector.close();
+        }
+      }
+    }
+
     await supabase!.from("schema_fields").delete().eq("schema_id", id);
     const rows = fieldsToRows(id, fields);
     if (rows.length > 0) {
