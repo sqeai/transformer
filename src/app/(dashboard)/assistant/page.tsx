@@ -91,8 +91,8 @@ function WelcomePage() {
       <div className="mx-auto max-w-lg text-center space-y-8">
         <div className="flex justify-center">
           <Image
-            src="/ai-data-cleanser-logo.png"
-            alt="AI Data Cleanser"
+            src="/transformer-logo.png"
+            alt="Transformer"
             width={80}
             height={80}
             className="rounded-2xl object-contain"
@@ -101,7 +101,7 @@ function WelcomePage() {
 
         <div className="space-y-2">
           <h1 className="text-3xl font-bold tracking-tight">
-            Welcome to AI Data Cleanser
+            Welcome to Transformer
           </h1>
           <p className="text-muted-foreground">
             You don&apos;t have access to any folders yet. Please contact your

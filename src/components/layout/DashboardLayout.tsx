@@ -363,14 +363,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                     className="flex items-center gap-2 font-semibold text-sidebar-foreground min-w-0 flex-1"
                   >
                     <Image
-                      src="/ai-data-cleanser-logo.png"
-                      alt="AI Data Cleanser"
+                      src="/transformer-logo.png"
+                      alt="Transformer"
                       width={36}
                       height={36}
                       className="h-9 w-9 shrink-0 rounded-lg object-contain"
                     />
                     <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent truncate">
-                      AI Data Cleanser
+                      Transformer
                     </span>
                   </Link>
                   <Button
@@ -689,7 +689,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                       <DropdownMenuItem asChild>
                         <Link href="/admin/users">
                           <Settings className="mr-2 h-4 w-4" />
-                          Settings
+                          User Management
                         </Link>
                       </DropdownMenuItem>
                     )}

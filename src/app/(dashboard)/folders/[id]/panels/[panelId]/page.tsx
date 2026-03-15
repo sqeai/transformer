@@ -166,7 +166,7 @@ export default function PanelEditPage() {
           if (p.config) setConfig(p.config);
           if (p.sqlQuery) setSqlQuery(p.sqlQuery);
           if (p.prompt) setPrompt(p.prompt);
-          toast.success(`Panel "${p.title}" updated via AI Data Cleanser`);
+          toast.success(`Panel "${p.title}" updated via Transformer`);
         }
       }
     }
@@ -658,7 +658,7 @@ export default function PanelEditPage() {
       <StarlightInput
         onSubmit={handleStarlightSubmit}
         isLoading={isChatLoading}
-        placeholder="Ask AI Data Cleanser to modify this panel (⌘K)"
+        placeholder="Ask Transformer to modify this panel (⌘K)"
         messages={chatMessages}
         view="panel"
       />

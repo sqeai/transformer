@@ -96,7 +96,7 @@ export default function SignupPage() {
               Create account
             </CardTitle>
             <CardDescription className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
-              AI Data Cleanser
+              Transformer
             </CardDescription>
           </CardHeader>
           <CardContent className="flex-1">

@@ -16,7 +16,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, AlertCircle, Sparkles } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
+import Image from "next/image";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -73,11 +74,17 @@ export default function LoginPage() {
       <div className="relative z-10 w-full flex justify-center">
         <Card className="w-full max-w-md min-h-[420px] flex flex-col rounded-lg border-white/20 bg-white/80 dark:bg-card/90 backdrop-blur-xl shadow-lg">
           <CardHeader className="text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-accent to-primary shadow-lg">
-              <Sparkles className="h-6 w-6 text-primary-foreground" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl from-primary via-accent to-primary shadow-lg">
+              <Image
+                src="/transformer-logo.png"
+                alt="Transformer"
+                width={80}
+                height={80}
+                className="rounded-2xl object-contain"
+              />
             </div>
             <CardTitle className="text-2xl font-bold tracking-tight">
-              AI Data Cleanser
+              Transformer
             </CardTitle>
             <CardDescription className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
               Map raw data to your structure

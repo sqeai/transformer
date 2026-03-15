@@ -522,7 +522,7 @@ export default function DatasetPage() {
     setExportDialogOpen(true);
   };
 
-  // --- AI Data Cleanser ---
+  // --- Transformer ---
 
   const escapeCsvCell = useCallback((value: unknown): string => {
     const text = String(value ?? "");
@@ -581,10 +581,10 @@ export default function DatasetPage() {
         const job = Array.isArray(statusData.jobs) ? statusData.jobs[0] : null;
         if (!job) continue;
         if (job.status === "completed") { nextResult = (job.result ?? null) as AiCleanseJobResult | null; break; }
-        if (job.status === "failed") throw new Error(String(job.error ?? "AI Data Cleanser job failed"));
+        if (job.status === "failed") throw new Error(String(job.error ?? "Transformer job failed"));
       }
 
-      if (!nextResult) throw new Error("Timed out waiting for AI Data Cleanser");
+      if (!nextResult) throw new Error("Timed out waiting for Transformer");
       const finalResult = nextResult;
 
       const nextRows = Array.isArray(finalResult.transformedRows) ? finalResult.transformedRows : [];
@@ -606,12 +606,12 @@ export default function DatasetPage() {
       const patchData = await patchRes.json().catch(() => ({}));
       if (!patchRes.ok) throw new Error(patchData.error ?? "Failed to save cleansed dataset");
 
-      toast.success(`AI Data Cleanser updated dataset (${nextRows.length} rows)`);
+      toast.success(`Transformer updated dataset (${nextRows.length} rows)`);
       setAiCleanserDialogOpen(false);
       setAiCleanserInstructions("");
       await fetchDataset();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to run AI Data Cleanser");
+      toast.error(error instanceof Error ? error.message : "Failed to run Transformer");
     } finally { setAiCleanserRunning(false); }
   };
 

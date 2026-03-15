@@ -1,5 +1,5 @@
 /**
- * Configuration for the AI Data Cleanser job queue.
+ * Configuration for the Transformer job queue.
  * max_concurrency limits how many jobs can run simultaneously.
  */
 export const AI_DATA_CLEANSER_MAX_CONCURRENCY =

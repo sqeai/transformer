@@ -614,7 +614,7 @@ function WelcomeScreen({ onPromptClick }: { onPromptClick: (text: string) => voi
         <Sparkles className="h-7 w-7 text-primary" />
       </div>
       <h2 className="text-xl font-semibold text-foreground mb-2">
-        Ask AI Data Cleanser anything
+        Ask Transformer anything
       </h2>
       <p className="text-sm text-muted-foreground mb-8">
         Query your data, create visualizations, and discover insights

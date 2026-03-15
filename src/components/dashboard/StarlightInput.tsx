@@ -291,7 +291,7 @@ export interface StarlightInputProps {
 export function StarlightInput({
   onSubmit,
   isLoading = false,
-  placeholder = "Ask AI Data Cleanser anything",
+  placeholder = "Ask Transformer anything",
   messages = [],
   view = "dashboard",
 }: StarlightInputProps) {
@@ -412,7 +412,7 @@ export function StarlightInput({
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/30">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium">AI Data Cleanser</span>
+                <span className="text-sm font-medium">Transformer</span>
                 <span className="text-[11px] text-muted-foreground">
                   · {viewLabel}
                 </span>
