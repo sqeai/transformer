@@ -508,14 +508,6 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
                     <SelectValue placeholder="Select a data source" />
                   </SelectTrigger>
                   <SelectContent>
-                    {defaultBqAvailable && (
-                      <SelectItem value={DEFAULT_BQ_SELECTOR_ID}>
-                        <span className="flex items-center gap-2">
-                          <Lock className="h-3.5 w-3.5 shrink-0 text-blue-500" />
-                          Default BigQuery
-                        </span>
-                      </SelectItem>
-                    )}
                     {availableDataSources.map((ds) => (
                       <SelectItem key={ds.id} value={ds.id}>
                         {ds.name} ({ds.type})
