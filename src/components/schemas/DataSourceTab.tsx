@@ -284,7 +284,7 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
         </div>
 
         <Card>
-          <CardHeader className="pb-2">
+          <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">
                 <span className="font-mono">{linked.tableSchema}.{linked.tableName}</span>
