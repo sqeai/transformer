@@ -195,6 +195,7 @@ export interface SchemaDataSource {
   dataSourceId: string;
   dataSourceName?: string;
   dataSourceType?: string;
+  dataSourceConfig?: Record<string, unknown>;
   tableSchema: string;
   tableName: string;
   isNewTable: boolean;

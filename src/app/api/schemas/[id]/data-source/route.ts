@@ -51,9 +51,15 @@ export async function GET(
 
     const { data: ds } = await supabase!
       .from("data_sources")
-      .select("id, name, type")
+      .select("id, name, type, config")
       .eq("id", sdsRec.data_source_id)
       .single();
+
+    const safeConfig: Record<string, unknown> = {};
+    if (ds?.type === "bigquery" && ds.config) {
+      const cfg = ds.config as Record<string, unknown>;
+      if (cfg.projectId) safeConfig.projectId = cfg.projectId;
+    }
 
     linked = {
       id: sdsRec.id,
@@ -61,6 +67,7 @@ export async function GET(
       dataSourceId: sdsRec.data_source_id,
       dataSourceName: ds?.name ?? null,
       dataSourceType: ds?.type ?? null,
+      dataSourceConfig: safeConfig,
       tableSchema: sdsRec.table_schema,
       tableName: sdsRec.table_name,
       isNewTable: sdsRec.is_new_table,

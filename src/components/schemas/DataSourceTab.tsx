@@ -36,6 +36,7 @@ import {
   Link,
   Lock,
   Zap,
+  ExternalLink,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -67,6 +68,27 @@ interface TableOption {
 }
 
 const DEFAULT_BQ_SELECTOR_ID = "__default_bq__";
+
+function getDataSourceDeepLink(
+  type: string | undefined,
+  config: Record<string, unknown> | undefined,
+  schema?: string,
+  table?: string,
+): string | null {
+  if (type === "bigquery") {
+    const projectId = (config?.projectId as string) || "";
+    if (!projectId) return null;
+    const params = new URLSearchParams({ project: projectId });
+    if (schema && table) {
+      params.set("p", projectId);
+      params.set("d", schema);
+      params.set("t", table);
+      params.set("page", "table");
+    }
+    return `https://console.cloud.google.com/bigquery?${params.toString()}`;
+  }
+  return null;
+}
 
 export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSourceTabProps) {
   const [linked, setLinked] = useState<SchemaDataSource | null>(null);
@@ -269,6 +291,23 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {(() => {
+              const deepLink = getDataSourceDeepLink(
+                linked.dataSourceType,
+                linked.dataSourceConfig,
+                linked.tableSchema,
+                linked.tableName,
+              );
+              if (!deepLink) return null;
+              return (
+                <Button variant="outline" size="sm" asChild>
+                  <a href={deepLink} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="h-4 w-4 mr-1.5" />
+                    Open in Console
+                  </a>
+                </Button>
+              );
+            })()}
             {isOwner && (
               <Button
                 variant="outline"
