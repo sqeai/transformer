@@ -385,10 +385,10 @@ export function AddSchemaDialog({
               <button
                 type="button"
                 className={cn(
-                  "rainbow-border h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left transition-colors",
+                  "h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left",
                   initialSelection === "upload"
-                    ? "border-transparent ring-2 ring-primary"
-                    : "border-transparent hover:bg-muted/50",
+                    ? "border-primary ring-2 ring-primary"
+                    : "border-border hover:bg-muted/50",
                 )}
                 onClick={() => setInitialSelection("upload")}
               >
@@ -407,10 +407,10 @@ export function AddSchemaDialog({
               <button
                 type="button"
                 className={cn(
-                  "rainbow-border h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left transition-colors",
+                  "h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left",
                   initialSelection === "datasource"
-                    ? "border-transparent ring-2 ring-primary"
-                    : "border-transparent hover:bg-muted/50",
+                    ? "border-primary ring-2 ring-primary"
+                    : "border-border hover:bg-muted/50",
                 )}
                 onClick={() => setInitialSelection("datasource")}
               >
@@ -428,7 +428,7 @@ export function AddSchemaDialog({
               <button
                 type="button"
                 className={cn(
-                  "rainbow-border h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left transition-colors",
+                  "h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left",
                   initialSelection === "manual"
                     ? "border-primary ring-2 ring-primary"
                     : "border-border hover:bg-muted/50",
@@ -452,10 +452,10 @@ export function AddSchemaDialog({
               <button
                 type="button"
                 className={cn(
-                  "h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left transition-colors",
+                  "h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left",
                   initialSelection === "preset"
-                    ? "border-transparent ring-2 ring-primary"
-                    : "border-transparent hover:bg-muted/50",
+                    ? "border-primary ring-2 ring-primary"
+                    : "border-border hover:bg-muted/50",
                 )}
                 onClick={() => setInitialSelection("preset")}
               >
