@@ -381,7 +381,7 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
             ) : previewCols.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">No columns found.</p>
+              <div className="text-sm text-muted-foreground text-center py-4">No columns found.</div>
             ) : (
               <div className="rounded-md border overflow-auto max-h-[400px]">
                 <Table>
