@@ -212,7 +212,7 @@ export default function PanelEditPage() {
       })
       .catch(() => {
         toast.error("Failed to load panel");
-        router.push(`/folders/${folderId}`);
+        router.push(`/folders/${folderId}/dashboard`);
       })
       .finally(() => setLoading(false));
   }, [panelId, folderId, router]);
@@ -340,7 +340,7 @@ export default function PanelEditPage() {
       const res = await fetch(`/api/panels/${panelId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Delete failed");
       toast.success("Panel deleted");
-      router.push(`/folders/${folderId}`);
+      router.push(`/folders/${folderId}/dashboard`);
     } catch {
       toast.error("Failed to delete panel");
       setDeleting(false);
@@ -425,7 +425,7 @@ export default function PanelEditPage() {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => router.push(`/folders/${folderId}`)}
+            onClick={() => router.push(`/folders/${folderId}/dashboard`)}
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>

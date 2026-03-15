@@ -219,7 +219,7 @@ export function AddSchemaDialog({
       const created = await addSchema(schema, folderId);
       onOpenChange(false);
       resetDialogMode();
-      router.push(`/schemas/${created.id}`);
+      router.push(folderId ? `/folders/${folderId}/schemas/${created.id}` : `/schemas/${created.id}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -253,7 +253,7 @@ export function AddSchemaDialog({
       const created = await addSchema(schema, folderId);
       onOpenChange(false);
       resetDialogMode();
-      router.push(`/schemas/${created.id}`);
+      router.push(folderId ? `/folders/${folderId}/schemas/${created.id}` : `/schemas/${created.id}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to create schema");
     } finally {
@@ -279,7 +279,7 @@ export function AddSchemaDialog({
       const created = await addSchema(schema, folderId);
       onOpenChange(false);
       resetDialogMode();
-      router.push(`/schemas/${created.id}`);
+      router.push(folderId ? `/folders/${folderId}/schemas/${created.id}` : `/schemas/${created.id}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to create schema");
     } finally {
@@ -344,10 +344,14 @@ export function AddSchemaDialog({
         fields,
         createdAt: new Date().toISOString(),
       };
-      const created = await addSchema(schema, folderId);
+      const created = await addSchema(schema, folderId, {
+        dataSourceId: selectedDataSourceId,
+        tableSchema: selectedTable.schema,
+        tableName: selectedTable.name,
+      });
       onOpenChange(false);
       resetDialogMode();
-      router.push(`/schemas/${created.id}`);
+      router.push(folderId ? `/folders/${folderId}/schemas/${created.id}` : `/schemas/${created.id}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to create schema");
     } finally {
@@ -381,10 +385,10 @@ export function AddSchemaDialog({
               <button
                 type="button"
                 className={cn(
-                  "rainbow-border h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left transition-colors",
+                  "h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left",
                   initialSelection === "upload"
-                    ? "border-transparent ring-2 ring-primary"
-                    : "border-transparent hover:bg-muted/50",
+                    ? "border-primary ring-2 ring-primary"
+                    : "border-border hover:bg-muted/50",
                 )}
                 onClick={() => setInitialSelection("upload")}
               >
@@ -403,10 +407,10 @@ export function AddSchemaDialog({
               <button
                 type="button"
                 className={cn(
-                  "rainbow-border h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left transition-colors",
+                  "h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left",
                   initialSelection === "datasource"
-                    ? "border-transparent ring-2 ring-primary"
-                    : "border-transparent hover:bg-muted/50",
+                    ? "border-primary ring-2 ring-primary"
+                    : "border-border hover:bg-muted/50",
                 )}
                 onClick={() => setInitialSelection("datasource")}
               >
@@ -424,7 +428,7 @@ export function AddSchemaDialog({
               <button
                 type="button"
                 className={cn(
-                  "rainbow-border h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left transition-colors",
+                  "h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left",
                   initialSelection === "manual"
                     ? "border-primary ring-2 ring-primary"
                     : "border-border hover:bg-muted/50",
@@ -448,10 +452,10 @@ export function AddSchemaDialog({
               <button
                 type="button"
                 className={cn(
-                  "h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left transition-colors",
+                  "h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left",
                   initialSelection === "preset"
-                    ? "border-transparent ring-2 ring-primary"
-                    : "border-transparent hover:bg-muted/50",
+                    ? "border-primary ring-2 ring-primary"
+                    : "border-border hover:bg-muted/50",
                 )}
                 onClick={() => setInitialSelection("preset")}
               >

@@ -153,10 +153,16 @@ const defaultDatasetWorkflow: DatasetWorkflowState = {
   globalAiInstructions: "",
 };
 
+export interface LinkDataSourceInfo {
+  dataSourceId: string;
+  tableSchema: string;
+  tableName: string;
+}
+
 interface SchemaStoreContextType {
   schemas: FinalSchema[];
   schemasLoading: boolean;
-  addSchema: (schema: FinalSchema, folderId?: string) => Promise<FinalSchema>;
+  addSchema: (schema: FinalSchema, folderId?: string, linkDataSource?: LinkDataSourceInfo) => Promise<FinalSchema>;
   updateSchema: (id: string, updates: Partial<FinalSchema>) => Promise<void>;
   deleteSchema: (id: string) => Promise<void>;
   getSchema: (id: string) => FinalSchema | undefined;
@@ -210,9 +216,10 @@ export function SchemaStoreProvider({ children }: { children: ReactNode }) {
     idbSet(IDB_DATASET_WORKFLOW_KEY, datasetWorkflow).catch(() => {});
   }, [datasetWorkflow, hydrated]);
 
-  const addSchema = useCallback(async (schema: FinalSchema, folderId?: string) => {
+  const addSchema = useCallback(async (schema: FinalSchema, folderId?: string, linkDataSource?: LinkDataSourceInfo) => {
     const payload: Record<string, unknown> = { name: schema.name, fields: schema.fields };
     if (folderId) payload.folderId = folderId;
+    if (linkDataSource) payload.linkDataSource = linkDataSource;
     const res = await api("/api/schemas", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

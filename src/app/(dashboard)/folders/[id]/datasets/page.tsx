@@ -20,6 +20,7 @@ import { UploadDatasetDialog } from "@/components/UploadDatasetDialog";
 
 interface Dataset {
   id: string;
+  schemaId: string;
   name: string;
   state: string;
   rowCount: number | null;
@@ -63,7 +64,7 @@ export default function FolderDatasetsPage() {
         files,
         selectedFiles: [],
       });
-      router.push(`/datasets/new?schemaId=${schemaId}&folderId=${folderId}`);
+      router.push(`/folders/${folderId}/schemas/${schemaId}/datasets/new?schemaId=${schemaId}`);
     },
     [resetDatasetWorkflow, setDatasetWorkflow, router, folderId],
   );
@@ -119,7 +120,7 @@ export default function FolderDatasetsPage() {
               <Card
                 key={ds.id}
                 className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => router.push(`/datasets/${ds.id}`)}
+                onClick={() => router.push(`/folders/${folderId}/schemas/${ds.schemaId}/datasets/${ds.id}`)}
               >
                 <CardHeader>
                   <div className="flex items-center justify-between">

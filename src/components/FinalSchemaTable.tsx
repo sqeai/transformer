@@ -54,9 +54,30 @@ import {
   Pencil,
   Save,
   X,
+  AlertTriangle,
+  Loader2,
+  Database,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { SQL_COMPATIBLE_TYPES, type SchemaField, type FinalSchema, type SqlCompatibleType } from "@/lib/types";
 import { toast } from "sonner";
+
+interface SchemaChangePreview {
+  hasDataSource: boolean;
+  isDefault?: boolean;
+  changes: Array<{ type: string; columnName: string; newColumnName?: string; oldDataType?: string; newDataType?: string }>;
+  descriptions: string[];
+  hasData: boolean;
+}
 
 interface FinalSchemaTableProps {
   schema: FinalSchema;
@@ -67,6 +88,8 @@ interface FinalSchemaTableProps {
   readOnly?: boolean;
   /** Emits whether there are unsaved field edits in this table. */
   onDirtyChange?: (dirty: boolean) => void;
+  /** Whether this schema has a linked data source (enables DDL change warnings). */
+  hasDataSource?: boolean;
 }
 
 interface FlatField {
@@ -362,11 +385,15 @@ export default function FinalSchemaTable({
   columnMappings = [],
   readOnly = false,
   onDirtyChange,
+  hasDataSource = false,
 }: FinalSchemaTableProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [showPreview, setShowPreview] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [showChangeWarning, setShowChangeWarning] = useState(false);
+  const [changePreview, setChangePreview] = useState<SchemaChangePreview | null>(null);
+  const [checkingChanges, setCheckingChanges] = useState(false);
 
   const schemaFlat = useMemo(() => flattenWithPath(schema.fields), [schema.fields]);
   const [draftFlat, setDraftFlat] = useState<FlatField[] | null>(null);
@@ -426,35 +453,87 @@ export default function FinalSchemaTable({
     setIsEditing(false);
   }, []);
 
-  const handleSave = useCallback(() => {
-    if (readOnly || !draftFlat) return;
+  const validateDraft = useCallback((): boolean => {
+    if (!draftFlat) return false;
     for (const item of draftFlat) {
       const name = String(item.field.name ?? "").trim();
       if (!name) {
         toast.error("Field names cannot be empty.");
-        return;
+        return false;
       }
       if (!SNAKE_CASE_FIELD_RE.test(name)) {
         toast.error(`Field "${name}" must be lowercase snake_case.`);
-        return;
+        return false;
       }
     }
-
     const pathSet = new Set<string>();
     for (const item of draftFlat) {
       if (pathSet.has(item.path)) {
         toast.error(`Duplicate field path detected: ${item.path}`);
-        return;
+        return false;
       }
       pathSet.add(item.path);
     }
+    return true;
+  }, [draftFlat]);
 
+  const doCommit = useCallback(() => {
+    if (!draftFlat) return;
     commitFields(draftFlat);
     setDraftFlat(null);
     setIsEditing(false);
     setSaved(true);
+    setShowChangeWarning(false);
+    setChangePreview(null);
     setTimeout(() => setSaved(false), 2000);
-  }, [readOnly, draftFlat, commitFields]);
+  }, [draftFlat, commitFields]);
+
+  const handleSave = useCallback(async () => {
+    if (readOnly || !draftFlat) return;
+    if (!validateDraft()) return;
+
+    if (!hasDataSource) {
+      doCommit();
+      return;
+    }
+
+    // Check what DDL changes would happen
+    setCheckingChanges(true);
+    try {
+      const fields = rebuildFields(draftFlat);
+      const res = await fetch(`/api/schemas/${schema.id}/preview-changes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fields }),
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok || !data) {
+        doCommit();
+        return;
+      }
+
+      const preview = data as SchemaChangePreview;
+
+      if (!preview.hasDataSource || preview.changes.length === 0) {
+        doCommit();
+        return;
+      }
+
+      if (preview.hasData) {
+        setChangePreview(preview);
+        setShowChangeWarning(true);
+      } else {
+        toast.info(`Syncing ${preview.changes.length} change(s) to database...`);
+        doCommit();
+      }
+    } catch {
+      doCommit();
+    } finally {
+      setCheckingChanges(false);
+    }
+  }, [readOnly, draftFlat, validateDraft, doCommit, hasDataSource, schema.id]);
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
@@ -568,9 +647,13 @@ export default function FinalSchemaTable({
                       <X className="mr-1.5 h-3.5 w-3.5" />
                       Cancel
                     </Button>
-                    <Button size="sm" onClick={handleSave} disabled={!draftFlat}>
-                      <Save className="mr-1.5 h-3.5 w-3.5" />
-                      {saved ? "Saved!" : "Save"}
+                    <Button size="sm" onClick={handleSave} disabled={!draftFlat || checkingChanges}>
+                      {checkingChanges ? (
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Save className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      {saved ? "Saved!" : checkingChanges ? "Checking..." : "Save"}
                     </Button>
                   </>
                 )}
@@ -662,6 +745,48 @@ export default function FinalSchemaTable({
           )}
         </CardContent>
       )}
+
+      <AlertDialog open={showChangeWarning} onOpenChange={setShowChangeWarning}>
+        <AlertDialogContent className="max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="h-5 w-5" />
+              Schema changes will modify the database
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  This schema is backed by a{" "}
+                  {changePreview?.isDefault ? "default BigQuery" : "database"}{" "}
+                  data source <strong>that already contains data</strong>. The following
+                  changes will be applied to the underlying table:
+                </p>
+                <div className="rounded-md border bg-muted/50 p-3 space-y-1.5">
+                  {changePreview?.descriptions.map((desc, i) => (
+                    <div key={i} className="flex items-start gap-2 text-sm">
+                      <Database className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-500" />
+                      <span>{desc}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-sm text-amber-600 font-medium">
+                  These changes may affect existing data. Column removals and type
+                  changes can cause data loss. This action cannot be undone.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-amber-600 text-white hover:bg-amber-700"
+              onClick={doCommit}
+            >
+              Apply Changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

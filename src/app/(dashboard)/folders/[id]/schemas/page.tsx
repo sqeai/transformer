@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { FileStack, Plus, Loader2 } from "lucide-react";
+import { FileStack, Plus, Loader2, Database } from "lucide-react";
 import { AddSchemaDialog } from "@/components/schemas/AddSchemaDialog";
 
 interface Schema {
@@ -18,6 +18,7 @@ interface Schema {
   name: string;
   createdAt: string;
   fieldCount?: number;
+  datasetCount?: number;
 }
 
 export default function FolderSchemasPage() {
@@ -84,12 +85,16 @@ export default function FolderSchemasPage() {
               <Card
                 key={schema.id}
                 className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => router.push(`/schemas/${schema.id}`)}
+                onClick={() => router.push(`/folders/${folderId}/schemas/${schema.id}`)}
               >
                 <CardHeader>
                   <CardTitle className="text-base">{schema.name}</CardTitle>
-                  <CardDescription className="text-xs">
-                    Created {new Date(schema.createdAt).toLocaleDateString()}
+                  <CardDescription className="flex items-center justify-between text-xs">
+                    <span>Created {new Date(schema.createdAt).toLocaleDateString()}</span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                      <Database className="h-3 w-3" />
+                      {schema.datasetCount ?? 0}
+                    </span>
                   </CardDescription>
                 </CardHeader>
               </Card>

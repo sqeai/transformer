@@ -46,6 +46,7 @@ import {
   Eye,
   FolderOpen,
   RefreshCw,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -78,6 +79,27 @@ interface TreeNodeState {
   previewRows?: Record<string, unknown>[];
   previewLoading?: boolean;
   showPreview?: boolean;
+}
+
+function getDataSourceDeepLink(
+  type: string,
+  config: Record<string, unknown>,
+  schema?: string,
+  table?: string,
+): string | null {
+  if (type === "bigquery") {
+    const projectId = (config.projectId as string) || "";
+    if (!projectId) return null;
+    const params = new URLSearchParams({ project: projectId });
+    if (schema && table) {
+      params.set("p", projectId);
+      params.set("d", schema);
+      params.set("t", table);
+      params.set("page", "table");
+    }
+    return `https://console.cloud.google.com/bigquery?${params.toString()}`;
+  }
+  return null;
 }
 
 export default function DataSourceDetailPage({
@@ -454,29 +476,43 @@ export default function DataSourceDetailPage({
               <p className="text-sm text-muted-foreground">{typeLabel} Connection</p>
             </div>
           </div>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="destructive" size="sm">
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete data source?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will permanently remove &ldquo;{ds.name}&rdquo;. This action cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDelete} disabled={deleting}>
-                  {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          <div className="flex items-center gap-2">
+            {(() => {
+              const deepLink = getDataSourceDeepLink(ds.type, ds.config);
+              if (!deepLink) return null;
+              return (
+                <Button variant="outline" size="sm" asChild>
+                  <a href={deepLink} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Open in Console
+                  </a>
+                </Button>
+              );
+            })()}
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" size="sm">
+                  <Trash2 className="mr-2 h-4 w-4" />
                   Delete
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete data source?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently remove &ldquo;{ds.name}&rdquo;. This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDelete} disabled={deleting}>
+                    {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
@@ -740,6 +776,23 @@ export default function DataSourceDetailPage({
                                   >
                                     <Eye className="h-3.5 w-3.5" />
                                   </Button>
+                                  {(() => {
+                                    const link = getDataSourceDeepLink(ds.type, ds.config, t.schema, t.name);
+                                    if (!link) return null;
+                                    return (
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6 shrink-0"
+                                        asChild
+                                        title="Open in console"
+                                      >
+                                        <a href={link} target="_blank" rel="noopener noreferrer">
+                                          <ExternalLink className="h-3.5 w-3.5" />
+                                        </a>
+                                      </Button>
+                                    );
+                                  })()}
                                 </div>
 
                                 {/* Columns */}

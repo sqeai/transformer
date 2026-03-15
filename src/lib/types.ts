@@ -164,3 +164,41 @@ export interface AppUser {
   email: string;
   name: string;
 }
+
+export type SchemaContextType = "lookup_table" | "validation" | "text_instructions";
+
+export interface SchemaContext {
+  id: string;
+  schemaId: string;
+  type: SchemaContextType;
+  name: string;
+  content?: string | null;
+  dataSourceId?: string | null;
+  bqDataset?: string | null;
+  bqTable?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SchemaMandatoryApprover {
+  id: string;
+  schemaId: string;
+  userId: string;
+  userEmail?: string;
+  userName?: string;
+  createdAt: string;
+}
+
+export interface SchemaDataSource {
+  id: string;
+  schemaId: string;
+  dataSourceId: string;
+  dataSourceName?: string;
+  dataSourceType?: string;
+  dataSourceConfig?: Record<string, unknown>;
+  tableSchema: string;
+  tableName: string;
+  isNewTable: boolean;
+  isDefault?: boolean;
+  createdAt: string;
+}
