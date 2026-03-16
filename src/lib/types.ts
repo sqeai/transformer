@@ -174,6 +174,7 @@ export interface SchemaContext {
   name: string;
   content?: string | null;
   dataSourceId?: string | null;
+  bqProject?: string | null;
   bqDataset?: string | null;
   bqTable?: string | null;
   createdAt: string;

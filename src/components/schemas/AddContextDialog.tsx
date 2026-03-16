@@ -328,6 +328,7 @@ export function AddContextDialog({
           type: "lookup_table",
           name: contextName.trim(),
           dataSourceId: uploadData.dataSourceId,
+          bqProject: uploadData.bqProject,
           bqDataset: uploadData.bqDataset,
           bqTable: uploadData.bqTable,
         }),

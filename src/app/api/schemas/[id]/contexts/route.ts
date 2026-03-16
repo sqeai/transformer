@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
+import type { BigQueryConfig } from "@/lib/connectors/types";
 
 export async function GET(
   _request: NextRequest,
@@ -43,6 +44,7 @@ export async function GET(
     name: c.name,
     content: c.content ?? null,
     dataSourceId: c.data_source_id ?? null,
+    bqProject: c.bq_project ?? null,
     bqDataset: c.bq_dataset ?? null,
     bqTable: c.bq_table ?? null,
     createdAt: c.created_at,
@@ -84,6 +86,7 @@ export async function POST(
     name?: string;
     content?: string;
     dataSourceId?: string;
+    bqProject?: string;
     bqDataset?: string;
     bqTable?: string;
   };
@@ -115,6 +118,19 @@ export async function POST(
     insert.data_source_id = body.dataSourceId;
     insert.bq_dataset = body.bqDataset ?? null;
     insert.bq_table = body.bqTable ?? null;
+
+    let bqProject = body.bqProject ?? null;
+    if (!bqProject && body.dataSourceId) {
+      const { data: ds } = await supabase!
+        .from("data_sources")
+        .select("config")
+        .eq("id", body.dataSourceId)
+        .single();
+      if (ds?.config) {
+        bqProject = (ds.config as BigQueryConfig).projectId ?? null;
+      }
+    }
+    insert.bq_project = bqProject;
   }
 
   const { data, error } = await supabase!
@@ -133,6 +149,7 @@ export async function POST(
       name: data.name,
       content: data.content ?? null,
       dataSourceId: data.data_source_id ?? null,
+      bqProject: data.bq_project ?? null,
       bqDataset: data.bq_dataset ?? null,
       bqTable: data.bq_table ?? null,
       createdAt: data.created_at,

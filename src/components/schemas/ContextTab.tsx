@@ -8,8 +8,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Plus, Trash2, BookOpen, CheckSquare, Table2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ExternalLink, Loader2, Plus, Trash2, BookOpen, CheckSquare, Table2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,6 +56,11 @@ export function ContextTab({ schemaId, isOwner, folderId }: ContextTabProps) {
   const [deleteTarget, setDeleteTarget] = useState<SchemaContext | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
   const fetchContexts = useCallback(() => {
     setLoading(true);
     fetch(`/api/schemas/${schemaId}/contexts`, { credentials: "include" })
@@ -80,6 +93,36 @@ export function ContextTab({ schemaId, isOwner, folderId }: ContextTabProps) {
       setDeleting(false);
     }
   };
+
+  const togglePreview = useCallback(async (ctx: SchemaContext) => {
+    if (expandedId === ctx.id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(ctx.id);
+    setPreviewRows([]);
+    setPreviewError(null);
+
+    if (ctx.type !== "lookup_table" || !ctx.dataSourceId || !ctx.bqDataset || !ctx.bqTable) return;
+
+    setPreviewLoading(true);
+    try {
+      const res = await fetch(
+        `/api/data-sources/${ctx.dataSourceId}/tables/${encodeURIComponent(ctx.bqDataset)}/${encodeURIComponent(ctx.bqTable)}/preview`,
+        { credentials: "include" },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to load preview");
+      }
+      const data = await res.json();
+      setPreviewRows(data.rows ?? []);
+    } catch (err) {
+      setPreviewError(err instanceof Error ? err.message : "Failed to load preview");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [expandedId]);
 
   if (loading) {
     return (
@@ -125,34 +168,113 @@ export function ContextTab({ schemaId, isOwner, folderId }: ContextTabProps) {
         <div className="space-y-3">
           {contexts.map((ctx) => {
             const Icon = CONTEXT_TYPE_ICONS[ctx.type];
+            const isLookup = ctx.type === "lookup_table";
+            const isExpanded = expandedId === ctx.id;
             return (
               <Card key={ctx.id}>
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Icon className="h-4 w-4 text-muted-foreground" />
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 text-left"
+                      onClick={() => isLookup && togglePreview(ctx)}
+                    >
+                      {isLookup ? (
+                        isExpanded ? (
+                          <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                        )
+                      ) : (
+                        <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+                      )}
                       <CardTitle className="text-sm">{ctx.name}</CardTitle>
                       <Badge variant="secondary" className="text-[10px]">
                         {CONTEXT_TYPE_LABELS[ctx.type]}
                       </Badge>
+                    </button>
+                    <div className="flex items-center gap-1">
+                      {isLookup && ctx.bqProject && ctx.bqDataset && ctx.bqTable && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 gap-1.5 text-xs text-muted-foreground"
+                          asChild
+                        >
+                          <a
+                            href={`https://console.cloud.google.com/bigquery?project=${encodeURIComponent(ctx.bqProject)}&ws=!1m5!1m4!4m3!1s${encodeURIComponent(ctx.bqProject)}!2s${encodeURIComponent(ctx.bqDataset)}!3s${encodeURIComponent(ctx.bqTable)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            Open in BigQuery
+                          </a>
+                        </Button>
+                      )}
+                      {isOwner && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                          onClick={() => setDeleteTarget(ctx)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                     </div>
-                    {isOwner && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                        onClick={() => setDeleteTarget(ctx)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {ctx.type === "lookup_table" && (
+                  {isLookup && !isExpanded && (
                     <div className="text-xs text-muted-foreground space-y-0.5">
                       {ctx.bqDataset && <p>Dataset: <span className="font-mono">{ctx.bqDataset}</span></p>}
                       {ctx.bqTable && <p>Table: <span className="font-mono">{ctx.bqTable}</span></p>}
+                    </div>
+                  )}
+                  {isLookup && isExpanded && (
+                    <div className="space-y-3">
+                      <div className="text-xs text-muted-foreground space-y-0.5">
+                        {ctx.bqDataset && <p>Dataset: <span className="font-mono">{ctx.bqDataset}</span></p>}
+                        {ctx.bqTable && <p>Table: <span className="font-mono">{ctx.bqTable}</span></p>}
+                      </div>
+                      {previewLoading && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Loading preview…
+                        </div>
+                      )}
+                      {previewError && (
+                        <p className="text-sm text-destructive py-2">{previewError}</p>
+                      )}
+                      {!previewLoading && !previewError && previewRows.length > 0 && (
+                        <div className="rounded-md border overflow-auto max-h-[360px]">
+                          <Table className="min-w-max">
+                            <TableHeader>
+                              <TableRow>
+                                {Object.keys(previewRows[0]).map((col) => (
+                                  <TableHead key={col} className="whitespace-nowrap text-xs">
+                                    {col}
+                                  </TableHead>
+                                ))}
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {previewRows.map((row, rIdx) => (
+                                <TableRow key={rIdx}>
+                                  {Object.values(row).map((val, cIdx) => (
+                                    <TableCell key={cIdx} className="whitespace-nowrap max-w-[200px] truncate text-xs">
+                                      {val == null ? "" : String(val)}
+                                    </TableCell>
+                                  ))}
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      )}
+                      {!previewLoading && !previewError && previewRows.length === 0 && (
+                        <p className="text-sm text-muted-foreground py-2">No rows found in this table.</p>
+                      )}
                     </div>
                   )}
                   {(ctx.type === "validation" || ctx.type === "text_instructions") && ctx.content && (

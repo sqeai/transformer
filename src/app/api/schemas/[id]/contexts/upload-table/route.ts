@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { getAuth } from "@/lib/api-auth";
 import {
   getDefaultBigQueryConfig,
@@ -129,9 +130,8 @@ export async function POST(
     }
 
     const prefix = getDefaultSchemaPrefix();
-    const safeContextName = toSnakeCase(contextName.trim());
     const datasetName = `${prefix}_contexts`;
-    const tableName = `${prefix}_${safeContextName}`;
+    const tableName = randomUUID().replace(/-/g, "_");
 
     const config = getDefaultBigQueryConfig()!;
     let credentials = config.credentials as Record<string, unknown> | undefined;
@@ -187,6 +187,7 @@ export async function POST(
     return NextResponse.json({
       success: true,
       dataSourceId,
+      bqProject: config.projectId,
       bqDataset: datasetName,
       bqTable: tableName,
       rowCount: dataRows.length,
