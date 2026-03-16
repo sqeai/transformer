@@ -367,7 +367,7 @@ function NewDatasetPageContent() {
         const data = await res.json();
         if (!res.ok) return;
 
-        const jobMap = new Map<string, { status: string; result?: unknown; error?: string }>();
+        const jobMap = new Map<string, { status: string; result?: unknown; error?: string; created_at?: string; started_at?: string; completed_at?: string }>();
         for (const job of data.jobs ?? []) jobMap.set(job.id, job);
 
         setJobResults((prev) => {
@@ -376,7 +376,16 @@ function NewDatasetPageContent() {
             if (!job) return r;
             const nextStatus = job.status as FileJobResult["status"];
             const merged = mergeJobResultWithIterationHistory(r, job.result as FileJobResult["result"] | undefined, nextStatus, r.jobId);
-            return { ...r, status: nextStatus, result: merged.result, transformationIterationJobIds: merged.transformationIterationJobIds, error: job.error };
+            return {
+              ...r,
+              status: nextStatus,
+              result: merged.result,
+              transformationIterationJobIds: merged.transformationIterationJobIds,
+              error: job.error,
+              createdAt: job.created_at ?? r.createdAt,
+              startedAt: job.started_at ?? r.startedAt,
+              completedAt: job.completed_at ?? r.completedAt,
+            };
           });
 
           const allDone = updated.every((r) => r.status === "completed" || r.status === "failed" || !r.jobId);
@@ -554,7 +563,16 @@ function NewDatasetPageContent() {
             if (r.jobId !== jobId) return r;
             const nextStatus = job.status as FileJobResult["status"];
             const merged = mergeJobResultWithIterationHistory(r, (job.result as FileJobResult["result"] | undefined) ?? r.result, nextStatus, jobId);
-            return { ...r, status: nextStatus, result: merged.result, transformationIterationJobIds: merged.transformationIterationJobIds, error: job.error };
+            return {
+              ...r,
+              status: nextStatus,
+              result: merged.result,
+              transformationIterationJobIds: merged.transformationIterationJobIds,
+              error: job.error,
+              createdAt: job.created_at ?? r.createdAt,
+              startedAt: job.started_at ?? r.startedAt,
+              completedAt: job.completed_at ?? r.completedAt,
+            };
           }),
         );
 

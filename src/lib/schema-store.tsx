@@ -93,6 +93,9 @@ export interface FileJobResult {
     mappingIterations?: TransformationMappingEntry[][];
   };
   error?: string;
+  createdAt?: string;
+  startedAt?: string;
+  completedAt?: string;
 }
 
 export interface PipelineNode {

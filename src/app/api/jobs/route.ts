@@ -67,6 +67,9 @@ export async function GET(request: NextRequest) {
         status: j.status,
         result: j.result,
         error: j.error,
+        created_at: j.created_at,
+        started_at: j.started_at,
+        completed_at: j.completed_at,
       })),
     });
   } catch (e) {
