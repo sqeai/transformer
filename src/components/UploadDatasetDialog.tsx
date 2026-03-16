@@ -172,9 +172,9 @@ export function UploadDatasetDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-2xl w-full">
+      <DialogContent className="max-w-2xl w-full min-w-0 overflow-hidden">
         <DialogHeader>
-          <DialogTitle>
+          <DialogTitle className="truncate">
             {isAddToDataset && datasetName
               ? `Add to "${datasetName}"`
               : "New Dataset"}
@@ -186,7 +186,7 @@ export function UploadDatasetDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div className="space-y-4 py-2 min-w-0">
           {!defaultSchemaId && (
             <div className="space-y-2">
               <label className="text-sm font-medium">Target Schema</label>
@@ -280,12 +280,12 @@ export function UploadDatasetDialog({
                   return (
                   <div
                     key={f.fileId}
-                    className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2"
+                    className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 min-w-0"
                   >
                     <FileIcon className="h-4 w-4 text-muted-foreground shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{f.fileName}</p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-muted-foreground truncate">
                         {f.unstructuredType
                           ? f.unstructuredType.toUpperCase()
                           : `${f.worksheetNames.length} worksheet${f.worksheetNames.length !== 1 ? "s" : ""}`}
