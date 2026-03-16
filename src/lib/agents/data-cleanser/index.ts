@@ -26,6 +26,7 @@ const MAX_JUDGE_RETRIES = 2;
 const SAMPLE_ROWS_FOR_PLANNER = 8;
 const SAMPLE_ROWS_FOR_JUDGE = 10;
 const LOOKUP_SAMPLE_ROWS = 50;
+const LOOKUP_MAX_ROWS = 10000;
 
 // ---------------------------------------------------------------------------
 // Schema context types & fetching
@@ -84,9 +85,9 @@ async function fetchLookupTableRows(ctx: SchemaContextRow): Promise<LookupTableD
 
   const connector = createConnector(ds.type as DataSourceType, ds.config as Record<string, unknown>);
   try {
-    const rows = await connector.previewData(ctx.bq_dataset, ctx.bq_table, LOOKUP_SAMPLE_ROWS);
-    if (!rows.length) return null;
-    return { contextName: ctx.name, columns: Object.keys(rows[0]), rows };
+    const allRows = await connector.previewData(ctx.bq_dataset, ctx.bq_table, LOOKUP_MAX_ROWS);
+    if (!allRows.length) return null;
+    return { contextName: ctx.name, columns: Object.keys(allRows[0]), rows: allRows };
   } catch (err) {
     console.warn(`[data-cleanser] Failed to fetch lookup table ${ctx.bq_dataset}.${ctx.bq_table}: ${(err as Error).message}`);
     return null;
