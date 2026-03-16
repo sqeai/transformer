@@ -17,11 +17,219 @@ import {
   buildPipeline,
 } from "../../utils";
 import { readLocalCsv, writeLocalCsv } from "../../utils/csv-fs";
+import { createAdminClient } from "../../supabase/admin";
+import { createConnector } from "../../connectors";
+import type { DataSourceType } from "../../connectors";
 
 const MAX_PLAN_STEPS = 30;
 const MAX_JUDGE_RETRIES = 2;
 const SAMPLE_ROWS_FOR_PLANNER = 8;
 const SAMPLE_ROWS_FOR_JUDGE = 10;
+const LOOKUP_SAMPLE_ROWS = 50;
+
+// ---------------------------------------------------------------------------
+// Schema context types & fetching
+// ---------------------------------------------------------------------------
+
+interface SchemaContextRow {
+  id: string;
+  schema_id: string;
+  type: "lookup_table" | "validation" | "text_instructions";
+  name: string;
+  content: string | null;
+  data_source_id: string | null;
+  bq_project: string | null;
+  bq_dataset: string | null;
+  bq_table: string | null;
+}
+
+interface LookupTableData {
+  contextName: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+}
+
+interface ResolvedContexts {
+  textContext: string;
+  lookupTables: LookupTableData[];
+}
+
+async function fetchSchemaContexts(schemaId: string): Promise<SchemaContextRow[]> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("schema_contexts")
+    .select("*")
+    .eq("schema_id", schemaId)
+    .order("created_at", { ascending: true });
+  if (error) {
+    console.warn(`[data-cleanser] Failed to fetch contexts for schema ${schemaId}: ${error.message}`);
+    return [];
+  }
+  return (data ?? []) as SchemaContextRow[];
+}
+
+async function fetchLookupTableRows(ctx: SchemaContextRow): Promise<LookupTableData | null> {
+  if (!ctx.data_source_id || !ctx.bq_dataset || !ctx.bq_table) return null;
+
+  const supabase = createAdminClient();
+  const { data: ds, error } = await supabase
+    .from("data_sources")
+    .select("type, config")
+    .eq("id", ctx.data_source_id)
+    .single();
+  if (error || !ds) {
+    console.warn(`[data-cleanser] Could not load data source ${ctx.data_source_id}: ${error?.message}`);
+    return null;
+  }
+
+  const connector = createConnector(ds.type as DataSourceType, ds.config as Record<string, unknown>);
+  try {
+    const rows = await connector.previewData(ctx.bq_dataset, ctx.bq_table, LOOKUP_SAMPLE_ROWS);
+    if (!rows.length) return null;
+    return { contextName: ctx.name, columns: Object.keys(rows[0]), rows };
+  } catch (err) {
+    console.warn(`[data-cleanser] Failed to fetch lookup table ${ctx.bq_dataset}.${ctx.bq_table}: ${(err as Error).message}`);
+    return null;
+  } finally {
+    await connector.close();
+  }
+}
+
+async function resolveContexts(schemaId: string): Promise<ResolvedContexts> {
+  const contexts = await fetchSchemaContexts(schemaId);
+  const textParts: string[] = [];
+  const lookupTables: LookupTableData[] = [];
+
+  for (const ctx of contexts) {
+    if (ctx.type === "validation" || ctx.type === "text_instructions") {
+      if (ctx.content?.trim()) {
+        const label = ctx.type === "validation" ? "Validation Rule" : "Additional Instructions";
+        textParts.push(`[${label}: ${ctx.name}]\n${ctx.content.trim()}`);
+      }
+    } else if (ctx.type === "lookup_table") {
+      const tableData = await fetchLookupTableRows(ctx);
+      if (tableData) lookupTables.push(tableData);
+    }
+  }
+
+  return { textContext: textParts.join("\n\n"), lookupTables };
+}
+
+// ---------------------------------------------------------------------------
+// Lookup-key identification subagent
+// ---------------------------------------------------------------------------
+
+interface LookupKeyResult {
+  lookupKeyColumn: string;
+  sourceKeyColumn: string;
+  appendColumns: string[];
+}
+
+const LOOKUP_KEY_SYSTEM_PROMPT = `You are a data analyst. You receive sample rows from two datasets:
+1. The "source" dataset (the file being cleansed)
+2. A "lookup" table
+
+Your job is to identify:
+- Which column in the SOURCE data and which column in the LOOKUP table share overlapping values (i.e. they represent the same entity and can be used as a join key).
+- Which additional columns from the LOOKUP table should be appended to the source data via this key.
+
+Call **emitLookupKey** with your findings. If no meaningful overlap exists, still call emitLookupKey with empty appendColumns.`;
+
+function createLookupKeyTools() {
+  const emitLookupKeyTool = tool(
+    async (input) => JSON.stringify(input),
+    {
+      name: "emitLookupKey",
+      description: "Emit the identified lookup key and columns to append.",
+      schema: z.object({
+        sourceKeyColumn: z.string().describe("Column name in the source data that matches the lookup key"),
+        lookupKeyColumn: z.string().describe("Column name in the lookup table that matches the source key"),
+        appendColumns: z.array(z.string()).describe("Columns from the lookup table to append to source data (excluding the key itself)"),
+      }),
+    },
+  );
+  return [emitLookupKeyTool];
+}
+
+async function identifyLookupKeys(
+  apiKey: string,
+  sourceData: FileData,
+  lookup: LookupTableData,
+  runId?: string,
+): Promise<LookupKeyResult | null> {
+  const llm = new ChatAnthropic({
+    model: "claude-sonnet-4-6",
+    anthropicApiKey: apiKey,
+    temperature: 0,
+  });
+
+  const tools = createLookupKeyTools();
+  const agent = createAgent({ model: llm, tools, systemPrompt: LOOKUP_KEY_SYSTEM_PROMPT });
+
+  const sourceSample = sourceData.rows.slice(0, SAMPLE_ROWS_FOR_PLANNER);
+  const lookupSample = lookup.rows.slice(0, SAMPLE_ROWS_FOR_PLANNER);
+
+  const lines: string[] = [
+    `Lookup table: "${lookup.contextName}"`,
+    `Lookup columns: ${lookup.columns.map((c) => `"${c}"`).join(", ")}`,
+    `Lookup sample rows (${lookupSample.length}):`,
+    JSON.stringify(lookupSample, null, 2),
+    "",
+    `Source columns: ${sourceData.columns.map((c) => `"${c}"`).join(", ")}`,
+    `Source sample rows (${sourceSample.length}):`,
+    JSON.stringify(sourceSample, null, 2),
+  ];
+
+  const runName = runId ? `lookup-key-${runId}` : "lookup-key";
+  const result = await agent.invoke(
+    { messages: [new HumanMessage(lines.join("\n"))] },
+    { recursionLimit: 20, runName },
+  );
+
+  const messages = result.messages as Array<{ content: unknown }>;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const content = messages[i].content;
+    const text = typeof content === "string" ? content : JSON.stringify(content);
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed?.sourceKeyColumn && parsed?.lookupKeyColumn) return parsed as LookupKeyResult;
+    } catch { /* continue */ }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Horizontal append: join lookup columns onto source data
+// ---------------------------------------------------------------------------
+
+function appendLookupColumns(
+  sourceData: FileData,
+  lookup: LookupTableData,
+  keyResult: LookupKeyResult,
+): { columns: string[]; rows: Record<string, unknown>[] } {
+  const lookupIndex = new Map<string, Record<string, unknown>>();
+  for (const row of lookup.rows) {
+    const key = String(row[keyResult.lookupKeyColumn] ?? "").trim().toLowerCase();
+    if (key && !lookupIndex.has(key)) lookupIndex.set(key, row);
+  }
+
+  const newColumns = keyResult.appendColumns.filter(
+    (c) => !sourceData.columns.includes(c),
+  );
+  const allColumns = [...sourceData.columns, ...newColumns];
+
+  const enrichedRows = sourceData.rows.map((row) => {
+    const key = String(row[keyResult.sourceKeyColumn] ?? "").trim().toLowerCase();
+    const lookupRow = lookupIndex.get(key);
+    const out: Record<string, unknown> = { ...row };
+    for (const col of newColumns) {
+      out[col] = lookupRow?.[col] ?? "";
+    }
+    return out;
+  });
+
+  return { columns: allColumns, rows: enrichedRows };
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,6 +245,8 @@ export interface DataCleanserInput {
   fileId?: string;
   /** When set, the file is unstructured and needs OCR before processing */
   unstructuredMimeType?: string;
+  /** Schema ID — used to fetch contexts (lookup tables, validation, instructions) */
+  schemaId?: string;
 }
 
 const SNAPSHOT_SAMPLE_ROWS = 20;
@@ -80,6 +290,7 @@ You will receive:
 - The target schema field paths
 - The current file dimensions + a small sample of rows
 - An optional user directive
+- An optional schema context section containing validation rules, additional instructions, and/or notes about lookup-table columns that were pre-joined to the data. When present, treat validation rules and instructions as constraints on how data should be transformed. Lookup-enrichment notes describe extra columns already appended to the data that you should leverage.
 
 You must generate the plan by calling **emitPlan** with the full ordered list of steps.
 
@@ -197,6 +408,7 @@ async function generatePlan(
   userDirective?: string,
   judgeDirective?: string,
   runId?: string,
+  contextText?: string,
 ): Promise<PlannerResult> {
   const llm = new ChatAnthropic({
     model: "claude-sonnet-4-6",
@@ -213,6 +425,10 @@ async function generatePlan(
     `Current file state:`,
     fileSummaryText,
   ];
+
+  if (contextText) {
+    lines.push("", "## Schema Context (validation rules, instructions, and enrichment notes):", contextText);
+  }
 
   if (userDirective) {
     lines.push("", `User directive (HIGHEST PRIORITY): ${userDirective}`);
@@ -556,6 +772,54 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
   await fs.copyFile(rawTmpPath, workingPath);
   await fs.unlink(rawTmpPath).catch(() => {});
 
+  // -----------------------------------------------------------------------
+  // Resolve schema contexts (validation, instructions, lookup tables)
+  // -----------------------------------------------------------------------
+  let contextText = "";
+  const appendedLookupNotes: string[] = [];
+
+  if (input.schemaId) {
+    const resolved = await resolveContexts(input.schemaId);
+    contextText = resolved.textContext;
+
+    if (resolved.lookupTables.length > 0) {
+      const sourceData = await readLocalCsv(workingPath);
+
+      for (const lookup of resolved.lookupTables) {
+        const keyResult = await identifyLookupKeys(apiKey, sourceData, lookup, runId);
+        if (!keyResult || keyResult.appendColumns.length === 0) {
+          console.warn(`[data-cleanser] No joinable key found for lookup "${lookup.contextName}" — skipping append.`);
+          continue;
+        }
+
+        const enriched = appendLookupColumns(sourceData, lookup, keyResult);
+        sourceData.columns = enriched.columns;
+        sourceData.rows = enriched.rows;
+
+        appendedLookupNotes.push(
+          `Lookup table "${lookup.contextName}" was joined via source column "${keyResult.sourceKeyColumn}" ↔ lookup column "${keyResult.lookupKeyColumn}". ` +
+          `Appended columns: ${keyResult.appendColumns.map((c) => `"${c}"`).join(", ")}. ` +
+          `These columns are now available in the data and should be considered during planning.`,
+        );
+      }
+
+      // Write enriched data back to the working file
+      await writeLocalCsv(workingPath, sourceData.columns, sourceData.rows);
+    }
+
+    if (appendedLookupNotes.length > 0) {
+      const lookupSection = appendedLookupNotes.join("\n");
+      contextText = contextText
+        ? `${contextText}\n\n## Enrichment from lookup tables:\n${lookupSection}`
+        : `## Enrichment from lookup tables:\n${lookupSection}`;
+    }
+  }
+
+  // Also write back the enriched file as the new raw backup for judge retries
+  if (appendedLookupNotes.length > 0) {
+    await fs.copyFile(workingPath, rawBackupPath);
+  }
+
   let allMappings: TransformationMapping[] = [];
   let allHistory: TransformationStep[] = [];
   let judgeDirective: string | undefined;
@@ -581,6 +845,7 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
       input.userDirective,
       judgeDirective,
       runId,
+      contextText || undefined,
     );
 
     if (plan.steps.length === 0) {

@@ -460,6 +460,7 @@ function NewDatasetPageContent() {
           targetPaths,
           fileName: selection.worksheetName,
           userDirective: combinedDirective,
+          schemaId,
         };
         if (unstructuredMimeType) {
           jobPayload.unstructuredMimeType = unstructuredMimeType;
@@ -606,7 +607,7 @@ function NewDatasetPageContent() {
         body: JSON.stringify({
           type: "data_cleanse",
           fileId: originalRef?.fileId,
-          payload: { filePath: uploadedModified.filePath, targetPaths, fileName: fileResult.file.worksheetName, userDirective: modifyPrompt.trim(), originalFilePath: originalRef?.filePath, modifiedFilePath: uploadedModified.filePath },
+          payload: { filePath: uploadedModified.filePath, targetPaths, fileName: fileResult.file.worksheetName, userDirective: modifyPrompt.trim(), originalFilePath: originalRef?.filePath, modifiedFilePath: uploadedModified.filePath, schemaId },
         }),
       });
       const data = await res.json();
