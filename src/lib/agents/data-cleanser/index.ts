@@ -34,7 +34,7 @@ const LOOKUP_SAMPLE_ROWS = 50;
 interface SchemaContextRow {
   id: string;
   schema_id: string;
-  type: "lookup_table" | "validation" | "text_instructions";
+  type: "lookup_table" | "validation" | "text_instructions" | "memory";
   name: string;
   content: string | null;
   data_source_id: string | null;
@@ -101,9 +101,13 @@ async function resolveContexts(schemaId: string): Promise<ResolvedContexts> {
   const lookupTables: LookupTableData[] = [];
 
   for (const ctx of contexts) {
-    if (ctx.type === "validation" || ctx.type === "text_instructions") {
+    if (ctx.type === "validation" || ctx.type === "text_instructions" || ctx.type === "memory") {
       if (ctx.content?.trim()) {
-        const label = ctx.type === "validation" ? "Validation Rule" : "Additional Instructions";
+        const label = ctx.type === "validation"
+          ? "Validation Rule"
+          : ctx.type === "memory"
+            ? "Memory"
+            : "Additional Instructions";
         textParts.push(`[${label}: ${ctx.name}]\n${ctx.content.trim()}`);
       }
     } else if (ctx.type === "lookup_table") {

@@ -96,9 +96,9 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const validTypes = ["lookup_table", "validation", "text_instructions"];
+  const validTypes = ["lookup_table", "validation", "text_instructions", "memory"];
   if (!body.type || !validTypes.includes(body.type)) {
-    return NextResponse.json({ error: "type must be one of: lookup_table, validation, text_instructions" }, { status: 400 });
+    return NextResponse.json({ error: "type must be one of: lookup_table, validation, text_instructions, memory" }, { status: 400 });
   }
   if (!body.name?.trim()) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });

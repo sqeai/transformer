@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
@@ -17,7 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { ChevronDown, ChevronRight, ExternalLink, Loader2, Plus, Trash2, BookOpen, CheckSquare, Table2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ExternalLink, Loader2, Plus, Trash2, BookOpen, CheckSquare, Table2, Brain, Pencil, Save, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,12 +42,14 @@ const CONTEXT_TYPE_LABELS: Record<SchemaContextType, string> = {
   lookup_table: "Lookup Table",
   validation: "Validation",
   text_instructions: "Text Instructions",
+  memory: "Memory",
 };
 
 const CONTEXT_TYPE_ICONS: Record<SchemaContextType, typeof Table2> = {
   lookup_table: Table2,
   validation: CheckSquare,
   text_instructions: BookOpen,
+  memory: Brain,
 };
 
 export function ContextTab({ schemaId, isOwner, folderId }: ContextTabProps) {
@@ -60,6 +63,10 @@ export function ContextTab({ schemaId, isOwner, folderId }: ContextTabProps) {
   const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
 
   const fetchContexts = useCallback(() => {
     setLoading(true);
@@ -93,6 +100,40 @@ export function ContextTab({ schemaId, isOwner, folderId }: ContextTabProps) {
       setDeleting(false);
     }
   };
+
+  const startEditing = useCallback((ctx: SchemaContext) => {
+    setEditingId(ctx.id);
+    setEditDraft(ctx.content ?? "");
+  }, []);
+
+  const cancelEditing = useCallback(() => {
+    setEditingId(null);
+    setEditDraft("");
+  }, []);
+
+  const handleSaveEdit = useCallback(async () => {
+    if (!editingId || editSaving) return;
+    setEditSaving(true);
+    try {
+      const res = await fetch(`/api/schemas/${schemaId}/contexts/${editingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: editDraft }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to save");
+      }
+      setEditingId(null);
+      setEditDraft("");
+      fetchContexts();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to save changes");
+    } finally {
+      setEditSaving(false);
+    }
+  }, [editingId, editDraft, editSaving, schemaId, fetchContexts]);
 
   const togglePreview = useCallback(async (ctx: SchemaContext) => {
     if (expandedId === ctx.id) {
@@ -169,6 +210,7 @@ export function ContextTab({ schemaId, isOwner, folderId }: ContextTabProps) {
           {contexts.map((ctx) => {
             const Icon = CONTEXT_TYPE_ICONS[ctx.type];
             const isLookup = ctx.type === "lookup_table";
+            const isTextBased = ctx.type === "validation" || ctx.type === "text_instructions" || ctx.type === "memory";
             const isExpanded = expandedId === ctx.id;
             return (
               <Card key={ctx.id}>
@@ -209,6 +251,16 @@ export function ContextTab({ schemaId, isOwner, folderId }: ContextTabProps) {
                             <ExternalLink className="h-3.5 w-3.5" />
                             Open in BigQuery
                           </a>
+                        </Button>
+                      )}
+                      {isOwner && isTextBased && editingId !== ctx.id && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                          onClick={() => startEditing(ctx)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
                         </Button>
                       )}
                       {isOwner && (
@@ -277,9 +329,29 @@ export function ContextTab({ schemaId, isOwner, folderId }: ContextTabProps) {
                       )}
                     </div>
                   )}
-                  {(ctx.type === "validation" || ctx.type === "text_instructions") && ctx.content && (
+                  {isTextBased && editingId === ctx.id ? (
+                    <div className="space-y-2">
+                      <Textarea
+                        value={editDraft}
+                        onChange={(e) => setEditDraft(e.target.value)}
+                        rows={4}
+                        className="text-sm resize-y"
+                        disabled={editSaving}
+                      />
+                      <div className="flex justify-end gap-1.5">
+                        <Button variant="ghost" size="sm" onClick={cancelEditing} disabled={editSaving}>
+                          <X className="h-3.5 w-3.5 mr-1" />
+                          Cancel
+                        </Button>
+                        <Button size="sm" onClick={handleSaveEdit} disabled={editSaving}>
+                          {editSaving ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1" />}
+                          Save
+                        </Button>
+                      </div>
+                    </div>
+                  ) : isTextBased && ctx.content ? (
                     <p className="text-sm text-muted-foreground whitespace-pre-wrap">{ctx.content}</p>
-                  )}
+                  ) : null}
                 </CardContent>
               </Card>
             );

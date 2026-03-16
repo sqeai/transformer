@@ -190,6 +190,26 @@ function NewDatasetPageContent() {
     router.push(datasetsListUrl);
   }, [router, step, datasetsListUrl]);
 
+  // --- Save AI directive as schema memory ---
+
+  const saveMemory = useCallback(async (directive: string, name: string) => {
+    if (!schemaId || !directive.trim()) return;
+    try {
+      await fetch(`/api/schemas/${schemaId}/contexts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "memory",
+          name,
+          content: directive.trim(),
+        }),
+        credentials: "include",
+      });
+    } catch {
+      // Memory saving is best-effort; don't block the main flow
+    }
+  }, [schemaId]);
+
   // --- File upload helper ---
 
   const uploadFileCsv = useCallback(async (
@@ -492,7 +512,22 @@ function NewDatasetPageContent() {
     setJobResults(results);
     fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
     startPolling(results);
-  }, [schemaId, selectedFiles, files, targetPaths, aiInstructions, globalAiInstructions, uploadFileCsv, startPolling]);
+
+    // Save directives as schema memory for future processing
+    const globalDirective = globalAiInstructions.trim();
+    if (globalDirective) {
+      saveMemory(globalDirective, `Dataset directive: ${globalDirective.slice(0, 80)}`);
+    }
+    const savedPerFile = new Set<string>();
+    for (const selection of selectedFiles) {
+      const fileKey = `${selection.fileId}:${selection.worksheetIndex}`;
+      const fileDirective = aiInstructions[fileKey]?.trim();
+      if (fileDirective && !savedPerFile.has(fileDirective)) {
+        savedPerFile.add(fileDirective);
+        saveMemory(fileDirective, `File directive (${selection.worksheetName}): ${fileDirective.slice(0, 60)}`);
+      }
+    }
+  }, [schemaId, selectedFiles, files, targetPaths, aiInstructions, globalAiInstructions, uploadFileCsv, startPolling, saveMemory]);
 
   useEffect(() => { return () => { if (pollingRef.current) clearInterval(pollingRef.current); }; }, []);
 
@@ -639,16 +674,22 @@ function NewDatasetPageContent() {
         ),
       );
 
+      const promptText = modifyPrompt.trim();
       setModifyPrompt("");
       setModifySubmittingSheetKey(null);
       setUploadedFileRefs((prev) => ({ ...prev, [currentFileKey]: uploadedModified }));
       fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
       startModifyPolling(data.jobId);
+
+      // Save the modify prompt as schema memory
+      if (promptText) {
+        saveMemory(promptText, `Modification: ${promptText.slice(0, 80)}`);
+      }
     } catch (err) {
       setModifySubmittingSheetKey(null);
       alert(err instanceof Error ? err.message : "Failed to modify");
     }
-  }, [modifyPrompt, schemaId, targetPaths, startModifyPolling, uploadedFileRefs, uploadFileCsv]);
+  }, [modifyPrompt, schemaId, targetPaths, startModifyPolling, uploadedFileRefs, uploadFileCsv, saveMemory]);
 
   // --- Export ---
 

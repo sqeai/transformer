@@ -165,7 +165,7 @@ export interface AppUser {
   name: string;
 }
 
-export type SchemaContextType = "lookup_table" | "validation" | "text_instructions";
+export type SchemaContextType = "lookup_table" | "validation" | "text_instructions" | "memory";
 
 export interface SchemaContext {
   id: string;

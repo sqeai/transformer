@@ -607,6 +607,22 @@ export default function DatasetPage() {
       if (!patchRes.ok) throw new Error(patchData.error ?? "Failed to save cleansed dataset");
 
       toast.success(`Transformer updated dataset (${nextRows.length} rows)`);
+
+      // Save the directive as schema memory for future processing
+      const directiveText = aiCleanserInstructions.trim();
+      if (directiveText && dataset.schemaId) {
+        fetch(`/api/schemas/${dataset.schemaId}/contexts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "memory",
+            name: `Modification: ${directiveText.slice(0, 80)}`,
+            content: directiveText,
+          }),
+          credentials: "include",
+        }).catch(() => {});
+      }
+
       setAiCleanserDialogOpen(false);
       setAiCleanserInstructions("");
       await fetchDataset();
