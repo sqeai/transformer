@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
+import { PermissionsService } from "@/lib/permissions";
 
 export async function GET(
   _request: NextRequest,
@@ -59,31 +60,26 @@ export async function GET(
 
   let folderMembers: Array<{ userId: string; email: string; name: string; role: string }> = [];
   if (schema.folder_id) {
-    const { data: members } = await supabase!
-      .from("folder_members")
-      .select("user_id, role")
-      .eq("folder_id", schema.folder_id);
+    const directMembers = await PermissionsService.getFolderMembers(schema.folder_id);
+    folderMembers = directMembers.map((m) => ({
+      userId: m.userId,
+      email: m.email,
+      name: m.name,
+      role: m.role,
+    }));
 
-    if (members && members.length > 0) {
-      const memberUserIds = members.map((m: Record<string, unknown>) => m.user_id as string);
-      const { data: memberProfiles } = await supabase!
-        .from("users")
-        .select("id, email, full_name")
-        .in("id", memberUserIds);
-
-      const memberProfileMap = new Map(
-        (memberProfiles ?? []).map((p: Record<string, unknown>) => [
-          p.id as string,
-          { email: (p.email ?? "") as string, name: (p.full_name ?? "") as string },
-        ]),
-      );
-
-      folderMembers = members.map((m: Record<string, unknown>) => ({
-        userId: m.user_id as string,
-        email: memberProfileMap.get(m.user_id as string)?.email ?? "",
-        name: memberProfileMap.get(m.user_id as string)?.name ?? "",
-        role: m.role as string,
-      }));
+    const ancestorMembers = await PermissionsService.getAncestorMembers(schema.folder_id);
+    const existingIds = new Set(folderMembers.map((m) => m.userId));
+    for (const am of ancestorMembers) {
+      if (am.role !== "admin" && !existingIds.has(am.userId)) {
+        existingIds.add(am.userId);
+        folderMembers.push({
+          userId: am.userId,
+          email: am.email,
+          name: am.name,
+          role: am.role,
+        });
+      }
     }
   }
 

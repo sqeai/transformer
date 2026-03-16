@@ -460,6 +460,60 @@ export const PermissionsService = {
   },
 
   /**
+   * Get members from all ancestor (parent) folders, walking up the hierarchy.
+   * Useful for expanding the approver candidate pool beyond the direct folder.
+   */
+  async getAncestorMembers(
+    folderId: string,
+  ): Promise<
+    {
+      userId: string;
+      email: string;
+      name: string;
+      role: FolderRole;
+      fromFolderId: string;
+      fromFolderName: string;
+    }[]
+  > {
+    const supabase = createAdminClient();
+    const ancestors = await fetchAncestorChain(folderId);
+    const directMembers = await this.getFolderMembers(folderId);
+    const directUserIds = new Set(directMembers.map((m) => m.userId));
+
+    const ancestorMembers: {
+      userId: string;
+      email: string;
+      name: string;
+      role: FolderRole;
+      fromFolderId: string;
+      fromFolderName: string;
+    }[] = [];
+    const seen = new Set<string>();
+
+    for (const ancestorId of ancestors) {
+      const { data: folder } = await supabase
+        .from("folders")
+        .select("name")
+        .eq("id", ancestorId)
+        .maybeSingle();
+
+      const members = await this.getFolderMembers(ancestorId);
+      for (const member of members) {
+        if (!directUserIds.has(member.userId) && !seen.has(member.userId)) {
+          seen.add(member.userId);
+          ancestorMembers.push({
+            ...member,
+            fromFolderId: ancestorId,
+            fromFolderName: folder?.name ?? "",
+          });
+        }
+      }
+    }
+
+    return ancestorMembers;
+  },
+
+  /**
    * Get members from descendant folders (shown as "inherited" in the UI).
    */
   async getDescendantMembers(

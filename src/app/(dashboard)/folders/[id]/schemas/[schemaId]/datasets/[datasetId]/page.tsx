@@ -251,6 +251,15 @@ export default function DatasetPage() {
         const membersData = await membersRes.json().catch(() => ({}));
         const members = (membersData.members ?? []) as { userId: string; email: string; name: string; role: string }[];
         folderMembers = members.map((m) => ({ id: m.userId, email: m.email, name: m.name }));
+
+        const ancestorMembers = (membersData.ancestorMembers ?? []) as { userId: string; email: string; name: string; role: string }[];
+        const existingIds = new Set(folderMembers.map((m) => m.id));
+        for (const am of ancestorMembers) {
+          if (am.role !== "admin" && !existingIds.has(am.userId)) {
+            existingIds.add(am.userId);
+            folderMembers.push({ id: am.userId, email: am.email, name: am.name });
+          }
+        }
       }
 
       let mandatoryIds: string[] = [];

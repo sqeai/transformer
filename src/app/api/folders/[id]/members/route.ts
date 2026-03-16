@@ -14,8 +14,9 @@ export async function GET(
   const canManage = await PermissionsService.can(access.user.id, id, "manage_users");
   const members = await PermissionsService.getFolderMembers(id);
   const inherited = await PermissionsService.getDescendantMembers(id);
+  const ancestorMembers = await PermissionsService.getAncestorMembers(id);
 
-  return NextResponse.json({ members, inherited, canManage });
+  return NextResponse.json({ members, inherited, ancestorMembers, canManage });
 }
 
 export async function POST(
