@@ -677,7 +677,7 @@ export function AddContextDialog({
         )}
 
         {step === "lookup_upload" && (
-          <div className="flex flex-col h-full min-h-0 gap-4">
+          <div className="flex flex-col h-full min-h-0 min-w-0 gap-4 overflow-hidden">
             <div className="shrink-0">
               <Button
                 variant="ghost"
@@ -745,7 +745,7 @@ export function AddContextDialog({
                 </p>
               </div>
             ) : (
-              <div className="flex flex-col gap-4 min-h-0 flex-1">
+              <div className="flex flex-col gap-4 min-h-0 min-w-0 flex-1">
                 <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
                   <FileSpreadsheet className="h-5 w-5 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
@@ -819,7 +819,7 @@ export function AddContextDialog({
                         {sheetPreview.slice(1, 6).map((row, rIdx) => (
                           <TableRow key={rIdx}>
                             {row.map((cell, cIdx) => (
-                              <TableCell key={cIdx} className="whitespace-nowrap max-w-[160px] truncate">
+                              <TableCell key={cIdx} className="whitespace-nowrap max-w-[200px] truncate">
                                 {cell}
                               </TableCell>
                             ))}
