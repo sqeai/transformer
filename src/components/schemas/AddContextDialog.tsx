@@ -107,6 +107,9 @@ export function AddContextDialog({
   const dragCounter = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Lookup method choice
+  const [lookupMethod, setLookupMethod] = useState<"upload" | "datasource" | null>(null);
+
   // Connect to existing data source
   const [dataSources, setDataSources] = useState<DataSourceEntry[]>([]);
   const [dataSourcesLoading, setDataSourcesLoading] = useState(false);
@@ -130,6 +133,7 @@ export function AddContextDialog({
     setSheetPreviewLoading(false);
     setDragging(false);
     dragCounter.current = 0;
+    setLookupMethod(null);
     setDataSources([]);
     setDataSourcesLoading(false);
     setSelectedDataSourceId("");
@@ -151,6 +155,15 @@ export function AddContextDialog({
       setStep("lookup_choice");
     } else {
       setStep("text_form");
+    }
+  };
+
+  const handleLookupNext = () => {
+    if (!contextName.trim() || !lookupMethod) return;
+    if (lookupMethod === "upload") {
+      setStep("lookup_upload");
+    } else {
+      handleSwitchToDataSource();
     }
   };
 
@@ -616,8 +629,13 @@ export function AddContextDialog({
             <div className="flex flex-col gap-3 py-2">
               <button
                 type="button"
-                className="h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left border-border hover:bg-muted/50"
-                onClick={() => setStep("lookup_upload")}
+                className={cn(
+                  "h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left",
+                  lookupMethod === "upload"
+                    ? "border-primary ring-2 ring-primary"
+                    : "border-border hover:bg-muted/50",
+                )}
+                onClick={() => setLookupMethod("upload")}
               >
                 <span className="flex w-full items-center gap-2 font-medium text-sm">
                   <Upload className="h-4 w-4 shrink-0" />
@@ -629,8 +647,13 @@ export function AddContextDialog({
               </button>
               <button
                 type="button"
-                className="h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left border-border hover:bg-muted/50"
-                onClick={handleSwitchToDataSource}
+                className={cn(
+                  "h-auto min-w-0 flex-shrink-0 rounded-lg border bg-background px-4 py-4 text-left",
+                  lookupMethod === "datasource"
+                    ? "border-primary ring-2 ring-primary"
+                    : "border-border hover:bg-muted/50",
+                )}
+                onClick={() => setLookupMethod("datasource")}
               >
                 <span className="flex w-full items-center gap-2 font-medium text-sm">
                   <Database className="h-4 w-4 shrink-0" />
@@ -640,6 +663,15 @@ export function AddContextDialog({
                   Select a table from an already connected data source.
                 </span>
               </button>
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <Button
+                onClick={handleLookupNext}
+                disabled={!contextName.trim() || !lookupMethod}
+              >
+                Next
+              </Button>
             </div>
           </>
         )}
@@ -952,25 +984,16 @@ export function AddContextDialog({
                 <div className="flex-1 min-w-0 flex flex-col min-h-0">
                   {selectedTable ? (
                     <div className="flex flex-col h-full">
-                      <div className="flex items-center justify-between mb-3">
-                        <div>
-                          <h3 className="text-base font-semibold">
-                            {selectedTable.schema !== "public" && (
-                              <span className="text-muted-foreground">{selectedTable.schema}.</span>
-                            )}
-                            {selectedTable.name}
-                          </h3>
-                          <p className="text-sm text-muted-foreground">
-                            Selected as lookup table
-                          </p>
-                        </div>
-                        <Button
-                          onClick={handleConfirmDataSource}
-                          disabled={!contextName.trim() || saving}
-                        >
-                          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                          Confirm
-                        </Button>
+                      <div className="mb-3">
+                        <h3 className="text-base font-semibold">
+                          {selectedTable.schema !== "public" && (
+                            <span className="text-muted-foreground">{selectedTable.schema}.</span>
+                          )}
+                          {selectedTable.name}
+                        </h3>
+                        <p className="text-sm text-muted-foreground">
+                          Selected as lookup table
+                        </p>
                       </div>
                       <div className="flex-1 min-h-0 rounded-md border bg-muted/10 flex items-center justify-center">
                         <div className="text-center text-muted-foreground">
@@ -999,6 +1022,16 @@ export function AddContextDialog({
                 </div>
               </div>
             )}
+
+            <div className="flex justify-end shrink-0 pt-4 border-t">
+              <Button
+                onClick={handleConfirmDataSource}
+                disabled={!selectedTable || !contextName.trim() || saving}
+              >
+                {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Confirm
+              </Button>
+            </div>
           </div>
         )}
       </DialogContent>
