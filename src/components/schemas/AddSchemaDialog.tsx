@@ -120,7 +120,10 @@ export function AddSchemaDialog({
     setDialogMode("datasource");
     setDataSourcesLoading(true);
     try {
-      const res = await fetch("/api/data-sources");
+      const url = folderId
+        ? `/api/data-sources?folderId=${encodeURIComponent(folderId)}`
+        : "/api/data-sources";
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setDataSources(data.dataSources ?? []);
