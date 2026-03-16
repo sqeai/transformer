@@ -309,14 +309,21 @@ You must generate the plan by calling **emitPlan** with the full ordered list of
 7. **unpivot** — melt wide columns into rows. Params: { unpivotColumns: string[], nameColumn: string, valueColumn: string, extractFields?: Array<{ fieldName: string, valuesBySourceColumn: Record<string, string> }> }
 8. **expand** — flatten hierarchy with nesting levels. Params: { labelColumn: string, maxDepth: number }
 9. **aggregate** — group and aggregate. Params: { groupByColumns: string[], aggregations: Array<{ column: string, function: "sum"|"concat"|"count"|"min"|"max"|"first" }> }
-10. **mapRows** — apply row-by-row conditional transformations and lookups. Use this when you need to derive a column's value based on conditions in other columns, or populate a column via a lookup table. Params:
+10. **mapRows** — apply row-by-row conditional transformations, lookups, and custom TypeScript expressions. Use this when you need to derive a column's value based on conditions in other columns, populate a column via a lookup table, or apply a flexible computed transformation (formatting, math, string manipulation, etc.). Params:
     - rules: Array<{ conditions: Array<{ column: string, operator: "eq"|"neq"|"contains"|"not_contains"|"gt"|"gte"|"lt"|"lte"|"regex"|"is_empty"|"is_not_empty", value?: any }>, conditionLogic?: "and"|"or" (default "and"), targetColumn: string, value: any, valueFromColumn?: string }>
     - lookups: Array<{ sourceColumn: string, lookupData: Record<string, any>, targetColumn: string, defaultValue?: any }>
-    Rules are evaluated in order per row. If a rule's conditions match, targetColumn is set to value (or to the row's valueFromColumn if specified). Lookups map sourceColumn values through a lookup table to produce targetColumn values.
+    - customTransforms: Array<{ expression: string, targetColumn: string, sourceColumn?: string }>
+    Rules are evaluated in order per row. If a rule's conditions match, targetColumn is set to value (or to the row's valueFromColumn if specified). Lookups map sourceColumn values through a lookup table to produce targetColumn values. customTransforms run a JavaScript expression per row; the expression receives three variables: "value" (from sourceColumn or current targetColumn), "row" (full row object), and "columns" (column name array) and must return the new value. customTransforms are applied AFTER rules and lookups.
     Examples:
       - Set "is_active" to TRUE when "status" equals "active": { rules: [{ conditions: [{ column: "status", operator: "eq", value: "active" }], targetColumn: "is_active", value: "TRUE" }] }
       - Copy "full_name" from "first_name" when "last_name" is empty: { rules: [{ conditions: [{ column: "last_name", operator: "is_empty" }], targetColumn: "full_name", valueFromColumn: "first_name" }] }
       - Map country codes to country names: { lookups: [{ sourceColumn: "country_code", lookupData: { "US": "United States", "GB": "United Kingdom" }, targetColumn: "country_name", defaultValue: "Unknown" }] }
+      - Trim decimals to 2 places: { customTransforms: [{ expression: "Number(value) === Number(value) ? Number(value).toFixed(2) : value", targetColumn: "price", sourceColumn: "price" }] }
+      - Pad decimals to 4 places: { customTransforms: [{ expression: "Number(value) === Number(value) ? Number(value).toFixed(4) : value", targetColumn: "measurement" }] }
+      - Uppercase a column: { customTransforms: [{ expression: "String(value ?? '').toUpperCase()", targetColumn: "name" }] }
+      - Concatenate two columns: { customTransforms: [{ expression: "String(row['first_name'] ?? '') + ' ' + String(row['last_name'] ?? '')", targetColumn: "full_name" }] }
+      - Extract year from date: { customTransforms: [{ expression: "String(value ?? '').slice(0, 4)", targetColumn: "year", sourceColumn: "date" }] }
+      - Replace commas with dots in numbers: { customTransforms: [{ expression: "String(value ?? '').replace(/,/g, '.')", targetColumn: "amount" }] }
 11. **reduce** — aggregate multiple columns by key columns, with explicit control over output column names. Similar to aggregate but allows renaming output columns and optionally includes a count. Params: { keyColumns: string[], aggregations: Array<{ sourceColumn: string, function: "sum"|"count"|"min"|"max"|"concat"|"first"|"avg", outputColumn?: string }>, includeCount?: boolean }
     If outputColumn is omitted, defaults to "{sourceColumn}_{function}". When includeCount is true, a "_count" column is added.
     Examples:
@@ -340,7 +347,7 @@ Priority order within this phase:
 1. **filter** — remove only obvious noise (empty rows, title/summary rows). Be conservative.
 2. **filterRows** — if the user directive asks to remove or keep specific rows based on column values, apply this step. This is the PRIMARY tool for user-requested row removal/filtering.
 3. **padColumns** — forward-fill empty cells. Check ALL columns for empty cells. ANY column with >0% empty cells that follows a group/category pattern MUST be padded. Include ALL such columns.
-4. **mapRows** — derive new columns or fill existing columns based on conditional logic or lookups. Use this when the user wants to set a column's value based on another column's value (e.g., "set X to TRUE if Y is Z"), or to map values through a lookup table. This is safe — it only adds/modifies columns, never removes rows.
+4. **mapRows** — derive new columns or fill existing columns based on conditional logic, lookups, or custom expressions. Use this when the user wants to set a column's value based on another column's value (e.g., "set X to TRUE if Y is Z"), map values through a lookup table, or apply computed transformations like formatting numbers, manipulating strings, or combining columns. This is safe — it only adds/modifies columns, never removes rows.
 5. **unpivot** — if wide columns represent repeating categories or time periods, melt them into rows. This ADDS rows and is safe.
 6. **expand** / **handleBalanceSheet** — flatten hierarchies. This restructures but preserves data.
 

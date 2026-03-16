@@ -292,6 +292,14 @@ interface MapRowsLookup {
   defaultValue?: unknown;
 }
 
+interface MapRowsCustomTransform {
+  /** JS expression evaluated per row. Available vars: `value` (from sourceColumn or current targetColumn), `row` (full row object), `columns` (column names). Must return the new value. */
+  expression: string;
+  targetColumn: string;
+  /** Column whose value is passed as `value`. Falls back to targetColumn if omitted. */
+  sourceColumn?: string;
+}
+
 function evaluateCondition(row: Record<string, unknown>, cond: MapRowsCondition): boolean {
   const cellVal = row[cond.column];
   const cellStr = String(cellVal ?? "").trim();
@@ -315,9 +323,23 @@ function evaluateCondition(row: Record<string, unknown>, cond: MapRowsCondition)
   }
 }
 
+function buildCustomTransformFn(expression: string): (value: unknown, row: Record<string, unknown>, columns: string[]) => unknown {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    return new Function("value", "row", "columns", `"use strict"; return (${expression});`) as (
+      value: unknown,
+      row: Record<string, unknown>,
+      columns: string[],
+    ) => unknown;
+  } catch {
+    return (value) => value;
+  }
+}
+
 export function applyMapRows(data: FileData, params: Record<string, unknown>): FileData {
   const rules = (params.rules ?? []) as MapRowsRule[];
   const lookups = (params.lookups ?? []) as MapRowsLookup[];
+  const customTransforms = (params.customTransforms ?? []) as MapRowsCustomTransform[];
   const newColumns = new Set(data.columns);
 
   for (const rule of rules) {
@@ -326,6 +348,14 @@ export function applyMapRows(data: FileData, params: Record<string, unknown>): F
   for (const lookup of lookups) {
     newColumns.add(lookup.targetColumn);
   }
+  for (const ct of customTransforms) {
+    newColumns.add(ct.targetColumn);
+  }
+
+  const compiledTransforms = customTransforms.map((ct) => ({
+    ...ct,
+    fn: buildCustomTransformFn(ct.expression),
+  }));
 
   const columns = [...newColumns];
   const rows = data.rows.map((row) => {
@@ -344,6 +374,15 @@ export function applyMapRows(data: FileData, params: Record<string, unknown>): F
     for (const lookup of lookups) {
       const key = String(row[lookup.sourceColumn] ?? "").trim();
       out[lookup.targetColumn] = lookup.lookupData[key] ?? lookup.defaultValue ?? "";
+    }
+
+    for (const ct of compiledTransforms) {
+      const sourceVal = ct.sourceColumn ? out[ct.sourceColumn] : out[ct.targetColumn];
+      try {
+        out[ct.targetColumn] = ct.fn(sourceVal, out, columns);
+      } catch {
+        // keep original value on error
+      }
     }
 
     return out;
