@@ -40,6 +40,7 @@ export interface SelectedDataSource {
 interface DataSourcePanelProps {
   selectedSources: SelectedDataSource[];
   onSelectionChange: (sources: SelectedDataSource[]) => void;
+  folderId?: string;
 }
 
 const DS_CACHE_KEY = "ds-panel-sources-cache";
@@ -86,6 +87,7 @@ function saveCachedTables(tables: Record<string, TableColumnInfo[]>) {
 export function DataSourcePanel({
   selectedSources,
   onSelectionChange,
+  folderId,
 }: DataSourcePanelProps) {
   const [dataSources, setDataSources] = useState<DataSourceInfo[]>(loadCachedSources);
   const [loading, setLoading] = useState(false);
@@ -98,7 +100,10 @@ export function DataSourcePanel({
   const fetchDataSources = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/data-sources");
+      const url = folderId
+        ? `/api/data-sources?folderId=${encodeURIComponent(folderId)}`
+        : "/api/data-sources";
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         const sources = (data.dataSources ?? []).map(
@@ -116,16 +121,32 @@ export function DataSourcePanel({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [folderId]);
+
+  const prevFolderIdRef = useRef(folderId);
 
   useEffect(() => {
+    const folderChanged = prevFolderIdRef.current !== folderId;
+    prevFolderIdRef.current = folderId;
+
+    if (folderChanged) {
+      initialFetchDone.current = false;
+      setTablesCache({});
+      saveCachedTables({});
+    }
+
     if (initialFetchDone.current) return;
     initialFetchDone.current = true;
-    const cached = loadCachedSources();
-    if (cached.length === 0) {
+
+    if (folderChanged) {
       fetchDataSources();
+    } else {
+      const cached = loadCachedSources();
+      if (cached.length === 0) {
+        fetchDataSources();
+      }
     }
-  }, [fetchDataSources]);
+  }, [fetchDataSources, folderId]);
 
   const fetchTablesForSource = useCallback(
     async (dsId: string, forceRefresh = false) => {
