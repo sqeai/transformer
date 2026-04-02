@@ -8,6 +8,7 @@ import {
   normalizeRowsForStorage,
   normalizeSqlType,
 } from "@/lib/dataset-type-normalizer";
+import { mapSqlType } from "@/lib/sql-type-mapper";
 
 type BigQueryConfigShape = {
   projectId?: string;
@@ -222,11 +223,15 @@ export async function POST(
       }
 
       if (!tableExists && createTable) {
-        const schema = columns.map((col) => ({
-          name: col.replace(/[^a-zA-Z0-9_]/g, "_"),
-          type: normalizeSqlType(fieldTypeMap[col]),
-          mode: "NULLABLE" as const,
-        }));
+        const schema = columns.map((col) => {
+          const standardType = normalizeSqlType(fieldTypeMap[col]);
+          const bqType = mapSqlType(standardType, "bigquery");
+          return {
+            name: col.replace(/[^a-zA-Z0-9_]/g, "_"),
+            type: bqType,
+            mode: "NULLABLE" as const,
+          };
+        });
         try {
           await datasetRef.createTable(bqTableName, { schema });
         } catch (err) {
@@ -302,7 +307,11 @@ export async function POST(
         const safeTable = targetTable.replace(/[^a-zA-Z0-9_]/g, "");
 
         if (createTable) {
-          const colDefs = columns.map((c) => `"${c.replace(/"/g, '""')}" TEXT`).join(", ");
+          const colDefs = columns.map((c) => {
+            const standardType = normalizeSqlType(fieldTypeMap[c]);
+            const pgType = mapSqlType(standardType, "postgres");
+            return `"${c.replace(/"/g, '""')}" ${pgType}`;
+          }).join(", ");
           await client.query(`CREATE TABLE IF NOT EXISTS "${safeSchema}"."${safeTable}" (${colDefs})`);
         }
 

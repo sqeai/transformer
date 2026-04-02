@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createConnector } from "@/lib/connectors";
 import type { DataSourceType } from "@/lib/connectors";
+import type { SqlCompatibleType } from "@/lib/types";
+import { mapSqlType } from "@/lib/sql-type-mapper";
 import {
   isDefaultBigQueryAvailable,
   DEFAULT_BQ_DATA_SOURCE_NAME,
@@ -190,7 +192,8 @@ export async function PUT(
           ? leafFields
               .map((f: Record<string, unknown>) => {
                 const colName = (f.name as string).replace(/[^a-zA-Z0-9_]/g, "_");
-                const colType = (f.data_type as string) || "STRING";
+                const standardType = ((f.data_type as string) || "STRING") as SqlCompatibleType;
+                const colType = mapSqlType(standardType, "bigquery");
                 return `${colName} ${colType}`;
               })
               .join(", ")
@@ -267,11 +270,13 @@ export async function PUT(
     );
 
     const connector = createConnector(ds.type as DataSourceType, ds.config as Record<string, unknown>);
+    const dbType = ds.type as DataSourceType;
     try {
       const colDefs = leafFields
         .map((f: Record<string, unknown>) => {
           const colName = (f.name as string).replace(/[^a-zA-Z0-9_]/g, "_");
-          const colType = (f.data_type as string) || "STRING";
+          const standardType = ((f.data_type as string) || "STRING") as SqlCompatibleType;
+          const colType = mapSqlType(standardType, dbType);
           return `${colName} ${colType}`;
         })
         .join(", ");

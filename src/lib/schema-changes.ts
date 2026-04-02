@@ -1,4 +1,5 @@
-import type { SchemaField } from "./types";
+import type { SchemaField, SqlCompatibleType } from "./types";
+import { mapSqlType } from "./sql-type-mapper";
 
 export interface SchemaChange {
   type: "add" | "remove" | "rename" | "type_change";
@@ -98,11 +99,14 @@ export function generateBigQueryDDL(
 
   for (const change of changes) {
     switch (change.type) {
-      case "add":
+      case "add": {
+        const standardType = (change.newDataType ?? "STRING") as SqlCompatibleType;
+        const bqType = mapSqlType(standardType, "bigquery");
         statements.push(
-          `ALTER TABLE ${fqn} ADD COLUMN ${change.columnName} ${change.newDataType ?? "STRING"}`,
+          `ALTER TABLE ${fqn} ADD COLUMN ${change.columnName} ${bqType}`,
         );
         break;
+      }
       case "remove":
         statements.push(
           `ALTER TABLE ${fqn} DROP COLUMN IF EXISTS ${change.columnName}`,
@@ -113,11 +117,14 @@ export function generateBigQueryDDL(
           `ALTER TABLE ${fqn} RENAME COLUMN ${change.columnName} TO ${change.newColumnName}`,
         );
         break;
-      case "type_change":
+      case "type_change": {
+        const standardType = (change.newDataType ?? "STRING") as SqlCompatibleType;
+        const bqType = mapSqlType(standardType, "bigquery");
         statements.push(
-          `ALTER TABLE ${fqn} ALTER COLUMN ${change.columnName} SET DATA TYPE ${change.newDataType ?? "STRING"}`,
+          `ALTER TABLE ${fqn} ALTER COLUMN ${change.columnName} SET DATA TYPE ${bqType}`,
         );
         break;
+      }
     }
   }
 
