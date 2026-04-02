@@ -45,15 +45,7 @@ export async function POST(request: NextRequest) {
     );
     if (!canManage) {
       return NextResponse.json(
-        { error: "Only admins and owners can create sub-folders" },
-        { status: 403 },
-      );
-    }
-  } else {
-    const isSuperadmin = await PermissionsService.isSuperadmin(result.user.id);
-    if (!isSuperadmin) {
-      return NextResponse.json(
-        { error: "Only superadmins can create root folders" },
+        { error: "You do not have permission to create sub-folders here" },
         { status: 403 },
       );
     }

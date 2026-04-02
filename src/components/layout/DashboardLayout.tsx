@@ -447,7 +447,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                       <FolderTree
                         folders={folders}
                         collapsed={collapsed}
-                        isSuperadmin={isSuperadmin}
                         onCreateFolder={handleCreateFolder}
                         onRenameFolder={handleRenameFolder}
                         onDeleteFolder={handleDeleteFolder}

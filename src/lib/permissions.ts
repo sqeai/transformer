@@ -36,6 +36,7 @@ const ROLE_PERMISSIONS: Record<FolderRole, Permission[]> = {
     "view_members",
     "edit_datasets",
     "edit_schemas",
+    "manage_folder",
   ],
   viewer: [
     "view_context",
@@ -46,6 +47,7 @@ const ROLE_PERMISSIONS: Record<FolderRole, Permission[]> = {
     "view_alerts",
     "view_members",
     "use_chat",
+    "manage_folder",
   ],
   editor: [
     "view_context",
@@ -62,6 +64,7 @@ const ROLE_PERMISSIONS: Record<FolderRole, Permission[]> = {
     "edit_schemas",
     "edit_panels",
     "edit_alerts",
+    "manage_folder",
   ],
   admin: [
     "view_context",
