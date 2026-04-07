@@ -83,18 +83,28 @@ export function UploadDatasetDialog({
   }, [open, defaultSchemaId, initialSchemaId]);
 
   const processFiles = useCallback(async (files: File[]) => {
+    const totalStart = performance.now();
+    console.log(`[processFiles] Starting to process ${files.length} file(s)`);
+
     setProcessingFiles(true);
     const entries: UploadedFileEntry[] = [];
     for (const file of files) {
+      const fileStart = performance.now();
       const name = file.name.toLowerCase();
+      console.log(`[processFiles] Processing file: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`);
+
       try {
+        const bufferStart = performance.now();
         const buffer = await file.arrayBuffer();
+        console.log(`[processFiles] file.arrayBuffer(): ${(performance.now() - bufferStart).toFixed(2)}ms`);
 
         if (isUnstructuredExtension(name)) {
           const unstructuredType = getUnstructuredFileType(name)!;
           let extractedText: string | undefined;
           if (unstructuredType === "txt") {
+            const decodeStart = performance.now();
             extractedText = new TextDecoder().decode(buffer);
+            console.log(`[processFiles] TextDecoder for txt: ${(performance.now() - decodeStart).toFixed(2)}ms`);
           }
           entries.push({
             fileId: crypto.randomUUID(),
@@ -104,6 +114,7 @@ export function UploadDatasetDialog({
             unstructuredType,
             extractedText,
           });
+          console.log(`[processFiles] Unstructured file processed: ${(performance.now() - fileStart).toFixed(2)}ms`);
         } else if (name.endsWith(".csv")) {
           entries.push({
             fileId: crypto.randomUUID(),
@@ -111,21 +122,29 @@ export function UploadDatasetDialog({
             buffer,
             worksheetNames: [file.name],
           });
+          console.log(`[processFiles] CSV file processed: ${(performance.now() - fileStart).toFixed(2)}ms`);
         } else if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+          const sheetNamesStart = performance.now();
           const worksheetNames = (await getExcelSheetNames(buffer)) ?? [file.name];
+          console.log(`[processFiles] getExcelSheetNames(): ${(performance.now() - sheetNamesStart).toFixed(2)}ms (found ${worksheetNames.length} sheets)`);
+
           entries.push({
             fileId: crypto.randomUUID(),
             fileName: file.name,
             buffer,
             worksheetNames,
           });
+          console.log(`[processFiles] Excel file processed: ${(performance.now() - fileStart).toFixed(2)}ms`);
         }
-      } catch {
+      } catch (err) {
+        console.error(`[processFiles] Error processing ${file.name}:`, err);
         // skip unreadable files
       }
     }
     setUploadedFiles((prev) => [...prev, ...entries]);
     setProcessingFiles(false);
+
+    console.log(`[processFiles] TOTAL TIME for ${files.length} file(s): ${(performance.now() - totalStart).toFixed(2)}ms`);
   }, []);
 
   const handleFileDrop = useCallback(

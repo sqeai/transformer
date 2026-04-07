@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 
 export interface WorkbookPreview {
   sheetName: string;
@@ -321,11 +322,21 @@ export async function extractWorkbookPreview(
 
 /**
  * Returns the list of sheet names in an Excel workbook.
+ * Uses xlsx (SheetJS) for fast parsing - only reads sheet names, not data.
  */
 export async function getExcelSheetNames(buffer: ArrayBuffer): Promise<string[]> {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
-  return workbook.worksheets.map((s) => s.name);
+  const t0 = performance.now();
+  console.log("[getExcelSheetNames] Starting with XLSX (SheetJS)...", { bufferSize: buffer.byteLength });
+
+  // Use xlsx with bookSheets option to only read sheet names (fastest)
+  const workbook = XLSX.read(buffer, { type: "array", bookSheets: true });
+  const t1 = performance.now();
+  console.log(`[getExcelSheetNames] XLSX.read() completed: ${(t1 - t0).toFixed(2)}ms`);
+
+  const names = workbook.SheetNames;
+  console.log(`[getExcelSheetNames] TOTAL TIME: ${(performance.now() - t0).toFixed(2)}ms (found ${names.length} sheets)`);
+
+  return names;
 }
 
 /**
@@ -378,6 +389,18 @@ export interface TopBottomBoundary {
  * Each entry in the returned `rows` array has an `originalIndex` (0-based)
  * and the cell `data`.
  */
+/**
+ * Converts xlsx cell value to string
+ */
+function xlsxCellToString(cell: XLSX.CellObject | undefined): string {
+  if (!cell) return "";
+  // Use formatted text if available, otherwise raw value
+  if (cell.w !== undefined) return String(cell.w).replace(/\r\n/g, "\n").trim();
+  if (cell.v === undefined || cell.v === null) return "";
+  if (cell.v instanceof Date) return cell.v.toISOString();
+  return String(cell.v).replace(/\r\n/g, "\n").trim();
+}
+
 export async function extractExcelGridTopBottom(
   buffer: ArrayBuffer,
   topN: number,
@@ -390,20 +413,36 @@ export async function extractExcelGridTopBottom(
   totalRows: number;
   totalColumns: number;
 }> {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
-  const sheet = workbook.worksheets[sheetIndex] ?? workbook.worksheets[0];
+  const t0 = performance.now();
+  console.log("[extractExcelGridTopBottom] Starting with XLSX (SheetJS)...", { bufferSize: buffer.byteLength, topN, bottomN, maxCols, sheetIndex });
+
+  // Use xlsx for fast parsing
+  const workbook = XLSX.read(buffer, { type: "array", cellStyles: false, cellFormula: false });
+  const t1 = performance.now();
+  console.log(`[extractExcelGridTopBottom] XLSX.read() completed: ${(t1 - t0).toFixed(2)}ms`);
+
+  const sheetName = workbook.SheetNames[sheetIndex] ?? workbook.SheetNames[0];
+  if (!sheetName) return { rows: [], totalRows: 0, totalColumns: 0 };
+
+  const sheet = workbook.Sheets[sheetName];
   if (!sheet) return { rows: [], totalRows: 0, totalColumns: 0 };
 
-  const totalRows = sheet.rowCount;
-  const totalColumns = sheet.columnCount;
+  const t2 = performance.now();
+
+  // Get sheet range
+  const range = XLSX.utils.decode_range(sheet["!ref"] || "A1");
+  const totalRows = range.e.r - range.s.r + 1;
+  const totalColumns = range.e.c - range.s.c + 1;
   const previewColumns = Math.min(totalColumns, maxCols);
 
+  console.log(`[extractExcelGridTopBottom] Sheet selected: ${(t2 - t1).toFixed(2)}ms`, { sheetName, totalRows, totalColumns });
+
   const readRow = (r0based: number): string[] => {
-    const row = sheet.getRow(r0based + 1);
     const cells: string[] = [];
-    for (let c = 1; c <= previewColumns; c++) {
-      cells.push(cellToString(row.getCell(c).value));
+    for (let c = 0; c < previewColumns; c++) {
+      const cellAddress = XLSX.utils.encode_cell({ r: r0based + range.s.r, c: c + range.s.c });
+      const cell = sheet[cellAddress] as XLSX.CellObject | undefined;
+      cells.push(xlsxCellToString(cell));
     }
     return cells;
   };
@@ -416,6 +455,8 @@ export async function extractExcelGridTopBottom(
     collected.add(idx);
     rows.push({ originalIndex: idx, data: readRow(idx) });
   };
+
+  const t3 = performance.now();
 
   if (boundary) {
     const hdr = boundary.headerRowIndex ?? 0;
@@ -439,7 +480,14 @@ export async function extractExcelGridTopBottom(
     for (let r = bottomStart; r < totalRows; r++) addRow(r);
   }
 
+  const t4 = performance.now();
+  console.log(`[extractExcelGridTopBottom] Rows read (${rows.length} rows): ${(t4 - t3).toFixed(2)}ms`);
+
   rows.sort((a, b) => a.originalIndex - b.originalIndex);
+
+  const t5 = performance.now();
+  console.log(`[extractExcelGridTopBottom] Rows sorted: ${(t5 - t4).toFixed(2)}ms`);
+  console.log(`[extractExcelGridTopBottom] TOTAL TIME: ${(t5 - t0).toFixed(2)}ms`);
 
   return { rows, totalRows, totalColumns };
 }

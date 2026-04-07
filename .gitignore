@@ -9,3 +9,4 @@ node_modules
 .terraform/
 *terraform.tfstate.backup
 .terraform.lock.hcl
+*.swp

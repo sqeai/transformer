@@ -290,11 +290,20 @@ function NewDatasetPageContent() {
     setPreviewLoading(true);
 
     (async () => {
+      const previewStartTime = performance.now();
+      console.log("[Preview] Starting preview load for:", file.fileName, { bufferSize: file.buffer.byteLength, previewTopRows, worksheetIndex: previewFile.worksheetIndex });
+
       try {
         const isCsv = file.fileName.toLowerCase().endsWith(".csv");
         if (isCsv) {
+          const csvDecodeStart = performance.now();
           const text = new TextDecoder().decode(file.buffer);
+          console.log(`[Preview] CSV decode: ${(performance.now() - csvDecodeStart).toFixed(2)}ms`);
+
+          const csvParseStart = performance.now();
           const parsed = parseCsvContent(text);
+          console.log(`[Preview] CSV parse: ${(performance.now() - csvParseStart).toFixed(2)}ms`);
+
           if (cancelled) return;
           const headerRow = parsed[0] ?? [];
           const columns = headerRow.map((h, i) => h.trim() || `Column ${i + 1}`);
@@ -305,18 +314,32 @@ function NewDatasetPageContent() {
             return row;
           });
           setPreview({ columns, rows, totalRows: parsed.length - 1, visibleRows: rows.length });
+          console.log(`[Preview] CSV TOTAL: ${(performance.now() - previewStartTime).toFixed(2)}ms`);
         } else {
+          const excelExtractStart = performance.now();
+          console.log("[Preview] Calling extractExcelGridTopBottom...");
           const result = await extractExcelGridTopBottom(file.buffer, previewTopRows, 0, 100, previewFile.worksheetIndex);
+          console.log(`[Preview] extractExcelGridTopBottom returned: ${(performance.now() - excelExtractStart).toFixed(2)}ms`);
+
           if (cancelled) return;
+
+          const columnsMapStart = performance.now();
           const columns = result.rows.length > 0 ? result.rows[0].data.map((_: string, i: number) => `Column ${i + 1}`) : [];
+          console.log(`[Preview] Columns mapped: ${(performance.now() - columnsMapStart).toFixed(2)}ms`);
+
+          const rowsMapStart = performance.now();
           const rows = result.rows.map((r: { originalIndex: number; data: string[] }) => {
             const row: Record<string, unknown> = {};
             r.data.forEach((cell: string, i: number) => { row[columns[i]] = cell; });
             return row;
           });
+          console.log(`[Preview] Rows mapped (${rows.length} rows): ${(performance.now() - rowsMapStart).toFixed(2)}ms`);
+
           setPreview({ columns, rows, totalRows: result.totalRows, visibleRows: rows.length });
+          console.log(`[Preview] Excel TOTAL: ${(performance.now() - previewStartTime).toFixed(2)}ms`);
         }
-      } catch {
+      } catch (err) {
+        console.error("[Preview] Error:", err);
         setPreview(null);
       } finally {
         if (!cancelled) setPreviewLoading(false);
