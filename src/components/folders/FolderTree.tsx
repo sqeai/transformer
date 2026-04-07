@@ -48,12 +48,15 @@ interface FolderTreeProps {
 }
 
 const FOLDER_SECTIONS = [
-  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
-  { key: "panels", label: "Panels", icon: LayoutDashboard, href: "/panels" },
   { key: "context", label: "Context", icon: FileText, href: "/context" },
   { key: "schemas", label: "Schemas", icon: FileStack, href: "/schemas" },
-  { key: "data-sources", label: "Data Sources", icon: Cable, href: "/data-sources" },
+];
+
+const OTHERS_SECTIONS = [
+  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
+  { key: "panels", label: "Panels", icon: LayoutDashboard, href: "/panels" },
   { key: "alerts", label: "Alerts", icon: Bell, href: "/alerts" },
+  { key: "data-sources", label: "Data Sources", icon: Cable, href: "/data-sources" },
 ];
 
 const DATA_ENGINEER_SECTIONS = new Set(["schemas"]);
@@ -192,6 +195,50 @@ function FolderNodeItem({
               </Link>
             );
           })}
+
+          {/* Others dropdown - only show if not data_engineer */}
+          {node.role !== "data_engineer" && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className={cn(
+                    "flex items-center gap-2 rounded-lg px-2 py-1 text-xs transition-colors w-full",
+                    OTHERS_SECTIONS.some(s => {
+                      const sPath = `${folderBasePath}${s.href}`;
+                      return pathname === sPath || pathname.startsWith(sPath + "/");
+                    })
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
+                  )}
+                  style={{ paddingLeft: `${(depth + 1) * 12 + 20}px` }}
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5 shrink-0" />
+                  Others
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="right">
+                {OTHERS_SECTIONS.map((section) => {
+                  const sectionPath = `${folderBasePath}${section.href}`;
+                  const isSectionActive =
+                    pathname === sectionPath || pathname.startsWith(sectionPath + "/");
+                  return (
+                    <DropdownMenuItem key={section.key} asChild>
+                      <Link
+                        href={sectionPath}
+                        className={cn(
+                          "flex items-center gap-2",
+                          isSectionActive && "bg-accent"
+                        )}
+                      >
+                        <section.icon className="h-4 w-4" />
+                        {section.label}
+                      </Link>
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
 
           {node.children.map((child) => (
             <FolderNodeItem
