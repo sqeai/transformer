@@ -25,17 +25,16 @@ function coerceBigQueryInteger(value: unknown): number | null {
   return Number.isFinite(num) ? Math.trunc(num) : null;
 }
 
-function coerceBigQueryNumeric(value: unknown): string | null {
+function coerceBigQueryNumeric(value: unknown): number | null {
   if (value === null || value === undefined) return null;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
   const normalized = String(value).replace(/,/g, "").trim();
   if (!normalized) return null;
   if (!/^[-+]?(?:\d+\.?\d*|\.\d+)$/.test(normalized)) return null;
-
-  const sign = normalized.startsWith("-") ? "-" : "";
-  const unsigned = normalized.replace(/^[-+]/, "");
-  const integerPart = unsigned.split(".")[0] || "0";
-  const collapsed = integerPart.replace(/^0+(?=\d)/, "");
-  return `${sign}${collapsed || "0"}`;
+  const num = parseFloat(normalized);
+  return Number.isFinite(num) ? num : null;
 }
 
 export interface MergeResult {
@@ -160,10 +159,10 @@ export async function mergeDatasetToDataSource(
           for (const col of columns) {
             const type = fieldTypeMap[col] ?? "STRING";
             let value = coerceForStorage(row[col], type);
-            // For BigQuery, ensure proper type coercion
+            // For BigQuery, ensure proper type coercion for numeric types
             if (type === "INTEGER") {
               value = coerceBigQueryInteger(value);
-            } else if (type === "NUMERIC") {
+            } else if (type === "NUMERIC" || type === "FLOAT") {
               value = coerceBigQueryNumeric(value);
             }
             clean[col.replace(/[^a-zA-Z0-9_]/g, "_")] = value;

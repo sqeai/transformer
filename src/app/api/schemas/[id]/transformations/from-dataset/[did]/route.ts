@@ -15,7 +15,7 @@ interface TransformationRow {
   updated_at: string;
 }
 
-interface TransformationMapping {
+interface TransformationMappingEntry {
   step: number;
   tool: string;
   params: Record<string, unknown>;
@@ -37,14 +37,27 @@ function rowToTransformation(row: TransformationRow): SchemaTransformation {
   };
 }
 
-function extractStepsFromMapping(mappings: TransformationMapping[]): SchemaTransformationStep[] {
-  return mappings.map((m, index) => ({
+function extractStepsFromTransformations(
+  transformations: TransformationMappingEntry[][][]
+): SchemaTransformationStep[] {
+  // transformations is: files[] → iterations[] → steps[]
+  // Take the last iteration from the first file (most complete transformation)
+  if (!transformations.length) return [];
+
+  const firstFileIterations = transformations[0];
+  if (!firstFileIterations?.length) return [];
+
+  // Use the last iteration as it's typically the most complete
+  const lastIteration = firstFileIterations[firstFileIterations.length - 1];
+  if (!lastIteration?.length) return [];
+
+  return lastIteration.map((entry, index) => ({
     id: randomUUID(),
     order: index,
-    tool: m.tool,
-    params: m.params,
-    phase: m.phase,
-    reasoning: m.reasoning,
+    tool: entry.tool,
+    params: entry.params,
+    phase: entry.phase,
+    reasoning: entry.reasoning,
   }));
 }
 
@@ -92,11 +105,14 @@ export async function POST(
     return NextResponse.json({ error: "Dataset does not belong to this schema" }, { status: 400 });
   }
 
-  // Extract mapping from snapshot
-  const mappingSnapshot = dataset.mapping_snapshot as { mapping?: TransformationMapping[] } | null;
-  const mappings = mappingSnapshot?.mapping ?? [];
+  // Extract transformations from snapshot
+  const mappingSnapshot = dataset.mapping_snapshot as {
+    transformations?: TransformationMappingEntry[][][]
+  } | null;
+  const transformations = mappingSnapshot?.transformations ?? [];
 
-  if (mappings.length === 0) {
+  const steps = extractStepsFromTransformations(transformations);
+  if (steps.length === 0) {
     return NextResponse.json({ error: "Dataset has no transformation mappings" }, { status: 400 });
   }
 
@@ -109,7 +125,6 @@ export async function POST(
   }
 
   const name = body.name?.trim() || `From: ${dataset.name}`;
-  const steps = extractStepsFromMapping(mappings);
 
   // If setting as default, unset any existing default
   if (body.isDefault) {

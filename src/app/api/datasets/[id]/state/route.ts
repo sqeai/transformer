@@ -2,6 +2,40 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { mergeDatasetToDataSource } from "@/lib/dataset-merge";
+import { randomUUID } from "crypto";
+import type { SchemaTransformationStep } from "@/lib/types";
+
+interface TransformationMappingEntry {
+  step: number;
+  tool: string;
+  params: Record<string, unknown>;
+  phase: "cleansing" | "transformation";
+  reasoning?: string;
+}
+
+function extractStepsFromTransformations(
+  transformations: TransformationMappingEntry[][][]
+): SchemaTransformationStep[] {
+  // transformations is: files[] → iterations[] → steps[]
+  // Take the last iteration from the first file (most complete transformation)
+  if (!transformations.length) return [];
+
+  const firstFileIterations = transformations[0];
+  if (!firstFileIterations?.length) return [];
+
+  // Use the last iteration as it's typically the most complete
+  const lastIteration = firstFileIterations[firstFileIterations.length - 1];
+  if (!lastIteration?.length) return [];
+
+  return lastIteration.map((entry, index) => ({
+    id: randomUUID(),
+    order: index,
+    tool: entry.tool,
+    params: entry.params,
+    phase: entry.phase,
+    reasoning: entry.reasoning,
+  }));
+}
 
 const VALID_STATES = ["draft", "pending_approval", "approved", "rejected", "completed"] as const;
 
@@ -125,6 +159,48 @@ export async function PATCH(
 
     if (updateError) {
       return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
+
+    // Auto-populate default transformation if none exists
+    try {
+      const { data: existingDefault } = await admin
+        .from("schema_transformations")
+        .select("id")
+        .eq("schema_id", schemaId)
+        .eq("is_default", true)
+        .maybeSingle();
+
+      if (!existingDefault) {
+        // Fetch the dataset's mapping_snapshot
+        const { data: datasetWithSnapshot } = await admin
+          .from("datasets")
+          .select("name, mapping_snapshot")
+          .eq("id", id)
+          .single();
+
+        if (datasetWithSnapshot) {
+          const mappingSnapshot = datasetWithSnapshot.mapping_snapshot as {
+            transformations?: TransformationMappingEntry[][][]
+          } | null;
+          const transformations = mappingSnapshot?.transformations ?? [];
+
+          if (transformations.length > 0) {
+            const steps = extractStepsFromTransformations(transformations);
+            if (steps.length > 0) {
+              await admin.from("schema_transformations").insert({
+                schema_id: schemaId,
+                name: "Default Pipeline",
+                description: `Auto-created from dataset: ${datasetWithSnapshot.name}`,
+                is_default: true,
+                steps,
+                source_dataset_id: id,
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // Non-critical: don't fail the completion if auto-populate fails
     }
 
     return NextResponse.json({
