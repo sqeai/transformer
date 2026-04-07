@@ -33,7 +33,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import Link from "next/link";
-import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 import { flattenFields, useSchemaStore, type UploadedFileEntry, type TransformationMappingEntry } from "@/lib/schema-store";
 import {
   DropdownMenu,
@@ -398,11 +398,17 @@ export default function DatasetPage() {
     setExporting(format);
     try {
       if (format === "excel") {
-        const workbook = new ExcelJS.Workbook();
-        const sheet = workbook.addWorksheet("Data");
-        sheet.addRow(columns);
-        for (const row of dataset.rows) sheet.addRow(columns.map((c) => (row as Record<string, unknown>)[c] ?? ""));
-        const buffer = await workbook.xlsx.writeBuffer();
+        // Build sheet data as array of arrays
+        const sheetData: unknown[][] = [columns];
+        for (const row of dataset.rows) {
+          sheetData.push(columns.map((c) => (row as Record<string, unknown>)[c] ?? ""));
+        }
+
+        const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Data");
+
+        const buffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
         const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");

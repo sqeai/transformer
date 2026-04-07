@@ -14,7 +14,7 @@ import {
 import { extractExcelGridTopBottom } from "@/lib/parse-excel-preview";
 import { parseExcelToRows } from "@/lib/parse-excel";
 import { parseCsvContent } from "@/lib/utils/csv";
-import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 import { StepIndicator, STEPS, type Step } from "@/components/datasets/StepIndicator";
 import { UploadStep } from "@/components/datasets/UploadStep";
 import { ProcessingStep } from "@/components/datasets/ProcessingStep";
@@ -404,8 +404,11 @@ function NewDatasetPageContent() {
     const jobIds = initialResults.filter((r) => r.jobId).map((r) => r.jobId);
     if (jobIds.length === 0) return;
 
+    console.log("[startPolling] Starting polling for jobs:", jobIds);
+
     pollingRef.current = setInterval(async () => {
       try {
+        const pollStart = performance.now();
         const res = await fetch(`/api/jobs?ids=${jobIds.join(",")}`);
         const data = await res.json();
         if (!res.ok) return;
@@ -413,11 +416,18 @@ function NewDatasetPageContent() {
         const jobMap = new Map<string, { status: string; result?: unknown; error?: string; created_at?: string; started_at?: string; completed_at?: string }>();
         for (const job of data.jobs ?? []) jobMap.set(job.id, job);
 
+        // Log status changes
+        const statusSummary = Array.from(jobMap.entries()).map(([id, job]) => ({ id: id.slice(0, 8), status: job.status }));
+        console.log(`[polling] Job statuses (${(performance.now() - pollStart).toFixed(0)}ms):`, statusSummary);
+
         setJobResults((prev) => {
           const updated = prev.map((r) => {
             const job = jobMap.get(r.jobId);
             if (!job) return r;
             const nextStatus = job.status as FileJobResult["status"];
+            if (r.status !== nextStatus) {
+              console.log(`[polling] Job ${r.jobId.slice(0, 8)} status changed: ${r.status} -> ${nextStatus}`);
+            }
             const merged = mergeJobResultWithIterationHistory(r, job.result as FileJobResult["result"] | undefined, nextStatus, r.jobId);
             return {
               ...r,
@@ -433,6 +443,7 @@ function NewDatasetPageContent() {
 
           const allDone = updated.every((r) => r.status === "completed" || r.status === "failed" || !r.jobId);
           if (allDone) {
+            console.log("[polling] All jobs completed, stopping polling");
             if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
             if (updated.some((r) => r.status === "pending")) {
               fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
@@ -447,14 +458,23 @@ function NewDatasetPageContent() {
   }, []);
 
   const submitJobs = useCallback(async () => {
+    const submitStartTime = performance.now();
+    console.log("[submitJobs] Starting job submission...", { schemaId, selectedFilesCount: selectedFiles.length });
+
     if (!schemaId || selectedFiles.length === 0) return;
     setStep("processing");
+    console.log("[submitJobs] Step changed to 'processing'", { elapsed: `${(performance.now() - submitStartTime).toFixed(2)}ms` });
+
     const results: FileJobResult[] = [];
     const nextUploadedRefs: Record<string, UploadedFileRef> = {};
 
     for (const selection of selectedFiles) {
+      const fileStartTime = performance.now();
       const file = files.find((f) => f.fileId === selection.fileId);
       if (!file) continue;
+
+      console.log(`[submitJobs] Processing file: ${selection.worksheetName}`, { fileId: selection.fileId, worksheetIndex: selection.worksheetIndex });
+
       try {
         let uploaded: UploadedFileRef;
         let unstructuredMimeType: string | undefined;
@@ -463,6 +483,7 @@ function NewDatasetPageContent() {
           const mimeType = getMimeTypeForUnstructured(file.unstructuredType);
           unstructuredMimeType = mimeType;
 
+          const presignStart = performance.now();
           const presignRes = await fetch("/api/files/presign", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -475,17 +496,21 @@ function NewDatasetPageContent() {
             }),
           });
           const presignData = await presignRes.json();
+          console.log(`[submitJobs] Presign request completed: ${(performance.now() - presignStart).toFixed(2)}ms`);
           if (!presignRes.ok) throw new Error(presignData.error ?? "Failed to request upload URL");
 
+          const uploadStart = performance.now();
           const uploadRes = await fetch(String(presignData.uploadUrl), {
             method: "PUT",
             headers: { "Content-Type": mimeType },
             body: new Uint8Array(file.buffer),
           });
+          console.log(`[submitJobs] S3 upload completed: ${(performance.now() - uploadStart).toFixed(2)}ms`);
           if (!uploadRes.ok) throw new Error("Failed to upload file to S3");
 
           uploaded = { fileId: String(presignData.fileId), filePath: String(presignData.filePath) };
         } else if (file.fileName.toLowerCase().endsWith(".csv")) {
+          const parseStart = performance.now();
           const text = new TextDecoder().decode(file.buffer);
           const csvParsed = parseCsvContent(text);
           const headerRow = csvParsed[0] ?? [];
@@ -495,10 +520,19 @@ function NewDatasetPageContent() {
             csvColumns.forEach((col, i) => { row[col] = r[i] ?? ""; });
             return row;
           });
+          console.log(`[submitJobs] CSV parsed: ${(performance.now() - parseStart).toFixed(2)}ms`, { rows: csvRows.length, columns: csvColumns.length });
+
+          const uploadStart = performance.now();
           uploaded = await uploadFileCsv({ fileName: selection.worksheetName, columns: csvColumns, rows: csvRows, type: "raw" });
+          console.log(`[submitJobs] CSV uploaded: ${(performance.now() - uploadStart).toFixed(2)}ms`);
         } else {
+          const parseStart = performance.now();
           const parsed = await parseExcelToRows(file.buffer, { headerRowIndex: 0, dataStartRowIndex: 1, sheetIndex: selection.worksheetIndex });
+          console.log(`[submitJobs] Excel parsed: ${(performance.now() - parseStart).toFixed(2)}ms`, { rows: parsed.rows.length, columns: parsed.columns.length });
+
+          const uploadStart = performance.now();
           uploaded = await uploadFileCsv({ fileName: selection.worksheetName, columns: parsed.columns, rows: parsed.rows, type: "raw" });
+          console.log(`[submitJobs] Excel uploaded: ${(performance.now() - uploadStart).toFixed(2)}ms`);
         }
 
         nextUploadedRefs[`${selection.fileId}:${selection.worksheetIndex}`] = uploaded;
@@ -518,23 +552,29 @@ function NewDatasetPageContent() {
           jobPayload.unstructuredMimeType = unstructuredMimeType;
         }
 
+        const jobCreateStart = performance.now();
         const res = await fetch("/api/jobs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ type: "data_cleanse", fileId: uploaded.fileId, payload: jobPayload }),
         });
         const data = await res.json();
+        console.log(`[submitJobs] Job created: ${(performance.now() - jobCreateStart).toFixed(2)}ms`, { jobId: data.jobId });
         if (!res.ok) throw new Error(data.error ?? "Failed to create job");
         results.push({ jobId: data.jobId, file: selection, status: "pending" });
+        console.log(`[submitJobs] File processed: ${(performance.now() - fileStartTime).toFixed(2)}ms total for ${selection.worksheetName}`);
       } catch (err) {
+        console.error(`[submitJobs] Error processing ${selection.worksheetName}:`, err);
         results.push({ jobId: "", file: selection, status: "failed", error: err instanceof Error ? err.message : "Failed to create job" });
       }
     }
 
     setUploadedFileRefs((prev) => ({ ...prev, ...nextUploadedRefs }));
     setJobResults(results);
+    console.log("[submitJobs] Triggering job processor...");
     fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
     startPolling(results);
+    console.log(`[submitJobs] TOTAL TIME: ${(performance.now() - submitStartTime).toFixed(2)}ms`, { jobsCreated: results.filter(r => r.jobId).length, jobsFailed: results.filter(r => !r.jobId).length });
 
     // Save directives as schema memory for future processing
     const globalDirective = globalAiInstructions.trim();
@@ -787,11 +827,18 @@ function NewDatasetPageContent() {
       for (const r of exportableResults) {
         if (r.result?.transformedRows) allRows.push(...r.result.transformedRows);
       }
-      const workbook = new ExcelJS.Workbook();
-      const sheet = workbook.addWorksheet("Data");
-      sheet.addRow(allCols);
-      for (const row of allRows) sheet.addRow(allCols.map((c) => row[c] ?? ""));
-      const buffer = await workbook.xlsx.writeBuffer();
+
+      // Build sheet data as array of arrays
+      const sheetData: unknown[][] = [allCols];
+      for (const row of allRows) {
+        sheetData.push(allCols.map((c) => row[c] ?? ""));
+      }
+
+      const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Data");
+
+      const buffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
       const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

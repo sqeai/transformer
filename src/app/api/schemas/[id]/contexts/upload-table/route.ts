@@ -8,24 +8,14 @@ import {
   ensureDefaultBqDataSource,
 } from "@/lib/connectors/default-bigquery";
 import { BigQuery } from "@google-cloud/bigquery";
-import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 
-function cellToString(value: ExcelJS.CellValue): string {
-  if (value == null) return "";
-  if (typeof value === "string") return value.trim();
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (value instanceof Date) return value.toISOString();
-  if (typeof value === "object") {
-    if ("richText" in value) {
-      return (value as ExcelJS.CellRichTextValue).richText.map((s) => s.text).join("").trim();
-    }
-    if ("text" in value) return String((value as { text: string }).text).trim();
-    if ("result" in value) {
-      const r = (value as { result: unknown }).result;
-      return r != null ? String(r).trim() : "";
-    }
-  }
-  return String(value).trim();
+function xlsxCellToString(cell: XLSX.CellObject | undefined): string {
+  if (!cell) return "";
+  if (cell.w !== undefined) return String(cell.w).trim();
+  if (cell.v === undefined || cell.v === null) return "";
+  if (cell.v instanceof Date) return cell.v.toISOString();
+  return String(cell.v).trim();
 }
 
 function toSnakeCase(value: string): string {
@@ -93,29 +83,38 @@ export async function POST(
       headers = lines[0] ?? [];
       dataRows = lines.slice(1);
     } else if (ext === "xlsx" || ext === "xls") {
-      const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(buffer);
-      const sheet = workbook.worksheets[sheetIndex] ?? workbook.worksheets[0];
-      if (!sheet) {
+      const workbook = XLSX.read(buffer, { type: "array", cellStyles: false, cellFormula: false });
+      const sheetName = workbook.SheetNames[sheetIndex] ?? workbook.SheetNames[0];
+      if (!sheetName) {
         return NextResponse.json({ error: "No worksheet found" }, { status: 400 });
       }
 
-      const totalRows = sheet.rowCount;
-      const totalCols = Math.min(sheet.columnCount, 200);
+      const sheet = workbook.Sheets[sheetName];
+      if (!sheet || !sheet["!ref"]) {
+        return NextResponse.json({ error: "Empty worksheet" }, { status: 400 });
+      }
 
-      const headerRow = sheet.getRow(1);
-      for (let c = 1; c <= totalCols; c++) {
-        const val = cellToString(headerRow.getCell(c).value);
+      const range = XLSX.utils.decode_range(sheet["!ref"]);
+      const totalRows = range.e.r - range.s.r + 1;
+      const totalCols = Math.min(range.e.c - range.s.c + 1, 200);
+
+      // Read header row (row 0)
+      for (let c = 0; c < totalCols; c++) {
+        const cellAddress = XLSX.utils.encode_cell({ r: range.s.r, c: c + range.s.c });
+        const cell = sheet[cellAddress] as XLSX.CellObject | undefined;
+        const val = xlsxCellToString(cell);
         if (val) headers.push(val);
         else break;
       }
 
       const colCount = headers.length;
-      for (let r = 2; r <= totalRows; r++) {
-        const row = sheet.getRow(r);
+      // Read data rows (starting from row 1)
+      for (let r = 1; r < totalRows; r++) {
         const cells: string[] = [];
-        for (let c = 1; c <= colCount; c++) {
-          cells.push(cellToString(row.getCell(c).value));
+        for (let c = 0; c < colCount; c++) {
+          const cellAddress = XLSX.utils.encode_cell({ r: r + range.s.r, c: c + range.s.c });
+          const cell = sheet[cellAddress] as XLSX.CellObject | undefined;
+          cells.push(xlsxCellToString(cell));
         }
         if (cells.some((c) => c.length > 0)) {
           dataRows.push(cells);

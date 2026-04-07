@@ -1,4 +1,3 @@
-import ExcelJS from "exceljs";
 import * as XLSX from "xlsx";
 
 export interface WorkbookPreview {
@@ -18,52 +17,16 @@ const MAX_RAW_PREVIEW_ROWS = 30;
  */
 const MAX_COLUMNS = 200;
 
-function stringifyUnknownCellObject(value: object): string {
-  try {
-    const json = JSON.stringify(value);
-    if (json && json !== "{}") return json;
-  } catch {
-    // Fall through to avoid returning "[object Object]".
-  }
-  return "";
-}
-
-function cellToString(value: ExcelJS.CellValue): string {
-  let raw: string;
-  if (value == null) return "";
-  if (typeof value === "string") {
-    raw = value;
-  } else if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  } else if (value instanceof Date) {
-    return value.toISOString();
-  } else if (typeof value === "object") {
-    if ("richText" in value) {
-      raw = (value as ExcelJS.CellRichTextValue).richText
-        .map((seg) => seg.text)
-        .join("");
-    } else if ("text" in value) {
-      raw = String((value as { text: string }).text);
-    } else if ("result" in value) {
-      const r = (value as { result: unknown }).result;
-      if (typeof r === "string") {
-        raw = r;
-      } else if (typeof r === "number" || typeof r === "boolean") {
-        raw = String(r);
-      } else if (r instanceof Date) {
-        raw = r.toISOString();
-      } else if (r && typeof r === "object") {
-        raw = stringifyUnknownCellObject(r);
-      } else {
-        raw = r != null ? String(r) : "";
-      }
-    } else {
-      raw = stringifyUnknownCellObject(value);
-    }
-  } else {
-    raw = String(value);
-  }
-  return raw.replace(/\r\n/g, "\n").trim();
+/**
+ * Converts xlsx cell value to string
+ */
+function xlsxCellToString(cell: XLSX.CellObject | undefined): string {
+  if (!cell) return "";
+  // Use formatted text if available, otherwise raw value
+  if (cell.w !== undefined) return String(cell.w).replace(/\r\n/g, "\n").trim();
+  if (cell.v === undefined || cell.v === null) return "";
+  if (cell.v instanceof Date) return cell.v.toISOString();
+  return String(cell.v).replace(/\r\n/g, "\n").trim();
 }
 
 /**
@@ -91,6 +54,40 @@ export interface ExtractOptions {
   useAllRows?: boolean;
 }
 
+interface SheetInfo {
+  sheet: XLSX.WorkSheet;
+  sheetName: string;
+  range: XLSX.Range;
+  totalRows: number;
+  totalCols: number;
+}
+
+/**
+ * Helper to get sheet info from a workbook
+ */
+function getSheetInfo(workbook: XLSX.WorkBook, sheetIndex: number): SheetInfo | null {
+  const sheetName = workbook.SheetNames[sheetIndex] ?? workbook.SheetNames[0];
+  if (!sheetName) return null;
+
+  const sheet = workbook.Sheets[sheetName];
+  if (!sheet) return null;
+
+  const range = XLSX.utils.decode_range(sheet["!ref"] || "A1");
+  const totalRows = range.e.r - range.s.r + 1;
+  const totalCols = range.e.c - range.s.c + 1;
+
+  return { sheet, sheetName, range, totalRows, totalCols };
+}
+
+/**
+ * Helper to read a cell value from xlsx sheet
+ */
+function readCell(sheet: XLSX.WorkSheet, row: number, col: number, range: XLSX.Range): string {
+  const cellAddress = XLSX.utils.encode_cell({ r: row + range.s.r, c: col + range.s.c });
+  const cell = sheet[cellAddress] as XLSX.CellObject | undefined;
+  return xlsxCellToString(cell);
+}
+
 /**
  * Detects the largest continuous rectangular table region within a sheet.
  * Scans for the densest block of non-empty cells, trimming surrounding
@@ -98,25 +95,24 @@ export interface ExtractOptions {
  *
  * Returns 1-based { startRow, endRow, startCol, endCol }.
  */
-function detectTableBounds(sheet: ExcelJS.Worksheet): {
+function detectTableBounds(info: SheetInfo): {
   startRow: number;
   endRow: number;
   startCol: number;
   endCol: number;
 } {
-  const totalRows = Math.min(sheet.rowCount, 500);
-  const totalCols = Math.min(sheet.columnCount, MAX_COLUMNS);
+  const totalRows = Math.min(info.totalRows, 500);
+  const totalCols = Math.min(info.totalCols, MAX_COLUMNS);
 
   if (totalRows === 0 || totalCols === 0) {
     return { startRow: 1, endRow: 1, startCol: 1, endCol: 1 };
   }
 
   const grid: boolean[][] = [];
-  for (let r = 1; r <= totalRows; r++) {
-    const row = sheet.getRow(r);
+  for (let r = 0; r < totalRows; r++) {
     const rowFlags: boolean[] = [];
-    for (let c = 1; c <= totalCols; c++) {
-      const val = cellToString(row.getCell(c).value);
+    for (let c = 0; c < totalCols; c++) {
+      const val = readCell(info.sheet, r, c, info.range);
       rowFlags.push(val.length > 0);
     }
     grid.push(rowFlags);
@@ -237,33 +233,39 @@ export async function extractWorkbookPreview(
   buffer: ArrayBuffer,
   options?: ExtractOptions,
 ): Promise<WorkbookPreview> {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
+  const workbook = XLSX.read(buffer, { type: "array", cellStyles: false, cellFormula: false });
   const sheetIndex = options?.sheetIndex ?? 0;
-  const sheet = workbook.worksheets[sheetIndex] ?? workbook.worksheets[0];
-  if (!sheet) {
+  const info = getSheetInfo(workbook, sheetIndex);
+
+  if (!info) {
     return { sheetName: "", headers: [], sampleRows: [], totalRows: 0, totalColumns: 0 };
   }
 
-  const bounds = detectTableBounds(sheet);
+  const bounds = detectTableBounds(info);
   const { startRow, endRow, startCol, endCol } = bounds;
   const tableCols = endCol - startCol + 1;
+
+  // Helper to read a row within bounds (1-based row/col from bounds)
+  const readBoundedRow = (r1based: number): string[] => {
+    const values: string[] = [];
+    for (let c = startCol; c <= endCol; c++) {
+      // Convert 1-based to 0-based for readCell
+      values.push(readCell(info.sheet, r1based - 1, c - 1, info.range));
+    }
+    return values;
+  };
 
   if (options?.useAllRows) {
     const rowCount = Math.min(endRow - startRow + 1, MAX_RAW_PREVIEW_ROWS);
 
     const sampleRows: string[][] = [];
     for (let r = startRow; r < startRow + rowCount; r++) {
-      const row = sheet.getRow(r);
-      const values: string[] = [];
-      for (let c = startCol; c <= endCol; c++) {
-        values.push(collapseMultiline(cellToString(row.getCell(c).value)));
-      }
+      const values = readBoundedRow(r).map(collapseMultiline);
       sampleRows.push(values);
     }
 
     return {
-      sheetName: sheet.name,
+      sheetName: info.sheetName,
       headers: [],
       sampleRows,
       totalRows: endRow - startRow + 1,
@@ -271,11 +273,7 @@ export async function extractWorkbookPreview(
     };
   }
 
-  const headerRow = sheet.getRow(startRow);
-  const rawHeaders: string[] = [];
-  for (let c = startCol; c <= endCol; c++) {
-    rawHeaders.push(cellToString(headerRow.getCell(c).value));
-  }
+  const rawHeaders = readBoundedRow(startRow);
 
   const nonEmptyColIndices: number[] = [];
   for (let i = 0; i < rawHeaders.length; i++) {
@@ -286,7 +284,7 @@ export async function extractWorkbookPreview(
 
   if (nonEmptyColIndices.length === 0) {
     return {
-      sheetName: sheet.name,
+      sheetName: info.sheetName,
       headers: [],
       sampleRows: [],
       totalRows: Math.max(0, endRow - startRow),
@@ -301,10 +299,8 @@ export async function extractWorkbookPreview(
 
   const sampleRows: string[][] = [];
   for (let r = startRow + 1; r <= startRow + sampleCount; r++) {
-    const row = sheet.getRow(r);
-    const values = nonEmptyColIndices.map((colIdx) =>
-      cellToString(row.getCell(startCol + colIdx).value),
-    );
+    const fullRow = readBoundedRow(r);
+    const values = nonEmptyColIndices.map((colIdx) => fullRow[colIdx]);
     const allEmpty = values.every((v) => v === "");
     if (!allEmpty) {
       sampleRows.push(values);
@@ -312,7 +308,7 @@ export async function extractWorkbookPreview(
   }
 
   return {
-    sheetName: sheet.name,
+    sheetName: info.sheetName,
     headers,
     sampleRows,
     totalRows: dataRowCount,
@@ -340,6 +336,74 @@ export async function getExcelSheetNames(buffer: ArrayBuffer): Promise<string[]>
 }
 
 /**
+ * Gets lightweight metadata from an Excel file without loading all data.
+ */
+export async function getExcelMetadata(
+  buffer: ArrayBuffer,
+  sheetIndex = 0,
+): Promise<{
+  sheets: Array<{ name: string; rowCount: number; columnCount: number }>;
+  activeSheet: { name: string; rowCount: number; columnCount: number };
+}> {
+  const workbook = XLSX.read(buffer, { type: "array", cellStyles: false, cellFormula: false });
+
+  const sheets = workbook.SheetNames.map((name) => {
+    const sheet = workbook.Sheets[name];
+    if (!sheet || !sheet["!ref"]) {
+      return { name, rowCount: 0, columnCount: 0 };
+    }
+    const range = XLSX.utils.decode_range(sheet["!ref"]);
+    return {
+      name,
+      rowCount: range.e.r - range.s.r + 1,
+      columnCount: range.e.c - range.s.c + 1,
+    };
+  });
+
+  const activeSheet = sheets[sheetIndex] ?? sheets[0] ?? { name: "", rowCount: 0, columnCount: 0 };
+
+  return { sheets, activeSheet };
+}
+
+/**
+ * Loads a specific page of rows from an Excel sheet.
+ * Optimized for pagination - only loads the requested rows.
+ * Skips fully empty rows automatically.
+ */
+export async function getExcelPagedRows(
+  buffer: ArrayBuffer,
+  sheetIndex: number,
+  startRow: number,
+  pageSize: number,
+  maxCols = 60,
+): Promise<{ rows: string[][]; hasMore: boolean }> {
+  const workbook = XLSX.read(buffer, { type: "array", cellStyles: false, cellFormula: false });
+  const info = getSheetInfo(workbook, sheetIndex);
+  if (!info) return { rows: [], hasMore: false };
+
+  const colCount = Math.min(info.totalCols, maxCols);
+  const endRow = Math.min(startRow + pageSize, info.totalRows);
+
+  const rows: string[][] = [];
+  for (let r = startRow; r < endRow; r++) {
+    const cells: string[] = [];
+    for (let c = 0; c < colCount; c++) {
+      cells.push(readCell(info.sheet, r, c, info.range));
+    }
+    // Skip fully empty rows
+    const hasValue = cells.some((cell) => cell.trim().length > 0);
+    if (hasValue) {
+      rows.push(cells);
+    }
+  }
+
+  return {
+    rows,
+    hasMore: endRow < info.totalRows,
+  };
+}
+
+/**
  * Extracts a raw grid (array of string arrays) from an Excel buffer
  * for client-side preview. Returns up to `maxRows` rows and `maxCols` columns.
  * @param sheetIndex 0-based index of the sheet to extract (default 0).
@@ -350,25 +414,23 @@ export async function extractExcelGrid(
   maxCols = 60,
   sheetIndex = 0,
 ): Promise<{ grid: string[][]; totalRows: number; totalColumns: number }> {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
-  const sheet = workbook.worksheets[sheetIndex] ?? workbook.worksheets[0];
-  if (!sheet) return { grid: [], totalRows: 0, totalColumns: 0 };
+  const workbook = XLSX.read(buffer, { type: "array", cellStyles: false, cellFormula: false });
+  const info = getSheetInfo(workbook, sheetIndex);
+  if (!info) return { grid: [], totalRows: 0, totalColumns: 0 };
 
-  const rowCount = Math.min(sheet.rowCount, maxRows);
-  const colCount = Math.min(sheet.columnCount, maxCols);
+  const rowCount = Math.min(info.totalRows, maxRows);
+  const colCount = Math.min(info.totalCols, maxCols);
 
   const grid: string[][] = [];
-  for (let r = 1; r <= rowCount; r++) {
-    const row = sheet.getRow(r);
+  for (let r = 0; r < rowCount; r++) {
     const cells: string[] = [];
-    for (let c = 1; c <= colCount; c++) {
-      cells.push(cellToString(row.getCell(c).value));
+    for (let c = 0; c < colCount; c++) {
+      cells.push(readCell(info.sheet, r, c, info.range));
     }
     grid.push(cells);
   }
 
-  return { grid, totalRows: sheet.rowCount, totalColumns: sheet.columnCount };
+  return { grid, totalRows: info.totalRows, totalColumns: info.totalCols };
 }
 
 export interface TopBottomBoundary {
@@ -389,18 +451,6 @@ export interface TopBottomBoundary {
  * Each entry in the returned `rows` array has an `originalIndex` (0-based)
  * and the cell `data`.
  */
-/**
- * Converts xlsx cell value to string
- */
-function xlsxCellToString(cell: XLSX.CellObject | undefined): string {
-  if (!cell) return "";
-  // Use formatted text if available, otherwise raw value
-  if (cell.w !== undefined) return String(cell.w).replace(/\r\n/g, "\n").trim();
-  if (cell.v === undefined || cell.v === null) return "";
-  if (cell.v instanceof Date) return cell.v.toISOString();
-  return String(cell.v).replace(/\r\n/g, "\n").trim();
-}
-
 export async function extractExcelGridTopBottom(
   buffer: ArrayBuffer,
   topN: number,
@@ -421,28 +471,21 @@ export async function extractExcelGridTopBottom(
   const t1 = performance.now();
   console.log(`[extractExcelGridTopBottom] XLSX.read() completed: ${(t1 - t0).toFixed(2)}ms`);
 
-  const sheetName = workbook.SheetNames[sheetIndex] ?? workbook.SheetNames[0];
-  if (!sheetName) return { rows: [], totalRows: 0, totalColumns: 0 };
-
-  const sheet = workbook.Sheets[sheetName];
-  if (!sheet) return { rows: [], totalRows: 0, totalColumns: 0 };
+  const info = getSheetInfo(workbook, sheetIndex);
+  if (!info) return { rows: [], totalRows: 0, totalColumns: 0 };
 
   const t2 = performance.now();
 
-  // Get sheet range
-  const range = XLSX.utils.decode_range(sheet["!ref"] || "A1");
-  const totalRows = range.e.r - range.s.r + 1;
-  const totalColumns = range.e.c - range.s.c + 1;
+  const totalRows = info.totalRows;
+  const totalColumns = info.totalCols;
   const previewColumns = Math.min(totalColumns, maxCols);
 
-  console.log(`[extractExcelGridTopBottom] Sheet selected: ${(t2 - t1).toFixed(2)}ms`, { sheetName, totalRows, totalColumns });
+  console.log(`[extractExcelGridTopBottom] Sheet selected: ${(t2 - t1).toFixed(2)}ms`, { sheetName: info.sheetName, totalRows, totalColumns });
 
   const readRow = (r0based: number): string[] => {
     const cells: string[] = [];
     for (let c = 0; c < previewColumns; c++) {
-      const cellAddress = XLSX.utils.encode_cell({ r: r0based + range.s.r, c: c + range.s.c });
-      const cell = sheet[cellAddress] as XLSX.CellObject | undefined;
-      cells.push(xlsxCellToString(cell));
+      cells.push(readCell(info.sheet, r0based, c, info.range));
     }
     return cells;
   };

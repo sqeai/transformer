@@ -1,4 +1,4 @@
-import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 
 const MAX_DETECT_ROWS = 500;
 /**
@@ -8,55 +8,68 @@ const MAX_DETECT_ROWS = 500;
  */
 const MAX_DETECT_COLS = 200;
 
-function stringifyUnknownCellObject(value: object): string {
-  try {
-    const json = JSON.stringify(value);
-    if (json && json !== "{}") return json;
-  } catch {
-    // Fall through to avoid returning "[object Object]".
-  }
-  return "";
+/**
+ * Converts xlsx cell value to string
+ */
+function xlsxCellToString(cell: XLSX.CellObject | undefined): string {
+  if (!cell) return "";
+  // Use formatted text if available, otherwise raw value
+  if (cell.w !== undefined) return String(cell.w).replace(/\r\n/g, "\n").trim();
+  if (cell.v === undefined || cell.v === null) return "";
+  if (cell.v instanceof Date) return cell.v.toISOString();
+  return String(cell.v).replace(/\r\n/g, "\n").trim();
 }
 
-function extractCellText(v: ExcelJS.CellValue, fallback: string): string {
-  let raw: string;
-  if (typeof v === "string") {
-    raw = v;
-  } else if (v && typeof v === "object" && "richText" in v) {
-    raw = (v as ExcelJS.CellRichTextValue).richText
-      .map((seg) => seg.text)
-      .join("");
-  } else if (v && typeof v === "object" && "text" in v) {
-    raw = String((v as { text: string }).text);
-  } else if (v != null) {
-    raw = typeof v === "object" ? stringifyUnknownCellObject(v) : String(v);
-  } else {
-    return fallback;
-  }
-  raw = raw.replace(/\r\n/g, "\n").trim();
-  return raw || fallback;
+/**
+ * Get cell value preserving type (for data rows)
+ */
+function xlsxCellValue(cell: XLSX.CellObject | undefined): unknown {
+  if (!cell) return "";
+  if (cell.v === undefined || cell.v === null) return "";
+  return cell.v;
 }
 
-function cellToStringSimple(value: ExcelJS.CellValue): string {
-  if (value == null) return "";
-  if (typeof value === "string") return value.trim();
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (value instanceof Date) return value.toISOString();
-  if (typeof value === "object") {
-    if ("richText" in value)
-      return (value as ExcelJS.CellRichTextValue).richText.map((s) => s.text).join("").trim();
-    if ("text" in value) return String((value as { text: string }).text).trim();
-    if ("result" in value) {
-      const r = (value as { result: unknown }).result;
-      if (typeof r === "string") return r.trim();
-      if (typeof r === "number" || typeof r === "boolean") return String(r).trim();
-      if (r instanceof Date) return r.toISOString();
-      if (r && typeof r === "object") return stringifyUnknownCellObject(r).trim();
-      return r != null ? String(r).trim() : "";
-    }
-    return stringifyUnknownCellObject(value).trim();
-  }
-  return String(value).trim();
+interface SheetInfo {
+  sheet: XLSX.WorkSheet;
+  sheetName: string;
+  range: XLSX.Range;
+  totalRows: number;
+  totalCols: number;
+}
+
+/**
+ * Helper to get sheet info from a workbook
+ */
+function getSheetInfo(workbook: XLSX.WorkBook, sheetIndex: number): SheetInfo | null {
+  const sheetName = workbook.SheetNames[sheetIndex] ?? workbook.SheetNames[0];
+  if (!sheetName) return null;
+
+  const sheet = workbook.Sheets[sheetName];
+  if (!sheet) return null;
+
+  const range = XLSX.utils.decode_range(sheet["!ref"] || "A1");
+  const totalRows = range.e.r - range.s.r + 1;
+  const totalCols = range.e.c - range.s.c + 1;
+
+  return { sheet, sheetName, range, totalRows, totalCols };
+}
+
+/**
+ * Helper to read a cell value from xlsx sheet as string
+ */
+function readCell(sheet: XLSX.WorkSheet, row: number, col: number, range: XLSX.Range): string {
+  const cellAddress = XLSX.utils.encode_cell({ r: row + range.s.r, c: col + range.s.c });
+  const cell = sheet[cellAddress] as XLSX.CellObject | undefined;
+  return xlsxCellToString(cell);
+}
+
+/**
+ * Helper to read a cell value from xlsx sheet preserving type
+ */
+function readCellValue(sheet: XLSX.WorkSheet, row: number, col: number, range: XLSX.Range): unknown {
+  const cellAddress = XLSX.utils.encode_cell({ r: row + range.s.r, c: col + range.s.c });
+  const cell = sheet[cellAddress] as XLSX.CellObject | undefined;
+  return xlsxCellValue(cell);
 }
 
 function sortedMedian(values: number[]): number {
@@ -72,25 +85,24 @@ function sortedMedian(values: number[]): number {
  * Detects the largest continuous rectangular table region within a sheet.
  * Returns 1-based { startRow, endRow, startCol, endCol }.
  */
-function detectTableBounds(sheet: ExcelJS.Worksheet): {
+function detectTableBounds(info: SheetInfo): {
   startRow: number;
   endRow: number;
   startCol: number;
   endCol: number;
 } {
-  const totalRows = Math.min(sheet.rowCount, MAX_DETECT_ROWS);
-  const totalCols = Math.min(sheet.columnCount, MAX_DETECT_COLS);
+  const totalRows = Math.min(info.totalRows, MAX_DETECT_ROWS);
+  const totalCols = Math.min(info.totalCols, MAX_DETECT_COLS);
 
   if (totalRows === 0 || totalCols === 0) {
     return { startRow: 1, endRow: 1, startCol: 1, endCol: 1 };
   }
 
   const grid: boolean[][] = [];
-  for (let r = 1; r <= totalRows; r++) {
-    const row = sheet.getRow(r);
+  for (let r = 0; r < totalRows; r++) {
     const rowFlags: boolean[] = [];
-    for (let c = 1; c <= totalCols; c++) {
-      rowFlags.push(cellToStringSimple(row.getCell(c).value).length > 0);
+    for (let c = 0; c < totalCols; c++) {
+      rowFlags.push(readCell(info.sheet, r, c, info.range).length > 0);
     }
     grid.push(rowFlags);
   }
@@ -178,17 +190,17 @@ function detectTableBounds(sheet: ExcelJS.Worksheet): {
 }
 
 export async function parseExcelColumns(buffer: ArrayBuffer, sheetIndex = 0): Promise<string[]> {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
-  const sheet = workbook.worksheets[sheetIndex] ?? workbook.worksheets[0];
-  if (!sheet) return [];
+  const workbook = XLSX.read(buffer, { type: "array", cellStyles: false, cellFormula: false });
+  const info = getSheetInfo(workbook, sheetIndex);
+  if (!info) return [];
 
-  const bounds = detectTableBounds(sheet);
-  const row = sheet.getRow(bounds.startRow);
+  const bounds = detectTableBounds(info);
   const cols: string[] = [];
-  const colCount = sheet.columnCount;
-  for (let c = 1; c <= colCount; c++) {
-    cols.push(extractCellText(row.getCell(c).value, `Column ${c}`));
+
+  // Read header row (bounds.startRow is 1-based, convert to 0-based)
+  for (let c = 0; c < info.totalCols; c++) {
+    const text = readCell(info.sheet, bounds.startRow - 1, c, info.range);
+    cols.push(text || `Column ${c + 1}`);
   }
   return cols;
 }
@@ -214,59 +226,52 @@ export async function parseExcelToRows(
   columns: string[];
   rows: Record<string, unknown>[];
 }> {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
+  const workbook = XLSX.read(buffer, { type: "array", cellStyles: false, cellFormula: false });
   const sheetIndex = options?.sheetIndex ?? 0;
-  const sheet = workbook.worksheets[sheetIndex] ?? workbook.worksheets[0];
-  if (!sheet) return { columns: [], rows: [] };
+  const info = getSheetInfo(workbook, sheetIndex);
+  if (!info) return { columns: [], rows: [] };
 
-  let headerRowNum: number;
-  let dataStartRowNum: number;
-  let lastDataRow: number;
+  let headerRowNum: number; // 0-based
+  let dataStartRowNum: number; // 0-based
+  let lastDataRow: number; // 0-based
   let columnsToKeep: number[] | undefined;
 
   if (options?.headerRowIndex != null) {
-    headerRowNum = options.headerRowIndex + 1;
-    dataStartRowNum = options.dataStartRowIndex != null ? options.dataStartRowIndex + 1 : headerRowNum + 1;
-    lastDataRow = options.dataEndRowIndex != null ? options.dataEndRowIndex + 1 : sheet.rowCount;
+    headerRowNum = options.headerRowIndex;
+    dataStartRowNum = options.dataStartRowIndex ?? headerRowNum + 1;
+    lastDataRow = options.dataEndRowIndex ?? info.totalRows - 1;
     columnsToKeep = options.columnsToKeep;
   } else {
-    const bounds = detectTableBounds(sheet);
-    headerRowNum = bounds.startRow;
-    dataStartRowNum = bounds.startRow + 1;
-    lastDataRow = bounds.endRow;
+    const bounds = detectTableBounds(info);
+    // bounds are 1-based, convert to 0-based
+    headerRowNum = bounds.startRow - 1;
+    dataStartRowNum = bounds.startRow;
+    lastDataRow = bounds.endRow - 1;
 
     const colIndices: number[] = [];
-    for (let c = bounds.startCol; c <= bounds.endCol; c++) {
-      colIndices.push(c - 1);
+    for (let c = bounds.startCol - 1; c < bounds.endCol; c++) {
+      colIndices.push(c);
     }
     columnsToKeep = colIndices;
   }
 
-  const headerRow = sheet.getRow(headerRowNum);
+  // Read header row
   const allColumns: { colIdx: number; name: string }[] = [];
-  headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-    if (columnsToKeep && !columnsToKeep.includes(colNumber - 1)) return;
-    const name = extractCellText(cell.value, `Column_${colNumber}`);
-    allColumns.push({ colIdx: colNumber, name });
-  });
+  for (let c = 0; c < info.totalCols; c++) {
+    if (columnsToKeep && !columnsToKeep.includes(c)) continue;
+    const text = readCell(info.sheet, headerRowNum, c, info.range);
+    const name = text || `Column_${c + 1}`;
+    allColumns.push({ colIdx: c, name });
+  }
 
   const columns = allColumns.map((c) => c.name);
 
   const rows: Record<string, unknown>[] = [];
-  for (let i = dataStartRowNum; i <= lastDataRow; i++) {
-    const row = sheet.getRow(i);
+  for (let r = dataStartRowNum; r <= lastDataRow; r++) {
     const obj: Record<string, unknown> = {};
     let hasValue = false;
     allColumns.forEach(({ colIdx, name }) => {
-      const cell = row.getCell(colIdx);
-      let val: unknown = cell.value;
-      if (val != null && typeof val === "object" && "result" in val) {
-        val = (val as { result: unknown }).result;
-      }
-      if (val != null && typeof val === "object" && "text" in val) {
-        val = (val as { text: string }).text;
-      }
+      const val = readCellValue(info.sheet, r, colIdx, info.range);
       obj[name] = val ?? "";
       if (val != null && val !== "") hasValue = true;
     });
