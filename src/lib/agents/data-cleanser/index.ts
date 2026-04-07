@@ -252,6 +252,13 @@ export interface DataCleanserInput {
   unstructuredMimeType?: string;
   /** Schema ID — used to fetch contexts (lookup tables, validation, instructions) */
   schemaId?: string;
+  /** Initial transformation steps from saved pipeline — used as guidance for the planner */
+  initialSteps?: Array<{
+    tool: string;
+    params: Record<string, unknown>;
+    phase: "cleansing" | "transformation";
+    reasoning?: string;
+  }>;
 }
 
 const SNAPSHOT_SAMPLE_ROWS = 20;
@@ -421,6 +428,12 @@ async function generatePlan(
   judgeDirective?: string,
   runId?: string,
   contextText?: string,
+  initialSteps?: Array<{
+    tool: string;
+    params: Record<string, unknown>;
+    phase: "cleansing" | "transformation";
+    reasoning?: string;
+  }>,
 ): Promise<PlannerResult> {
   const llm = new ChatAnthropic({
     model: "claude-sonnet-4-6",
@@ -440,6 +453,17 @@ async function generatePlan(
 
   if (contextText) {
     lines.push("", "## Schema Context (validation rules, instructions, and enrichment notes):", contextText);
+  }
+
+  if (initialSteps && initialSteps.length > 0) {
+    lines.push(
+      "",
+      "## Saved Pipeline (use as starting point, adapt as needed):",
+      "The following transformation steps were saved for this schema. Use them as a starting point for your plan.",
+      "You may modify, skip, or extend these steps based on the actual data you see.",
+      "",
+      JSON.stringify(initialSteps, null, 2),
+    );
   }
 
   if (userDirective) {
@@ -858,6 +882,7 @@ export async function runDataCleanser(input: DataCleanserInput): Promise<DataCle
       judgeDirective,
       runId,
       contextText || undefined,
+      input.initialSteps,
     );
 
     if (plan.steps.length === 0) {

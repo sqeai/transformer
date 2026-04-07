@@ -203,3 +203,26 @@ export interface SchemaDataSource {
   isDefault?: boolean;
   createdAt: string;
 }
+
+export type TransformationPhase = "cleansing" | "transformation";
+
+export interface SchemaTransformationStep {
+  id: string;
+  order: number;
+  tool: string; // filter, filterRows, trimColumns, etc.
+  params: Record<string, unknown>;
+  phase: TransformationPhase;
+  reasoning?: string;
+}
+
+export interface SchemaTransformation {
+  id: string;
+  schemaId: string;
+  name: string;
+  description?: string | null;
+  isDefault: boolean;
+  steps: SchemaTransformationStep[];
+  sourceDatasetId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}

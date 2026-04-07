@@ -32,15 +32,17 @@ import { ContextTab } from "@/components/schemas/ContextTab";
 import { MandatoryApproversTab } from "@/components/schemas/MandatoryApproversTab";
 import { DataSourceTab } from "@/components/schemas/DataSourceTab";
 import { DatasetsTab } from "@/components/schemas/DatasetsTab";
+import { TransformationsTab } from "@/components/schemas/TransformationsTab";
 import { cn } from "@/lib/utils";
 
-type TabId = "overview" | "context" | "approvers" | "data-source" | "datasets";
+type TabId = "overview" | "context" | "approvers" | "data-source" | "transformations" | "datasets";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "context", label: "Context" },
   { id: "approvers", label: "Mandatory Approvers" },
   { id: "data-source", label: "Data Source" },
+  { id: "transformations", label: "Transformations" },
   { id: "datasets", label: "Datasets" },
 ];
 
@@ -324,6 +326,12 @@ export default function SchemaDetailPage() {
             schemaId={schemaId}
             isOwner={isOwner}
             onDataSourceChange={setHasDataSource}
+          />
+        )}
+        {activeTab === "transformations" && (
+          <TransformationsTab
+            schemaId={schemaId}
+            isOwner={isOwner}
           />
         )}
         {activeTab === "datasets" && (

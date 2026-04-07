@@ -9,6 +9,51 @@ import {
 import { AI_DATA_CLEANSER_MAX_CONCURRENCY } from "@/lib/jobs-config";
 import { runDataCleanser } from "@/lib/agents/data-cleanser";
 import { createFileRecord } from "@/lib/files-db";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+interface TransformationStep {
+  tool: string;
+  params: Record<string, unknown>;
+  phase: "cleansing" | "transformation";
+  reasoning?: string;
+}
+
+async function loadDefaultTransformation(
+  supabase: SupabaseClient,
+  schemaId: string,
+): Promise<TransformationStep[] | undefined> {
+  const { data, error } = await supabase
+    .from("schema_transformations")
+    .select("steps")
+    .eq("schema_id", schemaId)
+    .eq("is_default", true)
+    .maybeSingle();
+
+  if (error || !data) {
+    return undefined;
+  }
+
+  const steps = data.steps as Array<{
+    id?: string;
+    order?: number;
+    tool: string;
+    params: Record<string, unknown>;
+    phase: "cleansing" | "transformation";
+    reasoning?: string;
+  }>;
+
+  if (!Array.isArray(steps) || steps.length === 0) {
+    return undefined;
+  }
+
+  // Return only the fields needed by the cleanser
+  return steps.map((s) => ({
+    tool: s.tool,
+    params: s.params,
+    phase: s.phase,
+    reasoning: s.reasoning,
+  }));
+}
 
 export async function POST(_request: NextRequest) {
   return processJobs();
@@ -51,6 +96,12 @@ async function processJobs() {
             throw new Error("Invalid payload: missing filePath or targetPaths");
           }
 
+          // Load default transformation pipeline if schema has one
+          let initialSteps: TransformationStep[] | undefined;
+          if (payload.schemaId) {
+            initialSteps = await loadDefaultTransformation(supabase, payload.schemaId);
+          }
+
           const result = await runDataCleanser({
             filePath: payload.filePath,
             targetPaths: payload.targetPaths,
@@ -61,6 +112,7 @@ async function processJobs() {
             fileId: job.file_id ?? undefined,
             unstructuredMimeType: payload.unstructuredMimeType,
             schemaId: payload.schemaId,
+            initialSteps,
           });
 
           if (typeof job.file_id === "string" && job.file_id) {
