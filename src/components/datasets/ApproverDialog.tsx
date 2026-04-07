@@ -25,6 +25,8 @@ interface ApproverDialogProps {
   submitting: boolean;
   onCancel: () => void;
   loading?: boolean;
+  /** When true, allows submitting with no approvers (completes dataset directly) */
+  allowNoApprovers?: boolean;
 }
 
 export function ApproverDialog({
@@ -38,6 +40,7 @@ export function ApproverDialog({
   submitting,
   onCancel,
   loading,
+  allowNoApprovers = false,
 }: ApproverDialogProps) {
   const sortedUsers = [...allUsers].sort((a, b) => {
     const aReq = mandatoryApproverIds.includes(a.id) ? 0 : 1;
@@ -122,17 +125,18 @@ export function ApproverDialog({
           </Button>
           <Button
             onClick={onSubmit}
-            disabled={selectedApproverIds.length === 0 || submitting || loading}
+            disabled={(!allowNoApprovers && selectedApproverIds.length === 0) || submitting || loading}
           >
             {submitting ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <Send className="mr-2 h-4 w-4" />
             )}
-            Submit{" "}
             {selectedApproverIds.length > 0
-              ? `(${selectedApproverIds.length} approver${selectedApproverIds.length !== 1 ? "s" : ""})`
-              : ""}
+              ? `Submit (${selectedApproverIds.length} approver${selectedApproverIds.length !== 1 ? "s" : ""})`
+              : allowNoApprovers
+                ? "Complete without approval"
+                : "Submit"}
           </Button>
         </DialogFooter>
       </DialogContent>

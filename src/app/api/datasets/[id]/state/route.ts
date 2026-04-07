@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { mergeDatasetToDataSource } from "@/lib/dataset-merge";
 
 const VALID_STATES = ["draft", "pending_approval", "approved", "rejected", "completed"] as const;
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
-  draft: ["pending_approval"],
+  draft: ["pending_approval", "completed"],  // completed allowed when no approvers needed
   pending_approval: ["approved", "rejected", "draft"],
   approved: ["completed", "draft"],
   rejected: ["draft"],
@@ -52,6 +53,21 @@ export async function PATCH(
   }
 
   const admin = createAdminClient();
+  const schemaId = (dataset as Record<string, unknown>).schema_id as string;
+
+  // Allow direct completion from draft only if no mandatory approvers exist
+  if (newState === "completed" && currentState === "draft") {
+    const { data: mandatoryApprovers } = await admin
+      .from("schema_mandatory_approvers")
+      .select("id")
+      .eq("schema_id", schemaId);
+
+    if (mandatoryApprovers && mandatoryApprovers.length > 0) {
+      return NextResponse.json({
+        error: "Cannot complete directly: this schema has mandatory approvers. Please submit for approval first.",
+      }, { status: 400 });
+    }
+  }
 
   if (newState === "pending_approval") {
     const approverIds = Array.isArray(body.approverIds)
@@ -93,6 +109,30 @@ export async function PATCH(
       .from("dataset_approvers")
       .delete()
       .eq("dataset_id", id);
+  }
+
+  // When completing, merge data to the data source
+  if (newState === "completed") {
+    const mergeResult = await mergeDatasetToDataSource(admin, id, userId!);
+    if (!mergeResult.ok) {
+      return NextResponse.json({ error: mergeResult.error }, { status: 400 });
+    }
+    // The merge function already logs the merge action, so we only need to update state
+    const { error: updateError } = await admin
+      .from("datasets")
+      .update({ state: newState })
+      .eq("id", id);
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      state: newState,
+      merged: mergeResult.merged,
+      target: mergeResult.target,
+    });
   }
 
   const { error: updateError } = await admin

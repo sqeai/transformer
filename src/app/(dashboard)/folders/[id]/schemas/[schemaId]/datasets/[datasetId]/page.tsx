@@ -365,17 +365,42 @@ export default function DatasetPage() {
   };
 
   const submitForApproval = async () => {
-    if (!dataset || selectedApproverIds.length === 0) return;
+    if (!dataset) return;
     setAddingApprovers(true);
     try {
-      const res = await fetch(`/api/datasets/${dataset.id}/state`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: "pending_approval", approverIds: selectedApproverIds }) });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) { toast.error(data.error ?? "Failed to submit for approval"); return; }
-      toast.success("Submitted for approval");
+      if (selectedApproverIds.length === 0) {
+        // No approvers selected - complete directly
+        const res = await fetch(`/api/datasets/${dataset.id}/state`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ state: "completed" }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast.error(data.error ?? "Failed to complete dataset");
+          return;
+        }
+        toast.success("Dataset completed");
+      } else {
+        // Has approvers - submit for approval
+        const res = await fetch(`/api/datasets/${dataset.id}/state`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ state: "pending_approval", approverIds: selectedApproverIds }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast.error(data.error ?? "Failed to submit for approval");
+          return;
+        }
+        toast.success("Submitted for approval");
+      }
       setApproverDialogOpen(false);
       setSelectedApproverIds([]);
       await fetchDataset();
-    } finally { setAddingApprovers(false); }
+    } finally {
+      setAddingApprovers(false);
+    }
   };
 
   const submitDecision = async () => {
@@ -722,7 +747,7 @@ export default function DatasetPage() {
             {dataset.state === "draft" && (
               <Button onClick={() => { setApproverDialogOpen(true); fetchApproverCandidates(); }} disabled={changingState}>
                 {changingState ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                Submit for Approval
+                Submit
               </Button>
             )}
             {dataset.state === "pending_approval" && !isReadOnlyApprover && (
@@ -979,6 +1004,7 @@ export default function DatasetPage() {
         submitting={addingApprovers}
         onCancel={() => { setApproverDialogOpen(false); setSelectedApproverIds([]); }}
         loading={loadingApproverCandidates}
+        allowNoApprovers={mandatoryApproverIds.length === 0}
       />
 
       <DecisionDialog
