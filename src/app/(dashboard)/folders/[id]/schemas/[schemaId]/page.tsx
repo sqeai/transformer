@@ -270,9 +270,8 @@ export default function SchemaDetailPage() {
             <Button
               onClick={handleUseSchema}
               disabled={!hasDataSource}
-              title={!hasDataSource ? "Configure a data source first" : undefined}
             >
-              Create new dataset using this schema
+              {hasDataSource ? "Create new dataset using this schema" : "Configure data source before proceeding"}
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </div>
