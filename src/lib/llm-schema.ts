@@ -226,7 +226,12 @@ Your task:
 2. Infer the target output fields needed for this data.
 3. Return concise field names in lower_snake_case.
 4. Recommend SQL-compatible data types.
-5. Be inclusive: if uncertain, still propose useful fields.
+
+IMPORTANT CONSTRAINTS:
+- Generate ONLY 5-10 fields. Too many fields leads to confusion. Focus on the essential output columns.
+- Commonly needed fields include: year (INTEGER), month (STRING or INTEGER), and category/classification fields.
+- Prioritize: temporal fields (year, month, date), category/classification fields, key identifiers, and primary value/amount fields.
+- Avoid creating redundant or overly granular fields. Keep it simple and practical.
 
 Use only these data types:
 - STRING
