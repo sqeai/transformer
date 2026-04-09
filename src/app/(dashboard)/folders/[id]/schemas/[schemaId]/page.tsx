@@ -27,6 +27,7 @@ import {
 import { UploadDatasetDialog } from "@/components/UploadDatasetDialog";
 import type { FinalSchema } from "@/lib/types";
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { OverviewTab } from "@/components/schemas/OverviewTab";
 import { ContextTab } from "@/components/schemas/ContextTab";
 import { MandatoryApproversTab } from "@/components/schemas/MandatoryApproversTab";
@@ -66,7 +67,9 @@ export default function SchemaDetailPage() {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [hasDataSource, setHasDataSource] = useState(false);
 
+  const { can } = usePermissions(folderId);
   const isOwner = !!user && !!schema?.creator && schema.creator.id === user.id;
+  const canEditSchemas = can("edit_schemas");
   const hasUnsavedChanges = useMemo(
     () => tableHasUnsavedChanges || name.trim() !== (schema?.name ?? ""),
     [tableHasUnsavedChanges, name, schema?.name],
@@ -331,6 +334,7 @@ export default function SchemaDetailPage() {
           <TransformationsTab
             schemaId={schemaId}
             isOwner={isOwner}
+            canEdit={canEditSchemas}
           />
         )}
         {activeTab === "datasets" && (

@@ -49,9 +49,10 @@ import {
 interface TransformationsTabProps {
   schemaId: string;
   isOwner: boolean;
+  canEdit?: boolean;
 }
 
-export function TransformationsTab({ schemaId, isOwner }: TransformationsTabProps) {
+export function TransformationsTab({ schemaId, isOwner, canEdit = false }: TransformationsTabProps) {
   const [transformations, setTransformations] = useState<SchemaTransformation[]>([]);
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -192,7 +193,7 @@ export function TransformationsTab({ schemaId, isOwner }: TransformationsTabProp
             Configure transformation pipelines that serve as starting points for the cleansing agent.
           </p>
         </div>
-        {isOwner && (
+        {canEdit && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button size="sm">
