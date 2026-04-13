@@ -25,32 +25,46 @@ const features = [
 
 const guideSteps = [
   {
-    title: "1. Upload & Prepare Data",
+    title: "1. Create Your Schema with AI",
     description:
-      "Select multiple files and define boundaries so AI can clean and unify all selected inputs.",
-    image: "/guides/03-select-multiple-sheets.jpg",
-    alt: "Select multiple files and prepare raw data",
+      "Describe the schema you need and let AI generate the field definitions, types, and structure for you.",
+    image: "/guides/001-schema-creation.png",
+    alt: "AI-assisted schema creation from a natural language description",
   },
   {
-    title: "2. Let AI Determine Mapping",
+    title: "2. Upload Raw Data",
     description:
-      "Use Auto-map with AI and review suggested links for each file mapping.",
-    image: "/guides/04-ai-mapping-determination.jpg",
-    alt: "AI mapping determination screen",
+      "Import raw Excel spreadsheets and CSV files directly — no reformatting required.",
+    image: "/guides/002-upload-raw-data.png",
+    alt: "Uploading raw Excel and CSV files",
   },
   {
-    title: "3. Save Mapping to Schema",
+    title: "3. AI-Powered Transformation",
     description:
-      "Review schema details and mapped fields, then save and reuse for future datasets.",
-    image: "/guides/02-schema-mapping-result.jpg",
-    alt: "Schema mapping result and saved output structure",
+      "Let AI transform your raw data and automatically determine the mapping to your target schema.",
+    image: "/guides/003-ai-transformation.png",
+    alt: "AI transforming and mapping raw data to the target schema",
   },
   {
-    title: "4. Export Clean Data",
+    title: "4. Review & Approve",
     description:
-      "Export transformed results to XLSX/CSV or downstream destinations after AI-assisted mapping.",
-    image: "/guides/05-data-export.jpg",
-    alt: "Data export options after mapping",
+      "Approve and review transformed data through a structured approval flow before merging into the final dataset.",
+    image: "/guides/004-approval-flow.png",
+    alt: "Approval flow for reviewing transformed data before merging",
+  },
+  {
+    title: "5. Export to BigQuery",
+    description:
+      "Push your finalized, cleansed data to BigQuery automatically — ready for analytics and reporting.",
+    image: "/guides/005-add-to-bigquery.png",
+    alt: "Exporting final data to BigQuery",
+  },
+  {
+    title: "6. Manage Any Data Type",
+    description:
+      "Organize and govern schemas across multiple businesses, departments, and data types from a single workspace.",
+    image: "/guides/006-manage-multiple-businesses.png",
+    alt: "Managing schemas across multiple businesses and data types",
   },
 ];
 
@@ -145,17 +159,17 @@ export default function Home() {
 
           <div className="mt-16 rounded-2xl border border-slate-700/80 bg-slate-900/55 p-6">
             <p className="text-xs uppercase tracking-[0.2em] text-cyan-200/90">
-              AI Mapping Showcase
+              Transformation Overview
             </p>
             <h2 className="mt-2 text-2xl font-semibold">
-              See how AI determines mapping automatically
+              See how AI transforms your data end-to-end
             </h2>
             <p className="mt-2 max-w-3xl text-sm text-slate-300">
-              The screenshot below highlights the mapping canvas where AI links source columns to your target schema.
+              From raw uploads to governed, export-ready datasets — managed through a single transformation pipeline.
             </p>
             <img
-              src="/guides/01-ai-mapping-frontpage.jpg"
-              alt="AI mapping canvas showing automatic mapping suggestions"
+              src="/guides/000-transformation-overview.png"
+              alt="Transformer overview showing the full data transformation pipeline"
               className="mt-5 w-full rounded-xl border border-slate-700/90 bg-slate-950/60"
             />
           </div>
@@ -165,7 +179,7 @@ export default function Home() {
               How-To Guide
             </p>
             <h2 className="mt-2 text-2xl font-semibold">
-              Clean data in four steps
+              Clean data in six steps
             </h2>
             <div className="mt-6 grid gap-5 lg:grid-cols-2">
               {guideSteps.map((step) => (
