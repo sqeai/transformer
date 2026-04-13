@@ -43,6 +43,8 @@ resource "aws_s3_bucket_cors_configuration" "adc_files_cors" {
     allowed_methods = ["GET", "PUT", "POST", "DELETE"]
     allowed_origins = [
       "http://localhost:3000",
+      "http://transformer.sqe.co.id",
+      "https://transformer.sqe.co.id",
       "http://ai-data-cleanser.sqe.co.id",
       "https://ai-data-cleanser.sqe.co.id",
     ]
