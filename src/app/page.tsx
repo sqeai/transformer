@@ -159,19 +159,44 @@ export default function Home() {
 
           <div className="mt-16 rounded-2xl border border-slate-700/80 bg-slate-900/55 p-6">
             <p className="text-xs uppercase tracking-[0.2em] text-cyan-200/90">
-              Transformation Overview
+              Before &amp; After
             </p>
             <h2 className="mt-2 text-2xl font-semibold">
-              See how AI transforms your data end-to-end
+              From messy spreadsheets to structured data
             </h2>
-            <p className="mt-2 max-w-3xl text-sm text-slate-300">
-              From raw uploads to governed, export-ready datasets — managed through a single transformation pipeline.
-            </p>
-            <img
-              src="/guides/000-transformation-overview.png"
-              alt="Transformer overview showing the full data transformation pipeline"
-              className="mt-5 w-full rounded-xl border border-slate-700/90 bg-slate-950/60"
-            />
+            <div className="relative mt-6 flex items-center gap-0 overflow-hidden rounded-xl">
+              {/* Before — raw Excel, fades out toward center */}
+              <div className="relative w-[45%] shrink-0">
+                <img
+                  src="/overview-excel-raw.png"
+                  alt="Raw messy Excel data before transformation"
+                  className="w-full rounded-l-xl"
+                />
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-slate-950" />
+              </div>
+
+              {/* Center — Transformer logo */}
+              <div className="relative z-10 flex shrink-0 flex-col items-center gap-2 px-4">
+                <img
+                  src="/transformer-logo.png"
+                  alt="Transformer logo"
+                  className="h-14 w-14 rounded-lg drop-shadow-[0_0_12px_rgba(14,165,233,0.5)]"
+                />
+                <span className="text-sm font-semibold tracking-tight text-cyan-300">
+                  Transformer
+                </span>
+              </div>
+
+              {/* After — structured BigQuery, fades out toward center */}
+              <div className="relative w-[45%] shrink-0">
+                <img
+                  src="/overview-structured-bigquery.png"
+                  alt="Clean structured data in BigQuery after transformation"
+                  className="w-full rounded-r-xl"
+                />
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-l from-transparent via-transparent to-slate-950" />
+              </div>
+            </div>
           </div>
 
           <div className="mt-12">
