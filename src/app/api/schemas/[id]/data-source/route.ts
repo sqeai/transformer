@@ -4,6 +4,7 @@ import { createConnector } from "@/lib/connectors";
 import type { DataSourceType } from "@/lib/connectors";
 import type { SqlCompatibleType } from "@/lib/types";
 import { mapSqlType } from "@/lib/sql-type-mapper";
+import { PermissionsService } from "@/lib/permissions";
 import {
   isDefaultBigQueryAvailable,
   DEFAULT_BQ_DATA_SOURCE_NAME,
@@ -36,7 +37,10 @@ export async function GET(
     .eq("schema_id", schemaId)
     .eq("granted_to_user_id", userId!)
     .maybeSingle();
-  if (!isOwner && !grantRow) {
+  const hasFolderAccess = schema.folder_id
+    ? await PermissionsService.can(userId!, schema.folder_id, "view_data_sources")
+    : false;
+  if (!isOwner && !grantRow && !hasFolderAccess) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

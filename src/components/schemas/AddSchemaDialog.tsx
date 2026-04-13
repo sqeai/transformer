@@ -373,7 +373,11 @@ export function AddSchemaDialog({
       <DialogContent
         className={cn(
           "w-full transition-all duration-200",
-          isExpanded ? "max-w-[90vw] max-h-[85vh] h-[85vh]" : "max-w-xl",
+          dialogMode === "datasource"
+            ? "max-w-3xl max-h-[85vh]"
+            : isExpanded
+              ? "max-w-[90vw] max-h-[85vh] h-[85vh]"
+              : "max-w-xl",
         )}
       >
         {!isExpanded ? (
