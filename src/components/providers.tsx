@@ -17,7 +17,7 @@ export function Providers({ children }: { children: ReactNode }) {
     <SessionProvider>
       <AuthProvider>
         <ImpersonationProvider>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
           <LivingBackground />
           <TooltipProvider>
             <SchemaStoreProvider>
