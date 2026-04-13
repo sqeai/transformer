@@ -65,6 +65,11 @@ export default function Home() {
         <header className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img
+              src="/sqe-logo-placeholder.png"
+              alt="SQE logo"
+              className="h-8 w-auto"
+            />
+            <img
               src="/transformer-logo.png"
               alt="Transformer logo"
               className="h-10 w-10 rounded-md"
