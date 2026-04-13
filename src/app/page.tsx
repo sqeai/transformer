@@ -63,12 +63,15 @@ export default function Home() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.35),_transparent_45%),radial-gradient(circle_at_bottom_right,_rgba(34,197,94,0.25),_transparent_42%)]" />
       <div className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-8 sm:px-10">
         <header className="flex items-center justify-between">
-          <div className="flex items-center">
+          <div className="flex items-center gap-3">
             <img
-              src="/sqe-logo-placeholder.png"
-              alt="Company logo"
-              className="h-12 w-auto max-w-[340px] rounded-md border border-cyan-300/50 bg-white/95 p-1"
+              src="/transformer-logo.png"
+              alt="Transformer logo"
+              className="h-10 w-10 rounded-md"
             />
+            <span className="text-xl font-semibold tracking-tight text-slate-100">
+              Transformer
+            </span>
           </div>
           <div className="flex items-center gap-2">
             {!loading && user ? (
