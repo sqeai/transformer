@@ -126,6 +126,7 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
   const [content, setContent] = useState("");
   const [contextTables, setContextTables] = useState<ContextTable[]>([]);
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
+  const [defaultBqDsId, setDefaultBqDsId] = useState<string | null>(null);
   const [allTablesMap, setAllTablesMap] = useState<Map<string, TableInfo[]>>(
     new Map(),
   );
@@ -166,7 +167,26 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
       const res = await fetch(`/api/data-sources?folderId=${folderId}`);
       if (res.ok) {
         const data = await res.json();
-        setDataSources(data.dataSources ?? []);
+        const sources: DataSource[] = data.dataSources ?? [];
+
+        // Also include default BigQuery if available
+        const bqRes = await fetch("/api/default-bigquery");
+        if (bqRes.ok) {
+          const bqData = await bqRes.json();
+          if (bqData.available && bqData.dataSourceId) {
+            setDefaultBqDsId(bqData.dataSourceId);
+            const alreadyIncluded = sources.some((s) => s.id === bqData.dataSourceId);
+            if (!alreadyIncluded) {
+              sources.unshift({
+                id: bqData.dataSourceId,
+                name: bqData.name ?? "Default BigQuery",
+                type: "bigquery",
+              });
+            }
+          }
+        }
+
+        setDataSources(sources);
       }
     } catch {
       /* ignore */
@@ -254,22 +274,65 @@ export function FolderContextEditor({ folderId }: FolderContextEditorProps) {
     if (dataSources.length === 0) return;
     setLoadingAllTables(true);
     const newMap = new Map<string, TableInfo[]>();
+
+    // Fetch schema-linked tables for this folder (from schema_data_sources)
+    let schemaTablesByDs = new Map<string, TableInfo[]>();
+    try {
+      const stRes = await fetch(`/api/folders/${folderId}/schema-tables`);
+      if (stRes.ok) {
+        const stData = await stRes.json();
+        for (const t of stData.tables ?? []) {
+          const list = schemaTablesByDs.get(t.dataSourceId) ?? [];
+          list.push({ schema: t.schema, name: t.name });
+          schemaTablesByDs.set(t.dataSourceId, list);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
     await Promise.all(
       dataSources.map(async (ds) => {
+        // For default BigQuery, only show schema-linked tables in this folder
+        if (defaultBqDsId && ds.id === defaultBqDsId) {
+          const schemaTables = schemaTablesByDs.get(ds.id) ?? [];
+          if (schemaTables.length > 0) {
+            newMap.set(ds.id, schemaTables);
+          }
+          return;
+        }
+
         try {
+          // Fetch tables from the data source itself
           const res = await fetch(`/api/data-sources/${ds.id}/tables`);
+          let dsTables: TableInfo[] = [];
           if (res.ok) {
             const data = await res.json();
-            newMap.set(ds.id, data.tables ?? []);
+            dsTables = data.tables ?? [];
           }
+
+          // Merge in any schema-linked tables not already in the list
+          const schemaTables = schemaTablesByDs.get(ds.id) ?? [];
+          const existingKeys = new Set(dsTables.map((t) => `${t.schema}::${t.name}`));
+          for (const st of schemaTables) {
+            if (!existingKeys.has(`${st.schema}::${st.name}`)) {
+              dsTables.push(st);
+            }
+          }
+
+          newMap.set(ds.id, dsTables);
         } catch {
-          /* ignore */
+          // If direct table fetch fails, still show schema-linked tables
+          const schemaTables = schemaTablesByDs.get(ds.id);
+          if (schemaTables) {
+            newMap.set(ds.id, schemaTables);
+          }
         }
       }),
     );
     setAllTablesMap(newMap);
     setLoadingAllTables(false);
-  }, [dataSources]);
+  }, [dataSources, folderId, defaultBqDsId]);
 
   const handleEditTables = useCallback(() => {
     setEditingTables(true);

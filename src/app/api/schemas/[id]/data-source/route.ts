@@ -12,7 +12,10 @@ import {
   getDefaultSchemaTableRef,
   ensureDefaultBqDataSource,
   isDefaultBqDataSourceId,
+  getDefaultBqDataSourceId,
 } from "@/lib/connectors/default-bigquery";
+
+const DEFAULT_BQ_SELECTOR_ID = "__default_bq__";
 
 export async function GET(
   _request: NextRequest,
@@ -82,21 +85,68 @@ export async function GET(
     };
   }
 
-  let availableDataSources: Array<{ id: string; name: string; type: string }> = [];
+  // Build available data sources from folder context tables only
+  let availableDataSources: Array<{ id: string; name: string; type: string; tables: { schema: string; name: string }[] }> = [];
+
   if (schema.folder_id) {
-    const { data: sources } = await supabase!
-      .from("data_sources")
-      .select("id, name, type")
+    // Get the folder context
+    const { data: folderCtx } = await supabase!
+      .from("folder_contexts")
+      .select("id")
       .eq("folder_id", schema.folder_id)
-      .order("name");
-    availableDataSources = (sources ?? []).map((s: Record<string, unknown>) => ({
-      id: s.id as string,
-      name: s.name as string,
-      type: s.type as string,
-    }));
+      .maybeSingle();
+
+    if (folderCtx) {
+      // Get tables configured in the context
+      const { data: ctxTables } = await supabase!
+        .from("folder_context_tables")
+        .select("data_source_id, schema_name, table_name")
+        .eq("folder_context_id", folderCtx.id);
+
+      if (ctxTables && ctxTables.length > 0) {
+        // Group tables by data source
+        const dsTableMap = new Map<string, { schema: string; name: string }[]>();
+        for (const ct of ctxTables) {
+          const dsId = ct.data_source_id as string;
+          if (!dsTableMap.has(dsId)) dsTableMap.set(dsId, []);
+          dsTableMap.get(dsId)!.push({
+            schema: ct.schema_name as string,
+            name: ct.table_name as string,
+          });
+        }
+
+        // Fetch data source details
+        const dsIds = [...dsTableMap.keys()];
+        const { data: sources } = await supabase!
+          .from("data_sources")
+          .select("id, name, type")
+          .in("id", dsIds)
+          .order("name");
+
+        availableDataSources = (sources ?? []).map((s: Record<string, unknown>) => ({
+          id: s.id as string,
+          name: s.name as string,
+          type: s.type as string,
+          tables: dsTableMap.get(s.id as string) ?? [],
+        }));
+      }
+    }
   }
 
+  // Include default BigQuery as a regular entry if available
   const defaultBqAvailable = isDefaultBigQueryAvailable();
+  if (defaultBqAvailable) {
+    const defaultBqId = await getDefaultBqDataSourceId();
+    // Only add if not already in the context list
+    if (!defaultBqId || !availableDataSources.some((ds) => ds.id === defaultBqId)) {
+      availableDataSources.unshift({
+        id: DEFAULT_BQ_SELECTOR_ID,
+        name: DEFAULT_BQ_DATA_SOURCE_NAME,
+        type: "bigquery",
+        tables: [],
+      });
+    }
+  }
 
   return NextResponse.json({
     dataSource: linked,
