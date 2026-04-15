@@ -458,9 +458,14 @@ async function generatePlan(
   if (initialSteps && initialSteps.length > 0) {
     lines.push(
       "",
-      "## Saved Pipeline (use as starting point, adapt as needed):",
-      "The following transformation steps were saved for this schema. Use them as a starting point for your plan.",
-      "You may modify, skip, or extend these steps based on the actual data you see.",
+      "## Default Pipeline (RIGID — follow exactly with minimal changes):",
+      "The following transformation steps are the DEFAULT PIPELINE for this schema. You MUST follow this pipeline as closely as possible.",
+      "- Use the EXACT same steps, in the EXACT same order.",
+      "- Use the EXACT same params for each step unless the actual column names in the data differ, in which case adjust only the column references to match.",
+      "- Do NOT add new steps, remove steps, or reorder steps unless absolutely necessary to avoid a runtime error (e.g. a referenced column does not exist).",
+      "- Do NOT change aggregation functions, filter logic, regex patterns, or mapping targets unless they would cause an error with the current data.",
+      "- The only acceptable modifications are: correcting column names to match the actual data, and fixing values that would cause a type mismatch or runtime failure.",
+      "- If a user directive is provided, apply it as a minor overlay on top of this pipeline — do not let it override the pipeline's structure.",
       "",
       JSON.stringify(initialSteps, null, 2),
     );
