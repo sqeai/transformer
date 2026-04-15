@@ -31,18 +31,16 @@ const MappingFlow = dynamic<{
 
 const PREVIEW_ROWS = 100;
 
-function buildPipelineFromIteration(
-  iteration: TransformationMappingEntry[],
-  iterationIndex: number,
+function buildPipelineFromSteps(
+  steps: TransformationMappingEntry[],
 ): PipelineDescriptor {
-  const iterationTag = `Iteration ${iterationIndex + 1}`;
-  const sourceId = `iteration-${iterationIndex}-source`;
-  const targetId = `iteration-${iterationIndex}-target`;
+  const sourceId = "pipeline-source";
+  const targetId = "pipeline-target";
 
   const nodes: PipelineDescriptor["nodes"] = [
-    { id: sourceId, type: "source", label: `${iterationTag} Input`, data: {} },
-    ...iteration.map((entry, idx) => ({
-      id: `iteration-${iterationIndex}-step-${idx}`,
+    { id: sourceId, type: "source", label: "Input", data: {} },
+    ...steps.map((entry, idx) => ({
+      id: `pipeline-step-${idx}`,
       type: "map" as const,
       label: `${entry.step}. ${entry.tool}`,
       data: {
@@ -52,32 +50,32 @@ function buildPipelineFromIteration(
         rowCountAfter: entry.rowCountAfter,
       },
     })),
-    { id: targetId, type: "target", label: `${iterationTag} Output`, data: {} },
+    { id: targetId, type: "target", label: "Output", data: {} },
   ];
 
   const edges: PipelineDescriptor["edges"] = [];
   const firstStepId =
-    iteration.length > 0
-      ? `iteration-${iterationIndex}-step-0`
+    steps.length > 0
+      ? "pipeline-step-0"
       : targetId;
   edges.push({
-    id: `iteration-${iterationIndex}-edge-source`,
+    id: "pipeline-edge-source",
     source: sourceId,
     target: firstStepId,
   });
 
-  for (let idx = 0; idx < iteration.length - 1; idx += 1) {
+  for (let idx = 0; idx < steps.length - 1; idx += 1) {
     edges.push({
-      id: `iteration-${iterationIndex}-edge-${idx}`,
-      source: `iteration-${iterationIndex}-step-${idx}`,
-      target: `iteration-${iterationIndex}-step-${idx + 1}`,
+      id: `pipeline-edge-${idx}`,
+      source: `pipeline-step-${idx}`,
+      target: `pipeline-step-${idx + 1}`,
     });
   }
 
-  if (iteration.length > 0) {
+  if (steps.length > 0) {
     edges.push({
-      id: `iteration-${iterationIndex}-edge-target`,
-      source: `iteration-${iterationIndex}-step-${iteration.length - 1}`,
+      id: "pipeline-edge-target",
+      source: `pipeline-step-${steps.length - 1}`,
       target: targetId,
     });
   }
@@ -235,9 +233,8 @@ export function ReviewStep({
             (currentResult.result?.mapping
               ? [currentResult.result.mapping]
               : []);
-          const iterationPipelines = mappingIterations.map(
-            (iteration, idx) => buildPipelineFromIteration(iteration, idx),
-          );
+          const allSteps = mappingIterations.flat();
+          const builtPipeline = allSteps.length > 0 ? buildPipelineFromSteps(allSteps) : null;
           const currentFileProcessing =
             currentResult.status === "pending" ||
             currentResult.status === "running";
@@ -406,20 +403,20 @@ export function ReviewStep({
                 )}
 
                 {reviewSubTab === "mapping" &&
-                  iterationPipelines.length > 0 && (
+                  builtPipeline && (
                     <div className="overflow-auto">
-                      <MappingFlow pipelines={iterationPipelines} />
+                      <MappingFlow pipelines={[builtPipeline]} />
                     </div>
                   )}
                 {reviewSubTab === "mapping" &&
-                  iterationPipelines.length === 0 &&
+                  !builtPipeline &&
                   pipeline && (
                     <div className="overflow-auto">
                       <MappingFlow pipeline={pipeline} />
                     </div>
                   )}
                 {reviewSubTab === "mapping" &&
-                  iterationPipelines.length === 0 &&
+                  !builtPipeline &&
                   !pipeline && (
                     <p className="text-muted-foreground text-center py-4">
                       No pipeline data available.

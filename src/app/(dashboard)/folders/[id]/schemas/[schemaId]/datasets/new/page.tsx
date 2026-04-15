@@ -9,7 +9,6 @@ import {
   flattenFields,
   type FileSelection,
   type FileJobResult,
-  type TransformationMappingEntry,
 } from "@/lib/schema-store";
 import { extractExcelGridTopBottom } from "@/lib/parse-excel-preview";
 import { parseExcelToRows } from "@/lib/parse-excel";
@@ -66,54 +65,23 @@ function rowsToCsv(columns: string[], rows: Record<string, unknown>[]): string {
   return lines.join("\n");
 }
 
-function isSameTransformationIteration(
-  a: TransformationMappingEntry[],
-  b: TransformationMappingEntry[],
-): boolean {
-  if (a.length !== b.length) return false;
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function mergeJobResultWithIterationHistory(
+function replaceJobResult(
   previous: FileJobResult,
   incoming: FileJobResult["result"] | undefined,
   status: FileJobResult["status"],
-  jobId: string,
-): Pick<FileJobResult, "result" | "transformationIterationJobIds"> {
+): Pick<FileJobResult, "result"> {
   const fallbackResult = incoming ?? previous.result;
   if (!fallbackResult) {
-    return {
-      result: fallbackResult,
-      transformationIterationJobIds: previous.transformationIterationJobIds,
-    };
+    return { result: fallbackResult };
   }
 
-  const previousIterations =
-    previous.result?.mappingIterations
-    ?? (previous.result?.mapping ? [previous.result.mapping] : []);
   const incomingMapping = fallbackResult.mapping ?? [];
-  const seenJobIds = previous.transformationIterationJobIds ?? [];
-  const alreadyRecorded = seenJobIds.includes(jobId);
-  const iterationAlreadyExists = previousIterations.some((it) =>
-    isSameTransformationIteration(it, incomingMapping),
-  );
-
-  const nextIterations = (
-    status === "completed" && !alreadyRecorded && !iterationAlreadyExists
-  )
-    ? [...previousIterations, incomingMapping]
-    : previousIterations;
 
   return {
     result: {
       ...fallbackResult,
-      mappingIterations: nextIterations,
+      mappingIterations: status === "completed" ? [incomingMapping] : (previous.result?.mappingIterations ?? []),
     },
-    transformationIterationJobIds: (
-      status === "completed" && !alreadyRecorded
-    )
-      ? [...seenJobIds, jobId]
-      : seenJobIds,
   };
 }
 
@@ -428,12 +396,11 @@ function NewDatasetPageContent() {
             if (r.status !== nextStatus) {
               console.log(`[polling] Job ${r.jobId.slice(0, 8)} status changed: ${r.status} -> ${nextStatus}`);
             }
-            const merged = mergeJobResultWithIterationHistory(r, job.result as FileJobResult["result"] | undefined, nextStatus, r.jobId);
+            const merged = replaceJobResult(r, job.result as FileJobResult["result"] | undefined, nextStatus);
             return {
               ...r,
               status: nextStatus,
               result: merged.result,
-              transformationIterationJobIds: merged.transformationIterationJobIds,
               error: job.error,
               createdAt: job.created_at ?? r.createdAt,
               startedAt: job.started_at ?? r.startedAt,
@@ -660,12 +627,11 @@ function NewDatasetPageContent() {
           prev.map((r) => {
             if (r.jobId !== jobId) return r;
             const nextStatus = job.status as FileJobResult["status"];
-            const merged = mergeJobResultWithIterationHistory(r, (job.result as FileJobResult["result"] | undefined) ?? r.result, nextStatus, jobId);
+            const merged = replaceJobResult(r, (job.result as FileJobResult["result"] | undefined) ?? r.result, nextStatus);
             return {
               ...r,
               status: nextStatus,
               result: merged.result,
-              transformationIterationJobIds: merged.transformationIterationJobIds,
               error: job.error,
               createdAt: job.created_at ?? r.createdAt,
               startedAt: job.started_at ?? r.startedAt,
@@ -706,24 +672,16 @@ function NewDatasetPageContent() {
     setModifySubmittingSheetKey(currentFileKey);
 
     try {
-      if (!fileResult.result) throw new Error("No modified data is available yet for this tab.");
-      const modifiedColumns = fileResult.result.transformedColumns;
-      const modifiedRows = fileResult.result.transformedRows;
       const originalRef = uploadedFileRefs[currentFileKey];
-      const uploadedModified = await uploadFileCsv({
-        fileName: `${fileResult.file.worksheetName} (modified)`,
-        columns: modifiedColumns,
-        rows: modifiedRows,
-        type: "intermediary",
-      });
+      if (!originalRef) throw new Error("Original file reference not found for this tab.");
 
       const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "data_cleanse",
-          fileId: originalRef?.fileId,
-          payload: { filePath: uploadedModified.filePath, targetPaths, fileName: fileResult.file.worksheetName, userDirective: modifyPrompt.trim(), originalFilePath: originalRef?.filePath, modifiedFilePath: uploadedModified.filePath, schemaId },
+          fileId: originalRef.fileId,
+          payload: { filePath: originalRef.filePath, targetPaths, fileName: fileResult.file.worksheetName, userDirective: modifyPrompt.trim(), schemaId },
         }),
       });
       const data = await res.json();
@@ -740,7 +698,6 @@ function NewDatasetPageContent() {
       const promptText = modifyPrompt.trim();
       setModifyPrompt("");
       setModifySubmittingSheetKey(null);
-      setUploadedFileRefs((prev) => ({ ...prev, [currentFileKey]: uploadedModified }));
       fetch("/api/jobs/process", { method: "POST" }).catch(() => {});
       startModifyPolling(data.jobId);
 
@@ -752,7 +709,7 @@ function NewDatasetPageContent() {
       setModifySubmittingSheetKey(null);
       alert(err instanceof Error ? err.message : "Failed to modify");
     }
-  }, [modifyPrompt, schemaId, targetPaths, startModifyPolling, uploadedFileRefs, uploadFileCsv, saveMemory]);
+  }, [modifyPrompt, schemaId, targetPaths, startModifyPolling, uploadedFileRefs, saveMemory]);
 
   // --- Export ---
 
@@ -786,11 +743,7 @@ function NewDatasetPageContent() {
             folderId,
             mappingSnapshot: {
               toolsUsed: exportableResults.map((r) => r.result?.toolsUsed ?? []),
-              transformations: exportableResults.map((r) => {
-                const iterations = r.result?.mappingIterations;
-                if (Array.isArray(iterations) && iterations.length > 0) return iterations;
-                return [r.result?.mapping ?? []];
-              }),
+              transformations: exportableResults.map((r) => [r.result?.mapping ?? []]),
             },
           }),
         });
