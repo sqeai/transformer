@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
+import { PermissionsService } from "@/lib/permissions";
 import type { BigQueryConfig } from "@/lib/connectors/types";
 
 export async function GET(
@@ -13,7 +14,7 @@ export async function GET(
 
   const { data: schema } = await supabase!
     .from("schemas")
-    .select("id, user_id")
+    .select("id, user_id, folder_id")
     .eq("id", schemaId)
     .single();
   if (!schema) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -25,7 +26,10 @@ export async function GET(
     .eq("schema_id", schemaId)
     .eq("granted_to_user_id", userId!)
     .maybeSingle();
-  if (!isOwner && !grantRow) {
+  const hasFolderAccess = schema.folder_id
+    ? await PermissionsService.can(userId!, schema.folder_id, "view_context")
+    : false;
+  if (!isOwner && !grantRow && !hasFolderAccess) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -65,7 +69,7 @@ export async function POST(
 
   const { data: schema } = await supabase!
     .from("schemas")
-    .select("id, user_id")
+    .select("id, user_id, folder_id")
     .eq("id", schemaId)
     .single();
   if (!schema) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -77,7 +81,10 @@ export async function POST(
     .eq("schema_id", schemaId)
     .eq("granted_to_user_id", userId!)
     .maybeSingle();
-  if (!isOwner && !grantRow) {
+  const canEditContext = schema.folder_id
+    ? await PermissionsService.can(userId!, schema.folder_id, "edit_context")
+    : false;
+  if (!isOwner && !grantRow && !canEditContext) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

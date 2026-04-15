@@ -34,7 +34,7 @@ import { AddContextDialog } from "./AddContextDialog";
 
 interface ContextTabProps {
   schemaId: string;
-  isOwner: boolean;
+  canEdit?: boolean;
   folderId?: string | null;
 }
 
@@ -52,7 +52,7 @@ const CONTEXT_TYPE_ICONS: Record<SchemaContextType, typeof Table2> = {
   memory: Brain,
 };
 
-export function ContextTab({ schemaId, isOwner, folderId }: ContextTabProps) {
+export function ContextTab({ schemaId, canEdit = false, folderId }: ContextTabProps) {
   const [contexts, setContexts] = useState<SchemaContext[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -182,7 +182,7 @@ export function ContextTab({ schemaId, isOwner, folderId }: ContextTabProps) {
             Add lookup tables, validation rules, or text instructions to this schema.
           </p>
         </div>
-        {isOwner && (
+        {canEdit && (
           <Button onClick={() => setShowAddDialog(true)} size="sm">
             <Plus className="h-4 w-4 mr-1.5" />
             Add Context
@@ -253,7 +253,7 @@ export function ContextTab({ schemaId, isOwner, folderId }: ContextTabProps) {
                           </a>
                         </Button>
                       )}
-                      {isOwner && isTextBased && editingId !== ctx.id && (
+                      {canEdit && isTextBased && editingId !== ctx.id && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -263,7 +263,7 @@ export function ContextTab({ schemaId, isOwner, folderId }: ContextTabProps) {
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
                       )}
-                      {isOwner && (
+                      {canEdit && (
                         <Button
                           variant="ghost"
                           size="sm"

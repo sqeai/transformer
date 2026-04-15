@@ -328,7 +328,7 @@ export default function SchemaDetailPage() {
         {activeTab === "context" && (
           <ContextTab
             schemaId={schemaId}
-            isOwner={isOwner}
+            canEdit={canEditSchemas}
             folderId={folderId}
           />
         )}

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
+import { PermissionsService } from "@/lib/permissions";
 
 export async function PATCH(
   request: NextRequest,
@@ -12,7 +13,7 @@ export async function PATCH(
 
   const { data: schema } = await supabase!
     .from("schemas")
-    .select("id, user_id")
+    .select("id, user_id, folder_id")
     .eq("id", schemaId)
     .single();
   if (!schema) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -24,7 +25,10 @@ export async function PATCH(
     .eq("schema_id", schemaId)
     .eq("granted_to_user_id", userId!)
     .maybeSingle();
-  if (!isOwner && !grantRow) {
+  const canEditContext = schema.folder_id
+    ? await PermissionsService.can(userId!, schema.folder_id, "edit_context")
+    : false;
+  if (!isOwner && !grantRow && !canEditContext) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -79,7 +83,7 @@ export async function DELETE(
 
   const { data: schema } = await supabase!
     .from("schemas")
-    .select("id, user_id")
+    .select("id, user_id, folder_id")
     .eq("id", schemaId)
     .single();
   if (!schema) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -91,7 +95,10 @@ export async function DELETE(
     .eq("schema_id", schemaId)
     .eq("granted_to_user_id", userId!)
     .maybeSingle();
-  if (!isOwner && !grantRow) {
+  const canEditContext = schema.folder_id
+    ? await PermissionsService.can(userId!, schema.folder_id, "edit_context")
+    : false;
+  if (!isOwner && !grantRow && !canEditContext) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
