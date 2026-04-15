@@ -333,7 +333,6 @@ export default function SchemaDetailPage() {
         {activeTab === "transformations" && (
           <TransformationsTab
             schemaId={schemaId}
-            isOwner={isOwner}
             canEdit={canEditSchemas}
           />
         )}

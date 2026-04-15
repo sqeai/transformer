@@ -48,11 +48,10 @@ import {
 
 interface TransformationsTabProps {
   schemaId: string;
-  isOwner: boolean;
   canEdit?: boolean;
 }
 
-export function TransformationsTab({ schemaId, isOwner, canEdit = false }: TransformationsTabProps) {
+export function TransformationsTab({ schemaId, canEdit = false }: TransformationsTabProps) {
   const [transformations, setTransformations] = useState<SchemaTransformation[]>([]);
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,10 +74,7 @@ export function TransformationsTab({ schemaId, isOwner, canEdit = false }: Trans
     fetch(`/api/schemas/${schemaId}/datasets`, { credentials: "include" })
       .then((res) => (res.ok ? res.json() : { datasets: [] }))
       .then((data) => {
-        const completedDatasets = (data.datasets ?? []).filter(
-          (d: DatasetSummary) => d.state === "completed" || d.state === "approved"
-        );
-        setDatasets(completedDatasets);
+        setDatasets(data.datasets ?? []);
       });
   }, [schemaId]);
 
@@ -245,7 +241,7 @@ export function TransformationsTab({ schemaId, isOwner, canEdit = false }: Trans
                     )}
                   </div>
                   <div className="flex items-center gap-1">
-                    {isOwner && !t.isDefault && (
+                    {canEdit && !t.isDefault && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -256,7 +252,7 @@ export function TransformationsTab({ schemaId, isOwner, canEdit = false }: Trans
                         Set Default
                       </Button>
                     )}
-                    {isOwner && (
+                    {canEdit && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -266,7 +262,7 @@ export function TransformationsTab({ schemaId, isOwner, canEdit = false }: Trans
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
                     )}
-                    {isOwner && (
+                    {canEdit && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -330,13 +326,13 @@ export function TransformationsTab({ schemaId, isOwner, canEdit = false }: Trans
           <DialogHeader>
             <DialogTitle>Create Pipeline from Dataset</DialogTitle>
             <DialogDescription>
-              Select a completed dataset to extract its transformation steps.
+              Select a dataset to extract its transformation steps.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 max-h-[300px] overflow-auto">
             {datasets.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">
-                No completed datasets available.
+                No datasets available.
               </p>
             ) : (
               datasets.map((dataset) => (

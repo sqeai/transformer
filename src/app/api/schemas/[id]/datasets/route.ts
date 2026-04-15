@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "@/lib/api-auth";
+import { PermissionsService } from "@/lib/permissions";
 
 export async function GET(
   _request: NextRequest,
@@ -13,7 +14,7 @@ export async function GET(
   // Check schema access
   const { data: schema } = await supabase!
     .from("schemas")
-    .select("id, user_id")
+    .select("id, user_id, folder_id")
     .eq("id", schemaId)
     .single();
 
@@ -28,8 +29,11 @@ export async function GET(
     .eq("schema_id", schemaId)
     .eq("granted_to_user_id", userId!)
     .maybeSingle();
+  const hasFolderAccess = schema.folder_id
+    ? await PermissionsService.can(userId!, schema.folder_id, "view_datasets")
+    : false;
 
-  if (!isOwner && !grantRow) {
+  if (!isOwner && !grantRow && !hasFolderAccess) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
