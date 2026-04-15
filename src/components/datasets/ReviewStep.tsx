@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -107,29 +107,11 @@ interface ReviewStepProps {
   originalVisibleCount: number;
   onLoadMoreOriginal: () => void;
   files: UploadedFileEntry[];
+  downloadingExcel: boolean;
+  onDownloadOriginalExcel: (result: FileJobResult) => void;
+  onDownloadModifiedExcel: (result: FileJobResult) => void;
   onBack: () => void;
   onNext: () => void;
-}
-
-function getMimeTypeForDownload(type: string): string {
-  switch (type) {
-    case "pdf": return "application/pdf";
-    case "png": return "image/png";
-    case "jpg":
-    case "jpeg": return "image/jpeg";
-    case "txt": return "text/plain";
-    case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-    case "pptx": return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-    default: return "application/octet-stream";
-  }
-}
-
-function getStructuredMimeType(fileName: string): string {
-  const lower = fileName.toLowerCase();
-  if (lower.endsWith(".csv")) return "text/csv";
-  if (lower.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-  if (lower.endsWith(".xls")) return "application/vnd.ms-excel";
-  return "application/octet-stream";
 }
 
 export function ReviewStep({
@@ -147,25 +129,15 @@ export function ReviewStep({
   originalVisibleCount,
   onLoadMoreOriginal,
   files,
+  downloadingExcel,
+  onDownloadOriginalExcel,
+  onDownloadModifiedExcel,
   onBack,
   onNext,
 }: ReviewStepProps) {
   const [reviewSheetIndex, setReviewSheetIndex] = useState(0);
   const [reviewSubTab, setReviewSubTab] = useState<ReviewSubTab>("modified");
   const [modifiedVisibleCount, setModifiedVisibleCount] = useState(PREVIEW_ROWS);
-
-  const handleDownloadOriginal = useCallback((file: UploadedFileEntry) => {
-    const mimeType = file.unstructuredType
-      ? getMimeTypeForDownload(file.unstructuredType)
-      : getStructuredMimeType(file.fileName);
-    const blob = new Blob([file.buffer], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = file.fileName;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, []);
 
   return (
     <div className="space-y-4">
@@ -261,6 +233,25 @@ export function ReviewStep({
                       {transformedCols.length} columns
                     </CardDescription>
                   </div>
+                  {(reviewSubTab === "original" || reviewSubTab === "modified") && transformedRows.length > 0 && !currentFileProcessing && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={downloadingExcel}
+                      onClick={() =>
+                        reviewSubTab === "original"
+                          ? onDownloadOriginalExcel(currentResult)
+                          : onDownloadModifiedExcel(currentResult)
+                      }
+                    >
+                      {downloadingExcel ? (
+                        <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Download className="mr-1.5 h-4 w-4" />
+                      )}
+                      {reviewSubTab === "original" ? "Download Original Excel" : "Download Modified Excel"}
+                    </Button>
+                  )}
                 </div>
 
                 <div className="flex gap-1 mt-3">
@@ -305,18 +296,6 @@ export function ReviewStep({
                   );
                   return (
                     <div className="space-y-4">
-                      {originalFile && (
-                        <div className="flex justify-end">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleDownloadOriginal(originalFile)}
-                          >
-                            <Download className="mr-2 h-4 w-4" />
-                            Download Original
-                          </Button>
-                        </div>
-                      )}
                       {originalFile?.unstructuredType ? (
                         <UnstructuredPreview file={originalFile} />
                       ) : (

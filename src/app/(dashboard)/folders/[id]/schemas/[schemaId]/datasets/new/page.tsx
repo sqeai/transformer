@@ -853,6 +853,67 @@ function NewDatasetPageContent() {
     }
   }, [jobResults, newDatasetName]);
 
+  const handleDownloadOriginalExcel = useCallback(async (fileResult: FileJobResult) => {
+    setDownloadingExcel(true);
+    try {
+      const cols = originalPreview?.columns ?? [];
+      // Use the full original rows from the ref (not the truncated preview)
+      const rows = allOriginalRowsRef.current.length > 0 ? allOriginalRowsRef.current : (originalPreview?.rows ?? []);
+
+      const sheetData: unknown[][] = [cols];
+      for (const row of rows) {
+        sheetData.push(cols.map((c) => (row as Record<string, unknown>)[c] ?? ""));
+      }
+
+      const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Data");
+
+      const buffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${fileResult.file.worksheetName} (original).xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setDownloadingExcel(false);
+    }
+  }, [originalPreview]);
+
+  const handleDownloadModifiedExcel = useCallback(async (fileResult: FileJobResult) => {
+    setDownloadingExcel(true);
+    try {
+      const cols = fileResult.result?.transformedColumns ?? [];
+      const rows = fileResult.result?.transformedRows ?? [];
+
+      const sheetData: unknown[][] = [cols];
+      for (const row of rows) {
+        sheetData.push(cols.map((c) => row[c] ?? ""));
+      }
+
+      const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Data");
+
+      const buffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${fileResult.file.worksheetName}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setDownloadingExcel(false);
+    }
+  }, []);
+
   // --- Render ---
 
   if (!schemaId || !schema) {
@@ -938,6 +999,9 @@ function NewDatasetPageContent() {
             originalVisibleCount={originalVisibleCount}
             onLoadMoreOriginal={() => setOriginalVisibleCount((prev) => prev + PREVIEW_ROWS)}
             files={files}
+            downloadingExcel={downloadingExcel}
+            onDownloadOriginalExcel={handleDownloadOriginalExcel}
+            onDownloadModifiedExcel={handleDownloadModifiedExcel}
             onBack={() => setStep("upload")}
             onNext={() => setStep("export")}
           />
