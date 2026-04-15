@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useSchemaStore, type UploadedFileEntry } from "@/lib/schema-store";
@@ -50,6 +50,7 @@ const TABS: { id: TabId; label: string }[] = [
 export default function SchemaDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const folderId = params.id as string;
   const schemaId = params.schemaId as string;
   const { user } = useAuth();
@@ -64,7 +65,21 @@ export default function SchemaDetailPage() {
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const pendingLeaveActionRef = useRef<null | (() => void)>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const tabParam = searchParams.get("tab");
+  const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : "overview";
+  const setActiveTab = useCallback(
+    (tab: TabId) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (tab === "overview") {
+        params.delete("tab");
+      } else {
+        params.set("tab", tab);
+      }
+      const qs = params.toString();
+      router.replace(`${window.location.pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+    },
+    [router, searchParams],
+  );
   const [hasDataSource, setHasDataSource] = useState(false);
 
   const { can } = usePermissions(folderId);
