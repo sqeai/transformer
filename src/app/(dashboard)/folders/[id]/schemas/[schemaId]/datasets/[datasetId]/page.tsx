@@ -148,7 +148,7 @@ export default function DatasetPage() {
     tableName: string;
   } | null>(null);
 
-  const { setDatasetWorkflow, resetDatasetWorkflow } = useSchemaStore();
+  const { getSchema, setDatasetWorkflow, resetDatasetWorkflow } = useSchemaStore();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   // --- Derived state ---
@@ -176,10 +176,28 @@ export default function DatasetPage() {
 
   const columns = useMemo(() => {
     if (!dataset) return [];
-    const set = new Set<string>();
-    for (const row of dataset.rows ?? []) Object.keys(row ?? {}).forEach((k) => set.add(k));
-    return Array.from(set);
-  }, [dataset]);
+    // Use schema field order when available
+    const schema = getSchema(dataset.schemaId);
+    const schemaOrder = schema
+      ? flattenFields(schema.fields).filter((f) => !f.children?.length).map((f) => f.path)
+      : [];
+    // Collect all columns present in the data
+    const dataColSet = new Set<string>();
+    for (const row of dataset.rows ?? []) Object.keys(row ?? {}).forEach((k) => dataColSet.add(k));
+    // Start with schema-ordered columns that exist in the data
+    const ordered: string[] = [];
+    for (const col of schemaOrder) {
+      if (dataColSet.has(col)) {
+        ordered.push(col);
+        dataColSet.delete(col);
+      }
+    }
+    // Append any remaining data columns not in the schema
+    for (const col of dataColSet) {
+      ordered.push(col);
+    }
+    return ordered;
+  }, [dataset, getSchema]);
 
   const visibleRows = useMemo(() => {
     if (!dataset) return [];
