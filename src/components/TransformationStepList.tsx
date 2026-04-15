@@ -34,7 +34,9 @@ export function TransformationStepList({
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<"before" | "after">("after");
 
-  if (iterations.length === 0) {
+  const steps = iterations.flat();
+
+  if (steps.length === 0) {
     return (
       <p className="text-muted-foreground text-center py-4">
         No transformation data available.
@@ -45,26 +47,11 @@ export function TransformationStepList({
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        {iterations.length} iteration{iterations.length !== 1 ? "s" : ""} recorded
+        {steps.length} transformation{steps.length !== 1 ? "s" : ""}
       </p>
-      <div className="space-y-4">
-        {iterations.map((iteration, iterationIdx) => (
-          <div key={iterationIdx} className="space-y-2 rounded-md border p-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Iteration {iterationIdx + 1}
-              </p>
-              <span className="text-xs text-muted-foreground">
-                {iteration.length} transformation{iteration.length !== 1 ? "s" : ""}
-              </span>
-            </div>
-            {iteration.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-2">
-                No transformations were applied in this iteration.
-              </p>
-            ) : (
-              iteration.map((entry, idx) => {
-                const stepKey = `${iterationIdx}:${idx}`;
+      <div className="space-y-2">
+        {steps.map((entry, idx) => {
+                const stepKey = `${idx}`;
                 const isExpanded = expandedStep === stepKey;
                 const snapshot = previewMode === "before" ? entry.before : entry.after;
                 const rowDelta = entry.rowCountAfter - entry.rowCountBefore;
@@ -248,10 +235,7 @@ export function TransformationStepList({
                     )}
                   </div>
                 );
-              })
-            )}
-          </div>
-        ))}
+              })}
       </div>
     </div>
   );
