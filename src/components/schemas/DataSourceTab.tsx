@@ -35,6 +35,7 @@ import {
   Plus,
   Link,
   Lock,
+  Zap,
   ExternalLink,
 } from "lucide-react";
 import {
@@ -59,7 +60,6 @@ interface AvailableDataSource {
   id: string;
   name: string;
   type: string;
-  tables: TableOption[];
 }
 
 interface TableOption {
@@ -93,6 +93,7 @@ function getDataSourceDeepLink(
 export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSourceTabProps) {
   const [linked, setLinked] = useState<SchemaDataSource | null>(null);
   const [availableDataSources, setAvailableDataSources] = useState<AvailableDataSource[]>([]);
+  const [defaultBqAvailable, setDefaultBqAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
@@ -101,13 +102,13 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
   // Link form
   const [mode, setMode] = useState<"link" | "create" | "default">("link");
   const [selectedDsId, setSelectedDsId] = useState("");
+  const [tables, setTables] = useState<TableOption[]>([]);
+  const [tablesLoading, setTablesLoading] = useState(false);
   const [selectedTable, setSelectedTable] = useState("");
   const [newTableSchema, setNewTableSchema] = useState("");
   const [newTableName, setNewTableName] = useState("");
 
   const isDefaultBqSelected = selectedDsId === DEFAULT_BQ_SELECTOR_ID;
-  const selectedDs = availableDataSources.find((ds) => ds.id === selectedDsId);
-  const tables: TableOption[] = selectedDs?.tables ?? [];
 
   // Preview
   const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([]);
@@ -119,10 +120,11 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
   const fetchData = useCallback(() => {
     setLoading(true);
     fetch(`/api/schemas/${schemaId}/data-source`, { credentials: "include" })
-      .then((res) => (res.ok ? res.json() : { dataSource: null, availableDataSources: [] }))
+      .then((res) => (res.ok ? res.json() : { dataSource: null, availableDataSources: [], defaultBqAvailable: false }))
       .then((data) => {
         setLinked(data.dataSource ?? null);
         setAvailableDataSources(data.availableDataSources ?? []);
+        setDefaultBqAvailable(!!data.defaultBqAvailable);
         onDataSourceChange?.(!!data.dataSource);
       })
       .finally(() => setLoading(false));
@@ -131,6 +133,22 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (!selectedDsId) {
+      setTables([]);
+      return;
+    }
+    setTablesLoading(true);
+    setSelectedTable("");
+    const url = selectedDsId === DEFAULT_BQ_SELECTOR_ID
+      ? "/api/default-bigquery/tables"
+      : `/api/data-sources/${selectedDsId}/tables`;
+    fetch(url, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : { tables: [] }))
+      .then((data) => setTables(data.tables ?? []))
+      .finally(() => setTablesLoading(false));
+  }, [selectedDsId]);
 
   const loadPreview = useCallback(() => {
     if (!linked) return;
@@ -198,6 +216,27 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to link data source");
+      fetchData();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to link");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLinkDefault = async () => {
+    if (saving) return;
+    setMode("default");
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/schemas/${schemaId}/data-source`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ useDefault: true }),
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to link default BigQuery");
       fetchData();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to link");
@@ -418,131 +457,165 @@ export function DataSourceTab({ schemaId, isOwner, onDataSourceChange }: DataSou
         </p>
       </div>
 
-      {availableDataSources.length === 0 ? (
+      {(availableDataSources.length === 0 && !defaultBqAvailable) ? (
         <Card>
           <CardContent className="py-8 text-center">
             <Database className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
             <p className="text-sm text-muted-foreground">
-              No data sources configured in the folder context. Add a data source in the Context page first.
+              No data sources available in this folder. Add a data source to the folder first.
             </p>
           </CardContent>
         </Card>
       ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Connect Data Source</CardTitle>
-            <CardDescription>
-              Select a data source configured in the folder context, then link to an existing table or create a new one.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Data Source</label>
-              <Select value={selectedDsId} onValueChange={(v) => { setSelectedDsId(v); setSelectedTable(""); setMode("link"); }}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a data source" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableDataSources.map((ds) => (
-                    <SelectItem key={ds.id} value={ds.id}>
-                      <span className="flex items-center gap-2">
-                        {ds.id === DEFAULT_BQ_SELECTOR_ID && (
+        <>
+          {defaultBqAvailable && (
+            <Card className="border-blue-500/30 bg-blue-500/5">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-blue-500" />
+                  Quick: Use Default BigQuery
+                </CardTitle>
+                <CardDescription>
+                  Automatically create a BigQuery table backed by the system default connection. Schema changes will sync to BigQuery in real-time.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  onClick={handleLinkDefault}
+                  disabled={saving}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {saving && mode === "default" && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+                  <Database className="h-4 w-4 mr-1.5" />
+                  Connect Default BigQuery
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Connect Data Source</CardTitle>
+              <CardDescription>
+                Select a data source and link to an existing table, or create a new one.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Data Source</label>
+                <Select value={selectedDsId} onValueChange={(v) => { setSelectedDsId(v); setMode("link"); }}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a data source" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {defaultBqAvailable && (
+                      <SelectItem value={DEFAULT_BQ_SELECTOR_ID}>
+                        <span className="flex items-center gap-2">
                           <Lock className="h-3.5 w-3.5 shrink-0 text-blue-500" />
-                        )}
-                        {ds.name} ({ds.type})
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {selectedDsId && (
-              <>
-                <div className="flex gap-1 border-b pb-2">
-                  <button
-                    type="button"
-                    className={`px-4 py-2 text-sm rounded-md transition-colors ${
-                      mode === "link" ? "bg-muted font-medium" : "text-muted-foreground hover:bg-muted/50"
-                    }`}
-                    onClick={() => setMode("link")}
-                  >
-                    <Link className="h-3.5 w-3.5 inline mr-1.5" />
-                    Link Existing Table
-                  </button>
-                  <button
-                    type="button"
-                    className={`px-4 py-2 text-sm rounded-md transition-colors ${
-                      mode === "create" ? "bg-muted font-medium" : "text-muted-foreground hover:bg-muted/50"
-                    }`}
-                    onClick={() => setMode("create")}
-                  >
-                    <Plus className="h-3.5 w-3.5 inline mr-1.5" />
-                    Create New Table
-                  </button>
-                </div>
-
-                {mode === "link" && (
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Table</label>
-                    {tables.length === 0 ? (
-                      <p className="text-sm text-muted-foreground py-2">No tables configured in the context for this data source.</p>
-                    ) : (
-                      <Select value={selectedTable} onValueChange={setSelectedTable}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a table" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {tables.map((t) => (
-                            <SelectItem key={`${t.schema}.${t.name}`} value={`${t.schema}.${t.name}`}>
-                              {t.schema}.{t.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                          Default BigQuery
+                        </span>
+                      </SelectItem>
                     )}
-                  </div>
-                )}
+                    {availableDataSources.map((ds) => (
+                      <SelectItem key={ds.id} value={ds.id}>
+                        {ds.name} ({ds.type})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-                {mode === "create" && (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Dataset / Schema</label>
-                      <Input
-                        placeholder="my_dataset"
-                        value={newTableSchema}
-                        onChange={(e) => setNewTableSchema(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Table Name</label>
-                      <Input
-                        placeholder="my_table"
-                        value={newTableName}
-                        onChange={(e) => setNewTableName(e.target.value)}
-                      />
-                    </div>
+              {selectedDsId && (
+                <>
+                  <div className="flex gap-1 border-b pb-2">
+                    <button
+                      type="button"
+                      className={`px-4 py-2 text-sm rounded-md transition-colors ${
+                        mode === "link" ? "bg-muted font-medium" : "text-muted-foreground hover:bg-muted/50"
+                      }`}
+                      onClick={() => setMode("link")}
+                    >
+                      <Link className="h-3.5 w-3.5 inline mr-1.5" />
+                      Link Existing Table
+                    </button>
+                    <button
+                      type="button"
+                      className={`px-4 py-2 text-sm rounded-md transition-colors ${
+                        mode === "create" ? "bg-muted font-medium" : "text-muted-foreground hover:bg-muted/50"
+                      }`}
+                      onClick={() => setMode("create")}
+                    >
+                      <Plus className="h-3.5 w-3.5 inline mr-1.5" />
+                      Create New Table
+                    </button>
                   </div>
-                )}
 
-                <div className="flex justify-end">
-                  <Button
-                    onClick={handleLink}
-                    disabled={
-                      saving ||
-                      !selectedDsId ||
-                      (mode === "link" && !selectedTable) ||
-                      (mode === "create" && (!newTableSchema || !newTableName))
-                    }
-                  >
-                    {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
-                    {mode === "create" ? "Create & Link Table" : "Link Table"}
-                  </Button>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
+                  {mode === "link" && (
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Table</label>
+                      {tablesLoading ? (
+                        <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" /> Loading tables...
+                        </div>
+                      ) : tables.length === 0 ? (
+                        <p className="text-sm text-muted-foreground py-2">No tables found in this data source.</p>
+                      ) : (
+                        <Select value={selectedTable} onValueChange={setSelectedTable}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a table" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {tables.map((t) => (
+                              <SelectItem key={`${t.schema}.${t.name}`} value={`${t.schema}.${t.name}`}>
+                                {t.schema}.{t.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+                  )}
+
+                  {mode === "create" && (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1 block">Dataset / Schema</label>
+                        <Input
+                          placeholder="my_dataset"
+                          value={newTableSchema}
+                          onChange={(e) => setNewTableSchema(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1 block">Table Name</label>
+                        <Input
+                          placeholder="my_table"
+                          value={newTableName}
+                          onChange={(e) => setNewTableName(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end">
+                    <Button
+                      onClick={handleLink}
+                      disabled={
+                        saving ||
+                        !selectedDsId ||
+                        (mode === "link" && !selectedTable) ||
+                        (mode === "create" && (!newTableSchema || !newTableName))
+                      }
+                    >
+                      {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+                      {mode === "create" ? "Create & Link Table" : "Link Table"}
+                    </Button>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </>
       )}
     </div>
   );
