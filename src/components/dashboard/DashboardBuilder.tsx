@@ -634,6 +634,7 @@ export function DashboardBuilder({ dashboardId, folderId }: DashboardBuilderProp
                     "Create a dashboard with revenue by month as a line chart and expenses by category as a pie chart",
                     "Show me a bar chart of top 10 products by sales",
                     "Build a financial overview with revenue trends, cost breakdown, and profit waterfall",
+                    "Display a KPI summary showing total sales, customer count, conversion rate, and average order value",
                   ].map((suggestion) => (
                     <button
                       key={suggestion}
