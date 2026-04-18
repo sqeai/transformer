@@ -852,6 +852,16 @@ export function AnalystChat() {
   }, [searchParams, chatId, loadChat, setMessages]);
 
   useEffect(() => {
+    const q = searchParams.get("q");
+    if (q) {
+      setInput(decodeURIComponent(q));
+      inputRef.current?.focus();
+    }
+  // Only run on mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     const handleNewChat = () => {
       isNewChatRef.current = true;
       setChatId(null);
