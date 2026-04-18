@@ -260,8 +260,8 @@ function WaterfallChart() {
         <YAxis hide />
         <Tooltip
           contentStyle={{ fontSize: 12, borderRadius: 6 }}
-          formatter={(v: number, _n: string, props: { payload: { positive: boolean } }) =>
-            [`${props.payload.positive ? "" : "-"}${v}Bn`, "IDR"]
+          formatter={(v: number, _n: string, item: { payload?: { positive?: boolean } }) =>
+            [`${item.payload?.positive === false ? "-" : ""}${v}Bn`, "IDR"] as [string, string]
           }
         />
         <Bar dataKey="displayValue" radius={[3, 3, 0, 0]}>
